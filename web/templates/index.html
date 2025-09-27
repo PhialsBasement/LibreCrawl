@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LibreCrawl - SEO Spider</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1 class="app-title">LibreCrawl</h1>
+                <div class="header-actions">
+                    <button class="btn btn-secondary" onclick="openSettings()">Settings</button>
+                    <button class="btn btn-secondary" onclick="exportData()">Export</button>
+                    <button class="btn btn-success" id="saveCrawlBtn" onclick="saveCrawl()" disabled>Save Crawl</button>
+                    <button class="btn btn-primary" id="loadCrawlBtn" onclick="loadCrawl()">Load Crawl</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- URL Input Section -->
+        <section class="url-section">
+            <div class="url-container">
+                <div class="input-group">
+                    <label for="urlInput" class="input-label">URL to Crawl</label>
+                    <input
+                        type="url"
+                        id="urlInput"
+                        class="url-input"
+                        placeholder="https://example.com"
+                        onkeypress="handleUrlKeypress(event)"
+                    >
+                </div>
+                <div class="control-buttons">
+                    <button id="startBtn" class="btn btn-primary" onclick="toggleCrawl()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M8 5v14l11-7z"/>
+                        </svg>
+                        Start
+                    </button>
+                    <button id="stopBtn" class="btn btn-danger" onclick="stopCrawl()" disabled>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                            <rect x="6" y="6" width="12" height="12"/>
+                        </svg>
+                        Stop
+                    </button>
+                    <button id="clearBtn" class="btn btn-secondary" onclick="clearCrawlData()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                        </svg>
+                        Clear
+                    </button>
+                </div>
+            </div>
+            <div class="progress-container" id="progressContainer" style="display: none;">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <span class="progress-text" id="progressText">Initializing...</span>
+            </div>
+        </section>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Sidebar -->
+            <aside class="sidebar">
+                <div class="sidebar-section">
+                    <h3 class="sidebar-title">Filters</h3>
+                    <div class="filter-tree">
+                        <div class="filter-group">
+                            <div class="filter-item" onclick="toggleFilter('internal')">
+                                <span class="filter-name">Internal</span>
+                                <span class="filter-count" id="internal-count">0</span>
+                            </div>
+                            <div class="filter-item" onclick="toggleFilter('external')">
+                                <span class="filter-name">External</span>
+                                <span class="filter-count" id="external-count">0</span>
+                            </div>
+                        </div>
+
+                        <div class="filter-group">
+                            <div class="filter-header">Response Codes</div>
+                            <div class="filter-subgroup">
+                                <div class="filter-item" onclick="toggleFilter('2xx')">
+                                    <span class="filter-name">2xx Success</span>
+                                    <span class="filter-count" id="2xx-count">0</span>
+                                </div>
+                                <div class="filter-item" onclick="toggleFilter('3xx')">
+                                    <span class="filter-name">3xx Redirect</span>
+                                    <span class="filter-count" id="3xx-count">0</span>
+                                </div>
+                                <div class="filter-item" onclick="toggleFilter('4xx')">
+                                    <span class="filter-name">4xx Client Error</span>
+                                    <span class="filter-count" id="4xx-count">0</span>
+                                </div>
+                                <div class="filter-item" onclick="toggleFilter('5xx')">
+                                    <span class="filter-name">5xx Server Error</span>
+                                    <span class="filter-count" id="5xx-count">0</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="filter-group">
+                            <div class="filter-header">Content Type</div>
+                            <div class="filter-subgroup">
+                                <div class="filter-item" onclick="toggleFilter('html')">
+                                    <span class="filter-name">HTML</span>
+                                    <span class="filter-count" id="html-count">0</span>
+                                </div>
+                                <div class="filter-item" onclick="toggleFilter('css')">
+                                    <span class="filter-name">CSS</span>
+                                    <span class="filter-count" id="css-count">0</span>
+                                </div>
+                                <div class="filter-item" onclick="toggleFilter('js')">
+                                    <span class="filter-name">JavaScript</span>
+                                    <span class="filter-count" id="js-count">0</span>
+                                </div>
+                                <div class="filter-item" onclick="toggleFilter('images')">
+                                    <span class="filter-name">Images</span>
+                                    <span class="filter-count" id="images-count">0</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="sidebar-section">
+                    <h3 class="sidebar-title">Statistics</h3>
+                    <div class="stats-container">
+                        <div class="stat-item">
+                            <span class="stat-label">URLs Discovered</span>
+                            <span class="stat-value" id="discoveredCount">0</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">URLs Crawled</span>
+                            <span class="stat-value" id="crawledCount">0</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Crawl Depth</span>
+                            <span class="stat-value" id="crawlDepth">0</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Speed</span>
+                            <span class="stat-value" id="crawlSpeed">0 URLs/sec</span>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Content Area -->
+            <div class="content-area">
+                <div class="tab-container">
+                    <div class="tab-header">
+                        <button class="tab-btn active" onclick="switchTab('overview')">Overview</button>
+                        <button class="tab-btn" onclick="switchTab('internal')">Internal</button>
+                        <button class="tab-btn" onclick="switchTab('external')">External</button>
+                        <button class="tab-btn" onclick="switchTab('status-codes')">Status Codes</button>
+                        <button class="tab-btn" onclick="switchTab('links')">Links</button>
+                        <button class="tab-btn" onclick="switchTab('issues')">Issues</button>
+                        <button class="tab-btn" onclick="switchTab('pagespeed')">PageSpeed</button>
+                    </div>
+
+                    <div class="tab-content">
+                        <div id="overview-tab" class="tab-pane active">
+                            <div class="table-container">
+                                <table class="data-table" id="overviewTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Address</th>
+                                            <th>Status</th>
+                                            <th>Title</th>
+                                            <th>Meta Desc</th>
+                                            <th>H1</th>
+                                            <th>Words</th>
+                                            <th>Response (ms)</th>
+                                            <th>Analytics</th>
+                                            <th>OG Tags</th>
+                                            <th>JSON-LD</th>
+                                            <th>Links (Int/Ext)</th>
+                                            <th>Images</th>
+                                            <th>Details</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="overviewTableBody">
+                                        <!-- Data will be populated here -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div id="internal-tab" class="tab-pane">
+                            <div class="table-container">
+                                <table class="data-table" id="internalTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Address</th>
+                                            <th>Status</th>
+                                            <th>Content Type</th>
+                                            <th>Size</th>
+                                            <th>Title</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="internalTableBody">
+                                        <!-- Data will be populated here -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div id="external-tab" class="tab-pane">
+                            <div class="table-container">
+                                <table class="data-table" id="externalTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Address</th>
+                                            <th>Status</th>
+                                            <th>Content Type</th>
+                                            <th>Size</th>
+                                            <th>Title</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="externalTableBody">
+                                        <!-- Data will be populated here -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div id="status-codes-tab" class="tab-pane">
+                            <div class="table-container">
+                                <table class="data-table" id="statusCodesTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Status Code</th>
+                                            <th>Status</th>
+                                            <th>Count</th>
+                                            <th>Percentage</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="statusCodesTableBody">
+                                        <!-- Data will be populated here -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div id="links-tab" class="tab-pane">
+                            <div class="table-container">
+                                <div class="links-sections">
+                                    <div class="links-section">
+                                        <h3 class="links-section-title">🔗 Internal Links</h3>
+                                        <div class="table-container">
+                                            <table class="data-table" id="internalLinksTable">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Source URL</th>
+                                                        <th>Target URL</th>
+                                                        <th>Anchor Text</th>
+                                                        <th>Status</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="internalLinksTableBody">
+                                                    <!-- Internal links will be populated here -->
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+
+                                    <div class="links-section">
+                                        <h3 class="links-section-title">🌐 External Links</h3>
+                                        <div class="table-container">
+                                            <table class="data-table" id="externalLinksTable">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Source URL</th>
+                                                        <th>Target URL</th>
+                                                        <th>Anchor Text</th>
+                                                        <th>Domain</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="externalLinksTableBody">
+                                                    <!-- External links will be populated here -->
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="issues-tab" class="tab-pane">
+                            <div class="table-container">
+                                <table class="data-table" id="issuesTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Issue Type</th>
+                                            <th>URL</th>
+                                            <th>Description</th>
+                                            <th>Severity</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="issuesTableBody">
+                                        <!-- Issues will be populated here -->
+                                    </tbody>
+                                </table>
+                                <div class="empty-state" id="issuesEmptyState">
+                                    <div class="empty-state-content">
+                                        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                            <circle cx="12" cy="12" r="10"/>
+                                            <path d="M12 8v4M12 16h0"/>
+                                        </svg>
+                                        <h3>No Issues Found</h3>
+                                        <p>Start crawling to detect SEO issues and problems on your website.</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="pagespeed-tab" class="tab-pane">
+                            <div class="pagespeed-container">
+                                <div class="pagespeed-header">
+                                    <h3>PageSpeed Insights Results</h3>
+                                    <p class="pagespeed-description">Performance analysis for homepage and category pages (powered by Google PageSpeed Insights)</p>
+                                </div>
+                                <div id="pagespeedResults" class="pagespeed-results">
+                                    <div class="pagespeed-placeholder">
+                                        <p>🚀 PageSpeed analysis will appear here after crawl completion</p>
+                                        <p>Enable PageSpeed Analysis in settings to get Core Web Vitals and performance scores</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Status Bar -->
+        <footer class="status-bar">
+            <span id="statusText">Ready</span>
+            <span id="crawlTime">00:00</span>
+        </footer>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Settings</h2>
+                <button class="modal-close" onclick="closeSettings()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-tabs">
+                    <button class="settings-tab-btn active" onclick="switchSettingsTab('crawler')">Crawler</button>
+                    <button class="settings-tab-btn" onclick="switchSettingsTab('requests')">Requests</button>
+                    <button class="settings-tab-btn" onclick="switchSettingsTab('filters')">Filters</button>
+                    <button class="settings-tab-btn" onclick="switchSettingsTab('export')">Export</button>
+                    <button class="settings-tab-btn" onclick="switchSettingsTab('advanced')">Advanced</button>
+                </div>
+
+                <!-- Crawler Settings -->
+                <div id="crawler-settings" class="settings-tab-content active">
+                    <h3>Crawler Configuration</h3>
+
+                    <div class="setting-group">
+                        <label for="maxDepth">Maximum Crawl Depth</label>
+                        <input type="number" id="maxDepth" value="3" min="1" max="10">
+                        <span class="setting-help">How deep to crawl from the starting URL</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="maxUrls">Maximum URLs to Crawl</label>
+                        <input type="number" id="maxUrls" value="1000" min="1" max="50000">
+                        <span class="setting-help">Stop crawling after this many URLs</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="crawlDelay">Crawl Delay (seconds)</label>
+                        <input type="number" id="crawlDelay" value="1" min="0" max="60" step="0.1">
+                        <span class="setting-help">Delay between requests to be respectful</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="followRedirects" checked>
+                            Follow Redirects
+                        </label>
+                        <span class="setting-help">Follow 3xx redirects automatically</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="crawlExternalLinks">
+                            Crawl External Links
+                        </label>
+                        <span class="setting-help">Include external domains in crawl</span>
+                    </div>
+                </div>
+
+                <!-- Request Settings -->
+                <div id="requests-settings" class="settings-tab-content">
+                    <h3>HTTP Request Configuration</h3>
+
+                    <div class="setting-group">
+                        <label for="userAgent">User Agent</label>
+                        <input type="text" id="userAgent" value="LibreCrawl/1.0 (Web Crawler)">
+                        <span class="setting-help">User agent string sent with requests</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="timeout">Request Timeout (seconds)</label>
+                        <input type="number" id="timeout" value="10" min="1" max="120">
+                        <span class="setting-help">How long to wait for a response</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="retries">Retry Attempts</label>
+                        <input type="number" id="retries" value="3" min="0" max="10">
+                        <span class="setting-help">Number of retries for failed requests</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="acceptLanguage">Accept Language</label>
+                        <input type="text" id="acceptLanguage" value="en-US,en;q=0.9">
+                        <span class="setting-help">Preferred language for responses</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="respectRobotsTxt" checked>
+                            Respect robots.txt
+                        </label>
+                        <span class="setting-help">Check robots.txt before crawling</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="allowCookies" checked>
+                            Allow Cookies
+                        </label>
+                        <span class="setting-help">Accept and send cookies</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="discoverSitemaps" checked>
+                            Discover Sitemaps
+                        </label>
+                        <span class="setting-help">Automatically find and parse sitemap.xml files (including nested sitemaps)</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="enablePageSpeed">
+                            Enable PageSpeed Analysis
+                        </label>
+                        <span class="setting-help">Run Google PageSpeed Insights on homepage and 2 category pages after crawl completes</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="googleApiKey">Google PageSpeed API Key</label>
+                        <input type="password" id="googleApiKey" placeholder="Enter your Google PageSpeed Insights API key">
+                        <span class="setting-help">
+                            API key for higher rate limits (25k requests/day vs limited without key).
+                            <a href="https://developers.google.com/speed/docs/insights/v5/get-started" target="_blank" style="color: #8b5cf6;">Get API key here</a>
+                        </span>
+                    </div>
+                </div>
+
+                <!-- Filter Settings -->
+                <div id="filters-settings" class="settings-tab-content">
+                    <h3>Content Filters</h3>
+
+                    <div class="setting-group">
+                        <label for="includeExtensions">Include File Extensions</label>
+                        <input type="text" id="includeExtensions" value="html,htm,php,asp,aspx,jsp">
+                        <span class="setting-help">Comma-separated list of extensions to crawl</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="excludeExtensions">Exclude File Extensions</label>
+                        <input type="text" id="excludeExtensions" value="pdf,doc,docx,zip,exe,dmg">
+                        <span class="setting-help">Comma-separated list of extensions to skip</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="includePatterns">Include URL Patterns</label>
+                        <textarea id="includePatterns" rows="3" placeholder="One pattern per line (regex supported)"></textarea>
+                        <span class="setting-help">Only crawl URLs matching these patterns</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="excludePatterns">Exclude URL Patterns</label>
+                        <textarea id="excludePatterns" rows="3" placeholder="One pattern per line (regex supported)"></textarea>
+                        <span class="setting-help">Skip URLs matching these patterns</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="maxFileSize">Maximum File Size (MB)</label>
+                        <input type="number" id="maxFileSize" value="50" min="1" max="1000">
+                        <span class="setting-help">Skip files larger than this size</span>
+                    </div>
+                </div>
+
+                <!-- Export Settings -->
+                <div id="export-settings" class="settings-tab-content">
+                    <h3>Export Configuration</h3>
+
+                    <div class="setting-group">
+                        <label for="exportFormat">Default Export Format</label>
+                        <select id="exportFormat">
+                            <option value="csv">CSV</option>
+                            <option value="xlsx">Excel (XLSX)</option>
+                            <option value="json">JSON</option>
+                            <option value="xml">XML</option>
+                        </select>
+                        <span class="setting-help">Default format for data exports</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label>Export Fields</label>
+                        <div class="checkbox-grid">
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="exportFields" value="url" checked>
+                                URL
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="exportFields" value="status_code" checked>
+                                Status Code
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="exportFields" value="title" checked>
+                                Title
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="exportFields" value="meta_description" checked>
+                                Meta Description
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="exportFields" value="h1" checked>
+                                H1 Tags
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="exportFields" value="word_count">
+                                Word Count
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="exportFields" value="content_type">
+                                Content Type
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="exportFields" value="response_time">
+                                Response Time
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="exportFields" value="canonical_url">
+                                Canonical URL
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="exportFields" value="og_tags">
+                                OpenGraph Tags
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="exportFields" value="twitter_tags">
+                                Twitter Cards
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="exportFields" value="json_ld">
+                                JSON-LD Data
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="exportFields" value="analytics">
+                                Analytics Tracking
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="exportFields" value="internal_links">
+                                Internal Links Count
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="exportFields" value="external_links">
+                                External Links Count
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="exportFields" value="images">
+                                Images Count
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="exportFields" value="links_detailed">
+                                Detailed Links Data (separate file)
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="exportFields" value="lang">
+                                Language
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="exportFields" value="charset">
+                                Charset
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="exportFields" value="viewport">
+                                Viewport
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="exportFields" value="robots">
+                                Robots Meta
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Advanced Settings -->
+                <div id="advanced-settings" class="settings-tab-content">
+                    <h3>Advanced Configuration</h3>
+
+                    <div class="setting-group">
+                        <label for="concurrency">Concurrent Requests</label>
+                        <input type="number" id="concurrency" value="5" min="1" max="50">
+                        <span class="setting-help">Number of simultaneous requests (higher = faster but more resource intensive)</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="memoryLimit">Memory Limit (MB)</label>
+                        <input type="number" id="memoryLimit" value="512" min="64" max="4096">
+                        <span class="setting-help">Maximum memory usage for crawl data</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="logLevel">Log Level</label>
+                        <select id="logLevel">
+                            <option value="DEBUG">Debug</option>
+                            <option value="INFO" selected>Info</option>
+                            <option value="WARNING">Warning</option>
+                            <option value="ERROR">Error</option>
+                        </select>
+                        <span class="setting-help">Logging verbosity level</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="saveSession">
+                            Save Session Data
+                        </label>
+                        <span class="setting-help">Automatically save crawl data between sessions</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="enableProxy">
+                            Enable Proxy
+                        </label>
+                        <span class="setting-help">Route requests through a proxy server</span>
+                    </div>
+
+                    <div class="setting-group" id="proxySettings" style="display: none;">
+                        <label for="proxyUrl">Proxy URL</label>
+                        <input type="text" id="proxyUrl" placeholder="http://proxy.example.com:8080">
+                        <span class="setting-help">Proxy server URL with port</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="customHeaders">Custom Headers</label>
+                        <textarea id="customHeaders" rows="4" placeholder="Header-Name: Header-Value&#10;Another-Header: Another-Value"></textarea>
+                        <span class="setting-help">Additional HTTP headers to send (one per line)</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="resetSettings()">Reset to Defaults</button>
+                <button class="btn btn-secondary" onclick="closeSettings()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+    <script src="/static/js/settings.js"></script>
+</body>
+</html>

@@ -1,0 +1,418 @@
+// Settings Management
+let currentSettings = {};
+let defaultSettings = {
+    // Crawler settings
+    maxDepth: 3,
+    maxUrls: 1000,
+    crawlDelay: 1,
+    followRedirects: true,
+    crawlExternalLinks: false,
+
+    // Request settings
+    userAgent: 'LibreCrawl/1.0 (Web Crawler)',
+    timeout: 10,
+    retries: 3,
+    acceptLanguage: 'en-US,en;q=0.9',
+    respectRobotsTxt: true,
+    allowCookies: true,
+    discoverSitemaps: true,
+    enablePageSpeed: false,
+    googleApiKey: '',
+
+    // Filter settings
+    includeExtensions: 'html,htm,php,asp,aspx,jsp',
+    excludeExtensions: 'pdf,doc,docx,zip,exe,dmg',
+    includePatterns: '',
+    excludePatterns: '',
+    maxFileSize: 50,
+
+    // Export settings
+    exportFormat: 'csv',
+    exportFields: ['url', 'status_code', 'title', 'meta_description', 'h1', 'word_count', 'response_time', 'analytics', 'og_tags', 'json_ld', 'internal_links', 'external_links', 'images'],
+
+    // Advanced settings
+    concurrency: 5,
+    memoryLimit: 512,
+    logLevel: 'INFO',
+    saveSession: false,
+    enableProxy: false,
+    proxyUrl: '',
+    customHeaders: ''
+};
+
+// Initialize settings when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    loadSettings();
+    setupSettingsEventHandlers();
+});
+
+function setupSettingsEventHandlers() {
+    // Proxy checkbox handler
+    const enableProxyCheckbox = document.getElementById('enableProxy');
+    if (enableProxyCheckbox) {
+        enableProxyCheckbox.addEventListener('change', function() {
+            const proxySettings = document.getElementById('proxySettings');
+            if (proxySettings) {
+                proxySettings.style.display = this.checked ? 'block' : 'none';
+            }
+        });
+    }
+}
+
+function openSettings() {
+    // Load current settings into form
+    populateSettingsForm();
+
+    // Show modal
+    document.getElementById('settingsModal').style.display = 'flex';
+
+    // Focus first input
+    const firstInput = document.querySelector('.settings-tab-content.active input, .settings-tab-content.active select');
+    if (firstInput) {
+        setTimeout(() => firstInput.focus(), 100);
+    }
+}
+
+function closeSettings() {
+    document.getElementById('settingsModal').style.display = 'none';
+}
+
+function switchSettingsTab(tabName) {
+    // Remove active class from all tabs and content
+    document.querySelectorAll('.settings-tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    document.querySelectorAll('.settings-tab-content').forEach(content => {
+        content.classList.remove('active');
+    });
+
+    // Add active class to selected tab and content
+    event.target.classList.add('active');
+    document.getElementById(tabName + '-settings').classList.add('active');
+}
+
+function populateSettingsForm() {
+    // Populate all form fields with current settings
+    Object.keys(currentSettings).forEach(key => {
+        const element = document.getElementById(key);
+        if (element) {
+            if (element.type === 'checkbox') {
+                element.checked = currentSettings[key];
+            } else {
+                element.value = currentSettings[key];
+            }
+        }
+    });
+
+    // Handle export fields checkboxes
+    const exportFieldsCheckboxes = document.querySelectorAll('input[name="exportFields"]');
+    exportFieldsCheckboxes.forEach(checkbox => {
+        checkbox.checked = currentSettings.exportFields.includes(checkbox.value);
+    });
+
+    // Show/hide proxy settings
+    const enableProxy = currentSettings.enableProxy;
+    const proxySettings = document.getElementById('proxySettings');
+    if (proxySettings) {
+        proxySettings.style.display = enableProxy ? 'block' : 'none';
+    }
+}
+
+function collectSettingsFromForm() {
+    const settings = {};
+
+    // Collect regular form fields
+    const formFields = [
+        'maxDepth', 'maxUrls', 'crawlDelay', 'followRedirects', 'crawlExternalLinks',
+        'userAgent', 'timeout', 'retries', 'acceptLanguage', 'respectRobotsTxt', 'allowCookies', 'discoverSitemaps', 'enablePageSpeed', 'googleApiKey',
+        'includeExtensions', 'excludeExtensions', 'includePatterns', 'excludePatterns', 'maxFileSize',
+        'exportFormat', 'concurrency', 'memoryLimit', 'logLevel', 'saveSession',
+        'enableProxy', 'proxyUrl', 'customHeaders'
+    ];
+
+    formFields.forEach(fieldId => {
+        const element = document.getElementById(fieldId);
+        if (element) {
+            if (element.type === 'checkbox') {
+                settings[fieldId] = element.checked;
+            } else if (element.type === 'number') {
+                settings[fieldId] = parseFloat(element.value) || 0;
+            } else {
+                settings[fieldId] = element.value;
+            }
+        }
+    });
+
+    // Collect export fields
+    const exportFieldsCheckboxes = document.querySelectorAll('input[name="exportFields"]:checked');
+    settings.exportFields = Array.from(exportFieldsCheckboxes).map(cb => cb.value);
+
+    return settings;
+}
+
+function saveSettings() {
+    // Collect settings from form
+    const newSettings = collectSettingsFromForm();
+
+    // Validate settings
+    const validation = validateSettings(newSettings);
+    if (!validation.valid) {
+        alert('Settings validation failed: ' + validation.errors.join(', '));
+        return;
+    }
+
+    // Save to backend
+    fetch('/api/save_settings', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(newSettings)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            currentSettings = { ...newSettings };
+            closeSettings();
+            showNotification('Settings saved successfully', 'success');
+
+            // Update crawler with new settings if it's running
+            if (crawlState.isRunning) {
+                updateCrawlerSettings();
+            }
+        } else {
+            showNotification('Failed to save settings: ' + data.error, 'error');
+        }
+    })
+    .catch(error => {
+        console.error('Error saving settings:', error);
+        showNotification('Error saving settings', 'error');
+    });
+}
+
+function resetSettings() {
+    if (confirm('Are you sure you want to reset all settings to their default values?')) {
+        currentSettings = { ...defaultSettings };
+        populateSettingsForm();
+        showNotification('Settings reset to defaults', 'info');
+    }
+}
+
+function validateSettings(settings) {
+    const errors = [];
+
+    // Validate numeric ranges
+    if (settings.maxDepth < 1 || settings.maxDepth > 10) {
+        errors.push('Max depth must be between 1 and 10');
+    }
+
+    if (settings.maxUrls < 1 || settings.maxUrls > 50000) {
+        errors.push('Max URLs must be between 1 and 50,000');
+    }
+
+    if (settings.crawlDelay < 0 || settings.crawlDelay > 60) {
+        errors.push('Crawl delay must be between 0 and 60 seconds');
+    }
+
+    if (settings.timeout < 1 || settings.timeout > 120) {
+        errors.push('Timeout must be between 1 and 120 seconds');
+    }
+
+    if (settings.retries < 0 || settings.retries > 10) {
+        errors.push('Retries must be between 0 and 10');
+    }
+
+    if (settings.maxFileSize < 1 || settings.maxFileSize > 1000) {
+        errors.push('Max file size must be between 1 and 1000 MB');
+    }
+
+    if (settings.concurrency < 1 || settings.concurrency > 50) {
+        errors.push('Concurrency must be between 1 and 50');
+    }
+
+    if (settings.memoryLimit < 64 || settings.memoryLimit > 4096) {
+        errors.push('Memory limit must be between 64 and 4096 MB');
+    }
+
+    // Validate proxy URL if proxy is enabled
+    if (settings.enableProxy && settings.proxyUrl) {
+        try {
+            new URL(settings.proxyUrl);
+        } catch (e) {
+            errors.push('Invalid proxy URL format');
+        }
+    }
+
+    // Validate user agent
+    if (!settings.userAgent.trim()) {
+        errors.push('User agent cannot be empty');
+    }
+
+    // Validate export fields
+    if (settings.exportFields.length === 0) {
+        errors.push('At least one export field must be selected');
+    }
+
+    return {
+        valid: errors.length === 0,
+        errors: errors
+    };
+}
+
+function loadSettings() {
+    // Load settings from backend
+    fetch('/api/get_settings')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                currentSettings = { ...defaultSettings, ...data.settings };
+            } else {
+                console.warn('Failed to load settings, using defaults');
+                currentSettings = { ...defaultSettings };
+            }
+        })
+        .catch(error => {
+            console.error('Error loading settings:', error);
+            currentSettings = { ...defaultSettings };
+        });
+}
+
+function updateCrawlerSettings() {
+    // Send updated settings to crawler
+    fetch('/api/update_crawler_settings', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(currentSettings)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            console.log('Crawler settings updated');
+        } else {
+            console.warn('Failed to update crawler settings:', data.error);
+        }
+    })
+    .catch(error => {
+        console.error('Error updating crawler settings:', error);
+    });
+}
+
+function exportSettings() {
+    // Create downloadable settings file
+    const settingsBlob = new Blob([JSON.stringify(currentSettings, null, 2)], {
+        type: 'application/json'
+    });
+
+    const url = URL.createObjectURL(settingsBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'librecrawl-settings.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+function importSettings(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const importedSettings = JSON.parse(e.target.result);
+
+            // Validate imported settings
+            const validation = validateSettings(importedSettings);
+            if (!validation.valid) {
+                alert('Invalid settings file: ' + validation.errors.join(', '));
+                return;
+            }
+
+            // Merge with defaults to ensure all fields are present
+            currentSettings = { ...defaultSettings, ...importedSettings };
+            populateSettingsForm();
+            showNotification('Settings imported successfully', 'success');
+
+        } catch (error) {
+            alert('Invalid settings file format');
+        }
+    };
+    reader.readAsText(file);
+}
+
+function showNotification(message, type = 'info') {
+    // Create notification element
+    const notification = document.createElement('div');
+    notification.className = `notification notification-${type}`;
+    notification.textContent = message;
+
+    // Style the notification
+    notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 12px 20px;
+        border-radius: 6px;
+        color: white;
+        font-weight: 500;
+        z-index: 1001;
+        max-width: 300px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        transition: all 0.3s ease;
+    `;
+
+    // Set background color based on type
+    switch (type) {
+        case 'success':
+            notification.style.background = 'linear-gradient(135deg, #10b981, #059669)';
+            break;
+        case 'error':
+            notification.style.background = 'linear-gradient(135deg, #ef4444, #dc2626)';
+            break;
+        case 'warning':
+            notification.style.background = 'linear-gradient(135deg, #f59e0b, #d97706)';
+            break;
+        default:
+            notification.style.background = 'linear-gradient(135deg, #8b5cf6, #7c3aed)';
+    }
+
+    // Add to page
+    document.body.appendChild(notification);
+
+    // Remove after 3 seconds
+    setTimeout(() => {
+        notification.style.opacity = '0';
+        notification.style.transform = 'translateX(100%)';
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.parentNode.removeChild(notification);
+            }
+        }, 300);
+    }, 3000);
+}
+
+// Close modal when clicking outside
+document.addEventListener('click', function(event) {
+    const modal = document.getElementById('settingsModal');
+    if (event.target === modal) {
+        closeSettings();
+    }
+});
+
+// Close modal with Escape key
+document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') {
+        const modal = document.getElementById('settingsModal');
+        if (modal.style.display === 'flex') {
+            closeSettings();
+        }
+    }
+});
+
+// Export current settings object for use by other modules
+window.getCurrentSettings = function() {
+    return currentSettings;
+};
