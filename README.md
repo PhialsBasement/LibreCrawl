@@ -2,11 +2,15 @@
 
 A desktop web crawler for SEO analysis and website auditing.
 
+<img width="1408" height="736" alt="img" src="https://github.com/user-attachments/assets/ed091b73-2551-44e2-9286-ebfc166cabf7" />
+
 ## What it does
 
 LibreCrawl crawls websites and gives you detailed information about pages, links, SEO elements, and performance. It's built as a desktop app using Python and a web interface.
 
 ## Features
+
+<img width="1920" height="1037" alt="z1" src="https://github.com/user-attachments/assets/8a9b2445-8938-44da-b8f2-2451bcb90bdf" />
 
 - Crawl websites with configurable depth and limits
 - Extract SEO data (titles, meta descriptions, headings, etc.)
@@ -18,6 +22,9 @@ LibreCrawl crawls websites and gives you detailed information about pages, links
 - Real-time crawling progress
 
 ## Getting started
+
+<img width="1920" height="1037" alt="z2" src="https://github.com/user-attachments/assets/6f9cbf84-3338-47b1-b1dc-e8860eac44e8" />
+
 
 ### Requirements
 
@@ -40,6 +47,9 @@ python main.py
 The app will open in a desktop window.
 
 ### Basic usage
+
+
+<img width="1920" height="1037" alt="z3" src="https://github.com/user-attachments/assets/5375bf78-be25-41af-8b5d-0fa72d2d0d8d" />
 
 1. Enter a website URL in the input field
 2. Click "Start" to begin crawling
