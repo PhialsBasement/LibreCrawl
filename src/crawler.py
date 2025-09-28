@@ -10,6 +10,9 @@ import queue
 import xml.etree.ElementTree as ET
 import gzip
 from datetime import datetime
+import asyncio
+from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
+import nest_asyncio
 
 class WebCrawler:
     def __init__(self):
@@ -25,9 +28,11 @@ class WebCrawler:
         self.crawl_results = []
         self.all_links = []  # Store all links found during crawling
         self.links_set = set()  # Track unique link combinations for faster duplicate checking
+        self.detected_issues = []  # Store detected SEO issues
         self.results_lock = threading.Lock()
         self.urls_lock = threading.Lock()
         self.links_lock = threading.Lock()
+        self.issues_lock = threading.Lock()
 
         self.is_running = False
         self.is_paused = False
@@ -58,7 +63,31 @@ class WebCrawler:
             'proxy_url': None,
             'custom_headers': {},
             'discover_sitemaps': True,
-            'enable_pagespeed': False
+            'enable_pagespeed': False,
+            'enable_javascript': False,
+            'js_wait_time': 3,
+            'js_timeout': 30,
+            'js_browser': 'chromium',
+            'js_headless': True,
+            'js_user_agent': 'LibreCrawl/1.0 (Web Crawler with JavaScript)',
+            'js_viewport_width': 1920,
+            'js_viewport_height': 1080,
+            'js_max_concurrent_pages': 3,
+            'issue_exclusion_patterns': [
+                '/cgi-bin/*', '/wp-admin/*', '/wp-content/plugins/*', '/wp-content/themes/*',
+                '/admin/*', '/administrator/*', '/_admin/*', '/backend/*',
+                '/cpanel/*', '/phpmyadmin/*', '/pma/*', '/webmail/*',
+                '/.git/*', '/.svn/*', '/.env', '/.htaccess', '/.htpasswd',
+                '/node_modules/*', '/vendor/*', '/bower_components/*',
+                '/api/internal/*', '/private/*', '/system/*', '/core/*',
+                '/includes/*', '/lib/*', '/src/*', '/dist/*',
+                '/test/*', '/tests/*', '/spec/*', '/specs/*',
+                '/_next/*', '/.next/*', '/build/*', '/builds/*',
+                '/tmp/*', '/temp/*', '/cache/*', '/logs/*',
+                '/config/*', '/configs/*', '/settings/*',
+                '*.json', '*.xml', '*.yaml', '*.yml', '*.toml',
+                '*.log', '*.bak', '*.backup', '*.old', '*.orig'
+            ]
         }
 
         self.stats = {
@@ -70,6 +99,15 @@ class WebCrawler:
         }
 
         self.crawl_thread = None
+
+        # JavaScript rendering components
+        self.playwright = None
+        self.browser = None
+        self.js_page_pool = []
+        self.js_pool_lock = threading.Lock()
+
+        # Enable nested asyncio for thread compatibility
+        nest_asyncio.apply()
 
     def start_crawl(self, url):
         """Start crawling from the given URL"""
@@ -91,6 +129,7 @@ class WebCrawler:
             self.crawl_results.clear()
             self.all_links.clear()
             self.links_set.clear()
+            self.detected_issues.clear()
             self._all_discovered_urls = set()
 
             self.stats = {
@@ -127,9 +166,14 @@ class WebCrawler:
         """Stop the current crawl"""
         self.is_running = False
         self.is_paused = False
+        self.is_running_pagespeed = False  # Stop PageSpeed analysis too
         if self.crawl_thread and self.crawl_thread.is_alive():
             self.crawl_thread.join(timeout=5)
-        return True, "Crawl stopped"
+        # Clean up JavaScript resources
+        if self.config.get('enable_javascript', False):
+            asyncio.run(self._cleanup_js_resources())
+
+        return True, "Crawl and PageSpeed analysis stopped"
 
     def pause_crawl(self):
         """Pause the current crawl"""
@@ -163,6 +207,7 @@ class WebCrawler:
             'stats': self.stats.copy(),
             'urls': self.crawl_results.copy(),
             'links': self.all_links.copy(),
+            'issues': self.detected_issues.copy(),
             'progress': min(100, (self.stats['crawled'] / max(self.stats['discovered'], 1)) * 100),
             'is_running_pagespeed': self.is_running_pagespeed
         }
@@ -175,6 +220,12 @@ class WebCrawler:
         last_crawled_count = 0
         no_progress_iterations = 0
         max_no_progress = 10  # Force stop after 10 iterations with no progress
+
+        # Use async approach if JavaScript rendering is enabled
+        if self.config.get('enable_javascript', False):
+            print("Initializing JavaScript rendering...")
+            asyncio.run(self._crawl_async_with_js())
+            return
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             active_futures = set()
@@ -224,6 +275,9 @@ class WebCrawler:
                                             self.crawl_results.append(result)
                                             self.stats['crawled'] += 1
                                             self.stats['depth'] = max(self.stats['depth'], result.get('depth', 0))
+
+                                        # Detect issues for this URL
+                                        self._detect_issues(result)
                                 except Exception as e:
                                     print(f"Error in crawl task: {e}")
                         except:
@@ -276,6 +330,11 @@ class WebCrawler:
             self._run_pagespeed_analysis()
             self.is_running_pagespeed = False
 
+        # Clean up JavaScript resources
+        if self.config.get('enable_javascript', False):
+            print("Cleaning up JavaScript rendering...")
+            asyncio.run(self._cleanup_js_resources())
+
         # Mark crawl as complete
         self.is_running = False
         print(f"Crawl completed. Discovered: {self.stats['discovered']}, Crawled: {self.stats['crawled']}")
@@ -315,6 +374,19 @@ class WebCrawler:
 
     def _crawl_url(self, url, depth):
         """Crawl a single URL and extract information"""
+        retries = self.config.get('retries', 3)
+        last_exception = None
+
+        # Use JavaScript rendering if enabled (for ALL pages)
+        use_javascript = self.config.get('enable_javascript', False)
+
+        if use_javascript:
+            return asyncio.run(self._crawl_url_with_javascript(url, depth))
+        else:
+            return self._crawl_url_with_requests(url, depth)
+
+    def _crawl_url_with_requests(self, url, depth):
+        """Crawl a single URL using traditional HTTP requests"""
         retries = self.config.get('retries', 3)
         last_exception = None
 
@@ -1029,6 +1101,347 @@ class WebCrawler:
             return False
 
 
+    def _detect_issues(self, result):
+        """Detect SEO issues for a crawled URL"""
+        url = result.get('url', '')
+        issues = []
+
+        # Skip if URL matches exclusion patterns
+        if self._should_exclude_from_issues(url):
+            return
+
+        # Critical SEO Issues
+
+        # Missing title
+        if not result.get('title'):
+            issues.append({
+                'url': url,
+                'type': 'error',
+                'category': 'SEO',
+                'issue': 'Missing Title Tag',
+                'details': 'Page has no title tag'
+            })
+        # Title too long
+        elif len(result.get('title', '')) > 60:
+            issues.append({
+                'url': url,
+                'type': 'warning',
+                'category': 'SEO',
+                'issue': 'Title Too Long',
+                'details': f"Title is {len(result['title'])} characters (recommended: ≤60)"
+            })
+        # Title too short
+        elif len(result.get('title', '')) < 30:
+            issues.append({
+                'url': url,
+                'type': 'warning',
+                'category': 'SEO',
+                'issue': 'Title Too Short',
+                'details': f"Title is {len(result['title'])} characters (recommended: 30-60)"
+            })
+
+        # Missing meta description
+        if not result.get('meta_description'):
+            issues.append({
+                'url': url,
+                'type': 'error',
+                'category': 'SEO',
+                'issue': 'Missing Meta Description',
+                'details': 'Page has no meta description'
+            })
+        # Meta description too long
+        elif len(result.get('meta_description', '')) > 160:
+            issues.append({
+                'url': url,
+                'type': 'warning',
+                'category': 'SEO',
+                'issue': 'Meta Description Too Long',
+                'details': f"Description is {len(result['meta_description'])} characters (recommended: ≤160)"
+            })
+        # Meta description too short
+        elif len(result.get('meta_description', '')) < 120:
+            issues.append({
+                'url': url,
+                'type': 'warning',
+                'category': 'SEO',
+                'issue': 'Meta Description Too Short',
+                'details': f"Description is {len(result['meta_description'])} characters (recommended: 120-160)"
+            })
+
+        # Missing H1
+        if not result.get('h1'):
+            issues.append({
+                'url': url,
+                'type': 'error',
+                'category': 'SEO',
+                'issue': 'Missing H1 Tag',
+                'details': 'Page has no H1 heading'
+            })
+
+        # Multiple H1 tags
+        if isinstance(result.get('h1'), str) and result.get('h1').count('\n') > 0:
+            h1_count = result['h1'].count('\n') + 1
+            if h1_count > 1:
+                issues.append({
+                    'url': url,
+                    'type': 'warning',
+                    'category': 'SEO',
+                    'issue': 'Multiple H1 Tags',
+                    'details': f'Page has {h1_count} H1 tags (recommended: 1)'
+                })
+
+        # Content issues
+        word_count = result.get('word_count', 0)
+        if word_count < 300:
+            issues.append({
+                'url': url,
+                'type': 'warning',
+                'category': 'Content',
+                'issue': 'Thin Content',
+                'details': f'Page has only {word_count} words (recommended: ≥300)'
+            })
+
+        # Technical SEO Issues
+
+        # HTTP status codes
+        status_code = result.get('status_code', 0)
+        if status_code >= 400 and status_code < 500:
+            issues.append({
+                'url': url,
+                'type': 'error',
+                'category': 'Technical',
+                'issue': f'{status_code} Client Error',
+                'details': self._get_status_code_message(status_code)
+            })
+        elif status_code >= 500:
+            issues.append({
+                'url': url,
+                'type': 'error',
+                'category': 'Technical',
+                'issue': f'{status_code} Server Error',
+                'details': self._get_status_code_message(status_code)
+            })
+        elif status_code >= 300 and status_code < 400:
+            issues.append({
+                'url': url,
+                'type': 'info',
+                'category': 'Technical',
+                'issue': f'{status_code} Redirect',
+                'details': 'URL redirects to another location'
+            })
+
+        # Missing canonical URL
+        if not result.get('canonical_url'):
+            issues.append({
+                'url': url,
+                'type': 'warning',
+                'category': 'Technical',
+                'issue': 'Missing Canonical URL',
+                'details': 'Page has no canonical URL specified'
+            })
+        # Canonical URL mismatch
+        elif result.get('canonical_url') != url:
+            issues.append({
+                'url': url,
+                'type': 'warning',
+                'category': 'Technical',
+                'issue': 'Canonical URL Different',
+                'details': f"Canonical points to: {result['canonical_url']}"
+            })
+
+        # Missing viewport meta tag (mobile)
+        if not result.get('viewport'):
+            issues.append({
+                'url': url,
+                'type': 'error',
+                'category': 'Mobile',
+                'issue': 'Missing Viewport Meta Tag',
+                'details': 'Page is not mobile-optimized'
+            })
+
+        # Missing lang attribute
+        if not result.get('lang'):
+            issues.append({
+                'url': url,
+                'type': 'warning',
+                'category': 'Accessibility',
+                'issue': 'Missing Language Attribute',
+                'details': 'HTML tag has no lang attribute'
+            })
+
+        # Image issues
+        images = result.get('images', [])
+        images_without_alt = [img for img in images if not img.get('alt')]
+        if images_without_alt:
+            issues.append({
+                'url': url,
+                'type': 'warning',
+                'category': 'Accessibility',
+                'issue': 'Images Without Alt Text',
+                'details': f'{len(images_without_alt)} of {len(images)} images lack alt text'
+            })
+
+        # Images without dimensions (this is really minor, just an info)
+        images_without_dimensions = [img for img in images if not img.get('width') or not img.get('height')]
+        if images_without_dimensions:
+            issues.append({
+                'url': url,
+                'type': 'info',
+                'category': 'Performance',
+                'issue': 'Images Without Dimensions',
+                'details': f'{len(images_without_dimensions)} images lack width/height attributes'
+            })
+
+        # Social Media Issues
+
+        # Missing OpenGraph tags
+        if not result.get('og_tags'):
+            issues.append({
+                'url': url,
+                'type': 'warning',
+                'category': 'Social',
+                'issue': 'Missing OpenGraph Tags',
+                'details': 'Page has no OpenGraph tags for social sharing'
+            })
+
+        # Missing Twitter Card tags
+        if not result.get('twitter_tags'):
+            issues.append({
+                'url': url,
+                'type': 'warning',
+                'category': 'Social',
+                'issue': 'Missing Twitter Card Tags',
+                'details': 'Page has no Twitter Card tags'
+            })
+
+        # Structured Data Issues
+
+        # No structured data
+        if not result.get('json_ld') and not result.get('schema_org'):
+            issues.append({
+                'url': url,
+                'type': 'error',
+                'category': 'Structured Data',
+                'issue': 'No Structured Data',
+                'details': 'Page has no JSON-LD or Schema.org markup'
+            })
+
+        # Performance Issues
+
+        # Slow response time
+        response_time = result.get('response_time', 0)
+        if response_time > 3000:  # 3 seconds
+            issues.append({
+                'url': url,
+                'type': 'error',
+                'category': 'Performance',
+                'issue': 'Slow Response Time',
+                'details': f'Page took {response_time}ms to respond (recommended: <3000ms)'
+            })
+        elif response_time > 1000:  # 1 second
+            issues.append({
+                'url': url,
+                'type': 'warning',
+                'category': 'Performance',
+                'issue': 'Moderate Response Time',
+                'details': f'Page took {response_time}ms to respond (recommended: <1000ms)'
+            })
+
+        # Large page size
+        page_size = result.get('size', 0)
+        if page_size > 3 * 1024 * 1024:  # 3MB
+            issues.append({
+                'url': url,
+                'type': 'error',
+                'category': 'Performance',
+                'issue': 'Large Page Size',
+                'details': f'Page size is {page_size / 1024 / 1024:.1f}MB (recommended: <3MB)'
+            })
+        elif page_size > 1 * 1024 * 1024:  # 1MB
+            issues.append({
+                'url': url,
+                'type': 'warning',
+                'category': 'Performance',
+                'issue': 'Moderate Page Size',
+                'details': f'Page size is {page_size / 1024 / 1024:.1f}MB (recommended: <1MB)'
+            })
+
+        # Security Issues
+
+        # Mixed content (if HTTPS site has HTTP resources)
+        if url.startswith('https://'):
+            external_links = result.get('external_links', 0)
+            # This is a simplified check - in reality we'd need to check resource URLs
+            if external_links > 0:
+                # Note: This is a placeholder - proper implementation would check actual resource protocols
+                pass
+
+        # Indexability Issues
+
+        # Check robots meta tag
+        robots = result.get('robots', '').lower()
+        if 'noindex' in robots:
+            issues.append({
+                'url': url,
+                'type': 'error',
+                'category': 'Indexability',
+                'issue': 'Noindex Tag Present',
+                'details': 'Page is BLOCKED from search engines - has noindex directive'
+            })
+        if 'nofollow' in robots:
+            issues.append({
+                'url': url,
+                'type': 'error',
+                'category': 'Indexability',
+                'issue': 'Nofollow Tag Present',
+                'details': 'Links on this page are NOT followed by search engines - has nofollow directive'
+            })
+
+        # Add all detected issues to the main list
+        with self.issues_lock:
+            self.detected_issues.extend(issues)
+
+    def _should_exclude_from_issues(self, url):
+        """Check if URL should be excluded from issue detection"""
+        from fnmatch import fnmatch
+        from urllib.parse import urlparse
+
+        parsed = urlparse(url)
+        path = parsed.path
+
+        # Check each exclusion pattern
+        for pattern in self.config.get('issue_exclusion_patterns', []):
+            # Handle wildcards
+            if '*' in pattern:
+                if fnmatch(path, pattern):
+                    return True
+            # Exact match
+            elif path == pattern or path.startswith(pattern.rstrip('*')):
+                return True
+
+        return False
+
+    def _get_status_code_message(self, status_code):
+        """Get descriptive message for HTTP status codes"""
+        messages = {
+            400: 'Bad Request',
+            401: 'Unauthorized',
+            403: 'Forbidden',
+            404: 'Not Found',
+            405: 'Method Not Allowed',
+            406: 'Not Acceptable',
+            408: 'Request Timeout',
+            410: 'Gone',
+            429: 'Too Many Requests',
+            500: 'Internal Server Error',
+            501: 'Not Implemented',
+            502: 'Bad Gateway',
+            503: 'Service Unavailable',
+            504: 'Gateway Timeout',
+            505: 'HTTP Version Not Supported'
+        }
+        return messages.get(status_code, f'HTTP {status_code} Error')
+
     def _run_pagespeed_analysis(self):
         """Run PageSpeed analysis on selected pages"""
         try:
@@ -1044,15 +1457,33 @@ class WebCrawler:
 
             pagespeed_results = []
             for i, page_url in enumerate(selected_pages):
+                # Check if crawl was stopped
+                if not self.is_running:
+                    print("PageSpeed analysis cancelled - crawl was stopped")
+                    self.is_running_pagespeed = False
+                    return
+
                 print(f"Analyzing page {i+1}/{len(selected_pages)}: {page_url}")
 
                 # Run PageSpeed for mobile first
                 print(f"  Running mobile analysis...")
                 mobile_result = self._call_pagespeed_api(page_url, 'mobile')
 
+                # Check if crawl was stopped
+                if not self.is_running:
+                    print("PageSpeed analysis cancelled - crawl was stopped")
+                    self.is_running_pagespeed = False
+                    return
+
                 # Wait between mobile and desktop analysis
                 print(f"  Waiting 2 seconds before desktop analysis...")
                 time.sleep(2)
+
+                # Check if crawl was stopped
+                if not self.is_running:
+                    print("PageSpeed analysis cancelled - crawl was stopped")
+                    self.is_running_pagespeed = False
+                    return
 
                 # Run PageSpeed for desktop
                 print(f"  Running desktop analysis...")
@@ -1254,3 +1685,426 @@ class WebCrawler:
                 'error': str(e),
                 'strategy': strategy
             }
+
+    async def _init_js_resources(self):
+        """Initialize Playwright browser and page pool for JavaScript rendering"""
+        try:
+            print("Starting Playwright browser...")
+            self.playwright = await async_playwright().start()
+
+            # Choose browser based on configuration
+            browser_type = self.config.get('js_browser', 'chromium').lower()
+            if browser_type == 'firefox':
+                self.browser = await self.playwright.firefox.launch(
+                    headless=self.config.get('js_headless', True)
+                )
+            elif browser_type == 'webkit':
+                self.browser = await self.playwright.webkit.launch(
+                    headless=self.config.get('js_headless', True)
+                )
+            else:  # Default to chromium
+                self.browser = await self.playwright.chromium.launch(
+                    headless=self.config.get('js_headless', True),
+                    args=['--no-sandbox', '--disable-dev-shm-usage'] if self.config.get('js_headless', True) else []
+                )
+
+            # Create page pool
+            max_pages = self.config.get('js_max_concurrent_pages', 3)
+            for i in range(max_pages):
+                context = await self.browser.new_context(
+                    user_agent=self.config.get('js_user_agent', 'LibreCrawl/1.0 (Web Crawler with JavaScript)'),
+                    viewport={
+                        'width': self.config.get('js_viewport_width', 1920),
+                        'height': self.config.get('js_viewport_height', 1080)
+                    }
+                )
+                page = await context.new_page()
+
+                # Set timeouts
+                page.set_default_timeout(self.config.get('js_timeout', 30) * 1000)
+
+                self.js_page_pool.append(page)
+
+            print(f"JavaScript rendering initialized with {len(self.js_page_pool)} browser pages")
+
+        except Exception as e:
+            print(f"Failed to initialize JavaScript rendering: {e}")
+            await self._cleanup_js_resources()
+
+    async def _cleanup_js_resources(self):
+        """Clean up Playwright browser and resources"""
+        try:
+            if self.js_page_pool:
+                for page in self.js_page_pool:
+                    try:
+                        await page.context.close()
+                    except:
+                        pass
+                self.js_page_pool.clear()
+
+            if self.browser:
+                await self.browser.close()
+                self.browser = None
+
+            if self.playwright:
+                await self.playwright.stop()
+                self.playwright = None
+
+            print("JavaScript rendering resources cleaned up")
+
+        except Exception as e:
+            print(f"Error during JavaScript cleanup: {e}")
+
+    def _should_use_javascript(self, url):
+        """Determine if a URL should use JavaScript rendering"""
+        # Only use JavaScript for HTML pages
+        parsed = urlparse(url)
+        path = parsed.path.lower()
+
+        # Skip if it's clearly a non-HTML resource
+        if path.endswith(('.pdf', '.jpg', '.jpeg', '.png', '.gif', '.css', '.js', '.xml', '.txt', '.zip')):
+            return False
+
+        # Use JavaScript for HTML pages or pages without clear extension
+        return True
+
+    async def _get_js_page(self):
+        """Get an available page from the pool"""
+        with self.js_pool_lock:
+            if self.js_page_pool:
+                page = self.js_page_pool.pop()
+                print(f"Got page from pool. Pool size now: {len(self.js_page_pool)}")
+                return page
+        return None
+
+    async def _get_js_page_blocking(self, url):
+        """Get an available page from the pool, waiting if necessary"""
+        max_wait = 5  # Shorter wait time to prevent deadlocks
+        wait_start = time.time()
+
+        while time.time() - wait_start < max_wait and self.is_running:
+            page = await self._get_js_page()
+            if page:
+                return page
+
+            # Check if crawl was stopped
+            if not self.is_running:
+                raise Exception("Crawl stopped while waiting for JavaScript page")
+
+            # Wait a bit before trying again
+            await asyncio.sleep(0.1)
+
+        # If we can't get a page after waiting, there's a serious problem
+        if not self.is_running:
+            raise Exception("Crawl stopped while waiting for JavaScript page")
+        else:
+            raise Exception(f"Failed to get JavaScript page for {url} after {max_wait} seconds - possible deadlock")
+
+    async def _return_js_page(self, page):
+        """Return a page to the pool"""
+        with self.js_pool_lock:
+            self.js_page_pool.append(page)
+            print(f"Returned page to pool. Pool size: {len(self.js_page_pool)}")
+
+    async def _crawl_url_with_javascript(self, url, depth):
+        """Crawl a single URL using JavaScript rendering"""
+        page = None
+        start_time = time.time()
+
+        try:
+            # Get a page from the pool
+            page = await self._get_js_page()
+            if not page:
+                raise Exception(f"No JavaScript page available for {url}")
+
+            # Navigate to the page with shorter timeout to prevent hanging
+            try:
+                response = await page.goto(
+                    url,
+                    wait_until='domcontentloaded',
+                    timeout=self.config.get('js_timeout', 30) * 1000
+                )
+
+                # Wait for JavaScript to render
+                await asyncio.sleep(self.config.get('js_wait_time', 3))
+
+                # Skip networkidle wait as it can hang indefinitely
+                # try:
+                #     await page.wait_for_load_state('networkidle', timeout=5000)
+                # except PlaywrightTimeoutError:
+                #     # Continue if network doesn't settle quickly
+                #     pass
+
+            except PlaywrightTimeoutError:
+                print(f"Timeout loading {url} with JavaScript")
+                return {
+                    'url': url,
+                    'status_code': 0,
+                    'content_type': '',
+                    'size': 0,
+                    'is_internal': False,
+                    'depth': depth,
+                    'title': '',
+                    'meta_description': '',
+                    'h1': '',
+                    'word_count': 0,
+                    'error': 'JavaScript rendering timeout'
+                }
+            except Exception as e:
+                print(f"Error navigating to {url}: {e}")
+                return {
+                    'url': url,
+                    'status_code': 0,
+                    'content_type': '',
+                    'size': 0,
+                    'is_internal': False,
+                    'depth': depth,
+                    'title': '',
+                    'meta_description': '',
+                    'h1': '',
+                    'word_count': 0,
+                    'error': f'Navigation error: {str(e)}'
+                }
+
+            # Get the rendered HTML content
+            html_content = await page.content()
+
+            # Get response details
+            status_code = response.status if response else 200
+            content_type = 'text/html'
+
+            # Determine if URL is internal
+            parsed_url = urlparse(url)
+            url_domain_clean = parsed_url.netloc.replace('www.', '', 1)
+
+            # Handle case where base_domain might not be set (direct testing)
+            if self.base_domain:
+                base_domain_clean = self.base_domain.replace('www.', '', 1)
+                is_internal = url_domain_clean == base_domain_clean
+            else:
+                # If no base domain set, treat as external
+                is_internal = False
+
+            result = {
+                'url': url,
+                'status_code': status_code,
+                'content_type': content_type,
+                'size': len(html_content.encode('utf-8')),
+                'is_internal': is_internal,
+                'depth': depth,
+                'title': '',
+                'meta_description': '',
+                'h1': '',
+                'h2': [],
+                'h3': [],
+                'word_count': 0,
+                'meta_tags': {},
+                'og_tags': {},
+                'twitter_tags': {},
+                'canonical_url': '',
+                'lang': '',
+                'charset': '',
+                'viewport': '',
+                'robots': '',
+                'author': '',
+                'keywords': '',
+                'generator': '',
+                'theme_color': '',
+                'json_ld': [],
+                'analytics': {
+                    'google_analytics': False,
+                    'gtag': False,
+                    'ga4_id': '',
+                    'gtm_id': '',
+                    'facebook_pixel': False,
+                    'hotjar': False,
+                    'mixpanel': False
+                },
+                'images': [],
+                'external_links': 0,
+                'internal_links': 0,
+                'response_time': 0,
+                'redirects': [],
+                'hreflang': [],
+                'schema_org': [],
+                'javascript_rendered': True
+            }
+
+            # Parse the HTML with BeautifulSoup
+            soup = BeautifulSoup(html_content, 'html.parser')
+
+            # Extract comprehensive data using existing methods
+            self._extract_basic_seo_data(soup, result)
+            self._extract_meta_tags(soup, result)
+            self._extract_opengraph_tags(soup, result)
+            self._extract_twitter_tags(soup, result)
+            self._extract_json_ld(soup, result)
+            self._extract_analytics_tracking(soup, html_content, result)
+            self._extract_images(soup, url, result)
+            self._extract_link_counts(soup, result)
+            self._extract_hreflang(soup, result)
+            self._extract_schema_org(soup, result)
+
+            result['response_time'] = round((time.time() - start_time) * 1000, 2)
+
+            # Extract and store all links for the Links tab
+            self._collect_all_links(soup, url)
+
+            # Extract links for further crawling
+            should_extract_links = (
+                (is_internal and depth < self.config['max_depth']) or
+                (self.config['crawl_external'] and depth < self.config['max_depth'])
+            )
+
+            # Extract links if needed and return them with the result
+            discovered_links = []
+            if should_extract_links:
+                # Extract links and collect them instead of adding to self.discovered_urls
+                for link in soup.find_all('a', href=True):
+                    href = link.get('href')
+                    if href:
+                        absolute_url = urljoin(url, href)
+                        absolute_url = absolute_url.split('#')[0]  # Remove fragments
+
+                        if self._should_crawl_url(absolute_url):
+                            discovered_links.append({'url': absolute_url, 'depth': depth + 1})
+
+            result['discovered_links'] = discovered_links
+            return result
+
+        except Exception as e:
+            print(f"Error crawling {url} with JavaScript: {e}")
+            return {
+                'url': url,
+                'status_code': 0,
+                'content_type': '',
+                'size': 0,
+                'is_internal': False,
+                'depth': depth,
+                'title': '',
+                'meta_description': '',
+                'h1': '',
+                'word_count': 0,
+                'error': f'JavaScript rendering error: {str(e)}'
+            }
+
+        finally:
+            # Return page to pool
+            if page:
+                await self._return_js_page(page)
+
+    async def _crawl_async_with_js(self):
+        """Async crawling loop for JavaScript rendering"""
+        try:
+            # Initialize JavaScript resources
+            await self._init_js_resources()
+
+            # Create URL queue
+            url_queue = deque()
+
+            # Add initial URLs
+            while self.discovered_urls:
+                url_info = self.discovered_urls.popleft()
+                url_queue.append({'url': url_info[0], 'depth': url_info[1]})
+
+            # Set to track processed URLs to avoid duplicates
+            processed_urls = set()
+            # Set to track ALL discovered URLs (for accurate progress)
+            all_discovered_urls_js = set(url['url'] for url in url_queue)
+            max_workers = self.config.get('js_max_concurrent_pages', 3)
+
+            # Track progress for force stop
+            last_crawled_count = 0
+            no_progress_iterations = 0
+            max_no_progress = 10
+
+            while self.is_running and len(processed_urls) < self.config['max_urls']:
+                # Check if crawl is paused
+                if self.is_paused:
+                    await asyncio.sleep(1)
+                    continue
+
+                # Get URLs to process
+                urls_to_process = []
+                while url_queue and len(urls_to_process) < max_workers:
+                    try:
+                        url_info = url_queue.popleft()
+                        url = url_info['url']
+                        if url not in processed_urls:
+                            urls_to_process.append(url_info)
+                            processed_urls.add(url)
+                    except IndexError:
+                        break
+
+                if not urls_to_process:
+                    # Check for no progress
+                    if self.stats['crawled'] == last_crawled_count:
+                        no_progress_iterations += 1
+                        if no_progress_iterations >= max_no_progress:
+                            print("No progress for 10 iterations, forcing stop...")
+                            break
+                    else:
+                        no_progress_iterations = 0
+                        last_crawled_count = self.stats['crawled']
+
+                    await asyncio.sleep(1)
+                    continue
+
+                # Process URLs concurrently
+                tasks = []
+                for url_info in urls_to_process:
+                    task = asyncio.create_task(self._crawl_url_with_javascript(url_info['url'], url_info['depth']))
+                    tasks.append(task)
+
+                # Wait for all tasks to complete
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                # Process results
+                for result in results:
+                    if isinstance(result, Exception):
+                        print(f"Task failed with exception: {result}")
+                        continue
+
+                    if result and 'url' in result:
+                        # Add discovered links to queue
+                        if 'discovered_links' in result:
+                            for link_info in result['discovered_links']:
+                                if link_info['url'] not in processed_urls and link_info['url'] not in all_discovered_urls_js:
+                                    url_queue.append(link_info)
+                                    all_discovered_urls_js.add(link_info['url'])
+
+                        # Remove discovered_links from result before storing
+                        if 'discovered_links' in result:
+                            del result['discovered_links']
+
+                        self.crawl_results.append(result)
+                        self.stats['crawled'] += 1
+
+                        # Detect issues for this URL
+                        self._detect_issues(result)
+
+                        # Update speed calculation
+                        if self.stats['start_time']:
+                            elapsed = time.time() - self.stats['start_time']
+                            self.stats['speed'] = self.stats['crawled'] / elapsed if elapsed > 0 else 0
+
+                        # Add delay between requests
+                        delay = self.config.get('delay', 1.0)
+                        if delay > 0:
+                            await asyncio.sleep(delay)
+
+                # Update stats - discovered is total unique URLs found
+                self.stats['discovered'] = len(all_discovered_urls_js)
+
+            # Run PageSpeed analysis if enabled
+            if self.config.get('enable_pagespeed', False) and self.config.get('google_api_key'):
+                self.is_running_pagespeed = True
+                self._run_pagespeed_analysis()
+                self.is_running_pagespeed = False
+
+        finally:
+            # Clean up JavaScript resources
+            await self._cleanup_js_resources()
+            # Mark crawl as complete
+            self.is_running = False
+            print(f"Crawl completed. Discovered: {self.stats['discovered']}, Crawled: {self.stats['crawled']}")

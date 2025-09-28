@@ -119,6 +119,48 @@ def generate_links_json_export(links):
     """Generate JSON export for links data"""
     return json.dumps(links, indent=2)
 
+def generate_issues_csv_export(issues):
+    """Generate CSV export for issues data"""
+    output = StringIO()
+    fieldnames = ['url', 'type', 'category', 'issue', 'details']
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+
+    for issue in issues:
+        row = {
+            'url': issue.get('url', ''),
+            'type': issue.get('type', ''),
+            'category': issue.get('category', ''),
+            'issue': issue.get('issue', ''),
+            'details': issue.get('details', '')
+        }
+        writer.writerow(row)
+
+    return output.getvalue()
+
+def generate_issues_json_export(issues):
+    """Generate JSON export for issues data"""
+    # Group issues by URL for better organization
+    issues_by_url = {}
+    for issue in issues:
+        url = issue.get('url', '')
+        if url not in issues_by_url:
+            issues_by_url[url] = []
+        issues_by_url[url].append({
+            'type': issue.get('type', ''),
+            'category': issue.get('category', ''),
+            'issue': issue.get('issue', ''),
+            'details': issue.get('details', '')
+        })
+
+    return json.dumps({
+        'export_date': time.strftime('%Y-%m-%d %H:%M:%S'),
+        'total_issues': len(issues),
+        'total_urls_with_issues': len(issues_by_url),
+        'issues_by_url': issues_by_url,
+        'all_issues': issues
+    }, indent=2)
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -212,12 +254,80 @@ def export_data():
         crawl_data = crawler.get_status()
         urls = crawl_data.get('urls', [])
         links = crawl_data.get('links', [])
+        issues = crawl_data.get('issues', [])
 
         if not urls:
             return jsonify({'success': False, 'error': 'No data to export'})
 
+        # Check if issues_detected export is requested (SEPARATE FILE)
+        if 'issues_detected' in export_fields:
+            # Remove it from the regular export fields
+            export_fields = [f for f in export_fields if f != 'issues_detected']
+
+            # Export issues data as a COMPLETELY SEPARATE file
+            if issues:
+                # Prepare issues export
+                if export_format == 'csv':
+                    issues_content = generate_issues_csv_export(issues)
+                    issues_mimetype = 'text/csv'
+                    issues_filename = f'librecrawl_issues_{int(time.time())}.csv'
+                elif export_format == 'json':
+                    issues_content = generate_issues_json_export(issues)
+                    issues_mimetype = 'application/json'
+                    issues_filename = f'librecrawl_issues_{int(time.time())}.json'
+                else:
+                    issues_content = generate_issues_csv_export(issues)
+                    issues_mimetype = 'text/csv'
+                    issues_filename = f'librecrawl_issues_{int(time.time())}.csv'
+
+                # If no other fields selected, return just the issues
+                if not export_fields:
+                    return jsonify({
+                        'success': True,
+                        'content': issues_content,
+                        'mimetype': issues_mimetype,
+                        'filename': issues_filename
+                    })
+
+                # Otherwise, return BOTH files
+                # Generate regular export for the remaining fields
+                if export_format == 'csv':
+                    regular_content = generate_csv_export(urls, export_fields)
+                    regular_mimetype = 'text/csv'
+                    regular_filename = f'librecrawl_export_{int(time.time())}.csv'
+                elif export_format == 'json':
+                    regular_content = generate_json_export(urls, export_fields)
+                    regular_mimetype = 'application/json'
+                    regular_filename = f'librecrawl_export_{int(time.time())}.json'
+                elif export_format == 'xml':
+                    regular_content = generate_xml_export(urls, export_fields)
+                    regular_mimetype = 'application/xml'
+                    regular_filename = f'librecrawl_export_{int(time.time())}.xml'
+                else:
+                    regular_content = generate_csv_export(urls, export_fields)
+                    regular_mimetype = 'text/csv'
+                    regular_filename = f'librecrawl_export_{int(time.time())}.csv'
+
+                # Return both files data
+                return jsonify({
+                    'success': True,
+                    'multiple_files': True,
+                    'files': [
+                        {
+                            'content': regular_content,
+                            'mimetype': regular_mimetype,
+                            'filename': regular_filename
+                        },
+                        {
+                            'content': issues_content,
+                            'mimetype': issues_mimetype,
+                            'filename': issues_filename
+                        }
+                    ]
+                })
+
         # Check if links_detailed export is requested
-        if 'links_detailed' in export_fields:
+        elif 'links_detailed' in export_fields:
             # Export links data separately
             if not links:
                 return jsonify({'success': False, 'error': 'No links data to export'})

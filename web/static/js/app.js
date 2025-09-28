@@ -151,12 +151,27 @@ function clearCrawlData() {
     crawlState.urls = [];
     crawlState.baseUrl = null;
     crawlState.filters.active = null;
+    crawlState.pendingLinks = null;
+    crawlState.pendingIssues = null;
     updateStatusCodesTable();
+
+    // Clear issues and reset badge
+    window.currentIssues = [];
+    updateIssuesTable([]);  // This will also clear the badge
+
+    // Reset issue filter counts
+    document.getElementById('issues-all-count').textContent = '(0)';
+    document.getElementById('issues-error-count').textContent = '(0)';
+    document.getElementById('issues-warning-count').textContent = '(0)';
+    document.getElementById('issues-info-count').textContent = '(0)';
 
     // Clear filter states
     document.querySelectorAll('.filter-item').forEach(item => {
         item.classList.remove('active');
     });
+
+    // Reset the "All Issues" filter to active
+    document.querySelector('[data-filter="all"]')?.classList.add('active');
 
     // Update UI
     updateStatus('Data cleared');
@@ -255,11 +270,19 @@ function updateCrawlData(data) {
         crawlState.pendingLinks = data.links;
     }
 
+    // Update issues table only if Issues tab is active
+    if (data.issues && isIssuesTabActive()) {
+        updateIssuesTable(data.issues);
+    } else if (data.issues) {
+        // Store issues data for when user switches to Issues tab
+        crawlState.pendingIssues = data.issues;
+    }
+
     // Update filter counts
     updateFilterCounts();
 
-    // Update status codes table
-    updateStatusCodesTable();
+    // Update status codes table (respecting active filter)
+    updateStatusCodesTable(crawlState.filters.active);
 
     // Update progress and status text
     updateProgress(data.progress || 0);
@@ -386,6 +409,11 @@ function isLinksTabActive() {
     return linksTab && linksTab.classList.contains('active');
 }
 
+function isIssuesTabActive() {
+    const issuesTab = document.getElementById('issues-tab');
+    return issuesTab && issuesTab.classList.contains('active');
+}
+
 function updateLinksTable(links) {
     // Performance optimization: use document fragment for batch DOM updates
     const internalFragment = document.createDocumentFragment();
@@ -472,10 +500,113 @@ function updateLinksTable(links) {
     }
 }
 
+function updateIssuesTable(issues) {
+    if (!issues || !Array.isArray(issues)) {
+        issues = [];
+    }
+
+    // Store issues globally for filtering
+    window.currentIssues = issues;
+
+    const issuesTableBody = document.getElementById('issuesTableBody');
+    const emptyState = document.getElementById('issuesEmptyState');
+    const issuesTable = document.getElementById('issuesTable');
+
+    if (!issuesTableBody) return;
+
+    // Clear existing content
+    issuesTableBody.innerHTML = '';
+
+    // Count by type
+    let errorCount = 0;
+    let warningCount = 0;
+    let infoCount = 0;
+
+    issues.forEach(issue => {
+        if (issue.type === 'error') errorCount++;
+        else if (issue.type === 'warning') warningCount++;
+        else if (issue.type === 'info') infoCount++;
+    });
+
+    // Update filter counts
+    document.getElementById('issues-all-count').textContent = `(${issues.length})`;
+    document.getElementById('issues-error-count').textContent = `(${errorCount})`;
+    document.getElementById('issues-warning-count').textContent = `(${warningCount})`;
+    document.getElementById('issues-info-count').textContent = `(${infoCount})`;
+
+    // Show/hide empty state
+    if (issues.length === 0) {
+        if (emptyState) emptyState.style.display = 'block';
+        if (issuesTable) issuesTable.style.display = 'none';
+    } else {
+        if (emptyState) emptyState.style.display = 'none';
+        if (issuesTable) issuesTable.style.display = 'table';
+
+        // Create rows for each issue
+        const fragment = document.createDocumentFragment();
+
+        issues.forEach(issue => {
+            const row = document.createElement('tr');
+            row.setAttribute('data-issue-type', issue.type);
+
+            // Set row style based on issue type
+            if (issue.type === 'error') {
+                row.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
+            } else if (issue.type === 'warning') {
+                row.style.backgroundColor = 'rgba(245, 158, 11, 0.1)';
+            } else {
+                row.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
+            }
+
+            // Create type indicator
+            let typeIcon = '';
+            let typeColor = '';
+            if (issue.type === 'error') {
+                typeIcon = '❌';
+                typeColor = '#ef4444';
+            } else if (issue.type === 'warning') {
+                typeIcon = '⚠️';
+                typeColor = '#f59e0b';
+            } else {
+                typeIcon = 'ℹ️';
+                typeColor = '#3b82f6';
+            }
+
+            row.innerHTML = `
+                <td style="word-break: break-all;" title="${issue.url}">${issue.url}</td>
+                <td><span style="color: ${typeColor};">${typeIcon}</span> ${issue.type}</td>
+                <td>${issue.category}</td>
+                <td>${issue.issue}</td>
+                <td style="word-break: break-word;" title="${issue.details}">${issue.details}</td>
+            `;
+
+            fragment.appendChild(row);
+        });
+
+        issuesTableBody.appendChild(fragment);
+    }
+
+    // Update issue count in tab button (find the button, not the tab content)
+    const issuesTabButton = Array.from(document.querySelectorAll('.tab-btn')).find(btn => btn.textContent.includes('Issues'));
+    if (issuesTabButton) {
+        const totalIssues = issues.length;
+        if (totalIssues > 0) {
+            let badgeColor = '#3b82f6';
+            if (errorCount > 0) badgeColor = '#ef4444';
+            else if (warningCount > 0) badgeColor = '#f59e0b';
+
+            issuesTabButton.innerHTML = `Issues <span style="background: ${badgeColor}; color: white; padding: 2px 6px; border-radius: 12px; font-size: 12px;">${totalIssues}</span>`;
+        } else {
+            issuesTabButton.innerHTML = 'Issues';
+        }
+    }
+}
+
 function clearAllTables() {
-    const tableIds = ['overviewTableBody', 'internalTableBody', 'externalTableBody', 'statusCodesTableBody', 'internalLinksTableBody', 'externalLinksTableBody'];
+    const tableIds = ['overviewTableBody', 'internalTableBody', 'externalTableBody', 'statusCodesTableBody', 'internalLinksTableBody', 'externalLinksTableBody', 'issuesTableBody'];
     tableIds.forEach(id => {
-        document.getElementById(id).innerHTML = '';
+        const element = document.getElementById(id);
+        if (element) element.innerHTML = '';
     });
     crawlState.urls = [];
 }
@@ -507,6 +638,7 @@ function addUrlToTable(urlData) {
     const jsonLdCount = (urlData.json_ld || []).length;
     const linksInfo = `${urlData.internal_links || 0}/${urlData.external_links || 0}`;
     const imagesCount = (urlData.images || []).length;
+    const jsRendered = urlData.javascript_rendered ? '✅ JS' : '';
 
     addRowToTable('overviewTableBody', [
         urlData.url,
@@ -521,6 +653,7 @@ function addUrlToTable(urlData) {
         jsonLdCount > 0 ? `${jsonLdCount} scripts` : '',
         linksInfo,
         imagesCount > 0 ? `${imagesCount} images` : '',
+        jsRendered,
         `<button class="details-btn" onclick="showUrlDetails('${urlData.url}')">📊 Details</button>`
     ]);
 
@@ -579,6 +712,67 @@ function switchTab(tabName) {
         updateLinksTable(crawlState.pendingLinks);
         crawlState.pendingLinks = null; // Clear pending data
     }
+
+    // Load pending issues data if switching to Issues tab
+    if (tabName === 'issues' && crawlState.pendingIssues) {
+        updateIssuesTable(crawlState.pendingIssues);
+        crawlState.pendingIssues = null; // Clear pending data
+    }
+}
+
+// Issue Filtering
+function filterIssues(filterType) {
+    // Update active button state and colors
+    document.querySelectorAll('#issues-tab .filter-item').forEach(btn => {
+        btn.classList.remove('active');
+        const filter = btn.getAttribute('data-filter');
+
+        if (filter === filterType) {
+            btn.classList.add('active');
+            // Set active state colors
+            if (filter === 'all') {
+                btn.style.background = '#374151';
+                btn.style.borderColor = '#4b5563';
+                btn.style.color = 'white';
+            } else if (filter === 'error') {
+                btn.style.background = 'rgba(239, 68, 68, 0.2)';
+                btn.style.borderColor = 'rgba(239, 68, 68, 0.5)';
+            } else if (filter === 'warning') {
+                btn.style.background = 'rgba(245, 158, 11, 0.2)';
+                btn.style.borderColor = 'rgba(245, 158, 11, 0.5)';
+            } else if (filter === 'info') {
+                btn.style.background = 'rgba(59, 130, 246, 0.2)';
+                btn.style.borderColor = 'rgba(59, 130, 246, 0.5)';
+            }
+        } else {
+            // Reset inactive state colors
+            if (filter === 'all') {
+                btn.style.background = 'transparent';
+                btn.style.borderColor = '#4b5563';
+                btn.style.color = '#9ca3af';
+            } else if (filter === 'error') {
+                btn.style.background = 'rgba(239, 68, 68, 0.1)';
+                btn.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+            } else if (filter === 'warning') {
+                btn.style.background = 'rgba(245, 158, 11, 0.1)';
+                btn.style.borderColor = 'rgba(245, 158, 11, 0.3)';
+            } else if (filter === 'info') {
+                btn.style.background = 'rgba(59, 130, 246, 0.1)';
+                btn.style.borderColor = 'rgba(59, 130, 246, 0.3)';
+            }
+        }
+    });
+
+    // Filter the table rows
+    const rows = document.querySelectorAll('#issuesTableBody tr');
+    rows.forEach(row => {
+        const issueType = row.getAttribute('data-issue-type');
+        if (filterType === 'all' || issueType === filterType) {
+            row.style.display = '';
+        } else {
+            row.style.display = 'none';
+        }
+    });
 }
 
 // Filter Management
@@ -604,14 +798,16 @@ function applyFilter(filterType) {
     filterTable('overviewTableBody', filterType);
     filterTable('internalTableBody', filterType);
     filterTable('externalTableBody', filterType);
-    filterTable('statusCodesTableBody', filterType);
+
+    // Update Status Codes table with filtered data
+    updateStatusCodesTable(filterType);
 
     console.log('Applied filter:', filterType);
 }
 
 function clearActiveFilters() {
     // Show all rows in all tables
-    const tableIds = ['overviewTableBody', 'internalTableBody', 'externalTableBody', 'statusCodesTableBody'];
+    const tableIds = ['overviewTableBody', 'internalTableBody', 'externalTableBody'];
     tableIds.forEach(tableId => {
         const tbody = document.getElementById(tableId);
         if (tbody) {
@@ -620,6 +816,9 @@ function clearActiveFilters() {
             });
         }
     });
+
+    // Reset Status Codes table to show all data
+    updateStatusCodesTable();
 }
 
 function filterTable(tableBodyId, filterType) {
@@ -741,15 +940,52 @@ function updateFilterCounts() {
     });
 }
 
-function updateStatusCodesTable() {
+function updateStatusCodesTable(filterType = null) {
     const tbody = document.getElementById('statusCodesTableBody');
     if (!tbody) return;
 
-    // Count status codes
+    // Count status codes, respecting current filter
     const statusCounts = {};
-    let totalUrls = crawlState.urls.length;
+    let filteredUrls = crawlState.urls;
 
-    crawlState.urls.forEach(url => {
+    // Apply filter if specified
+    if (filterType === 'internal') {
+        filteredUrls = crawlState.urls.filter(url => isInternalURL(url.url));
+    } else if (filterType === 'external') {
+        filteredUrls = crawlState.urls.filter(url => !isInternalURL(url.url));
+    } else if (filterType === '2xx') {
+        filteredUrls = crawlState.urls.filter(url => {
+            const status = parseInt(url.status_code);
+            return status >= 200 && status < 300;
+        });
+    } else if (filterType === '3xx') {
+        filteredUrls = crawlState.urls.filter(url => {
+            const status = parseInt(url.status_code);
+            return status >= 300 && status < 400;
+        });
+    } else if (filterType === '4xx') {
+        filteredUrls = crawlState.urls.filter(url => {
+            const status = parseInt(url.status_code);
+            return status >= 400 && status < 500;
+        });
+    } else if (filterType === '5xx') {
+        filteredUrls = crawlState.urls.filter(url => {
+            const status = parseInt(url.status_code);
+            return status >= 500;
+        });
+    } else if (filterType === 'html') {
+        filteredUrls = crawlState.urls.filter(url => (url.content_type || '').includes('html'));
+    } else if (filterType === 'css') {
+        filteredUrls = crawlState.urls.filter(url => (url.content_type || '').includes('css'));
+    } else if (filterType === 'js') {
+        filteredUrls = crawlState.urls.filter(url => (url.content_type || '').includes('javascript'));
+    } else if (filterType === 'images') {
+        filteredUrls = crawlState.urls.filter(url => (url.content_type || '').includes('image'));
+    }
+
+    let totalUrls = filteredUrls.length;
+
+    filteredUrls.forEach(url => {
         const statusCode = url.status_code;
         if (statusCounts[statusCode]) {
             statusCounts[statusCode]++;
@@ -885,19 +1121,40 @@ async function exportData() {
             return;
         }
 
-        // Create and download the file
-        const blob = new Blob([exportData.content], { type: exportData.mimetype });
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.style.display = 'none';
-        a.href = url;
-        a.download = exportData.filename;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
+        // Check if we have multiple files to download
+        if (exportData.multiple_files && exportData.files) {
+            // Download each file separately
+            exportData.files.forEach((file, index) => {
+                setTimeout(() => {
+                    const blob = new Blob([file.content], { type: file.mimetype });
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = url;
+                    a.download = file.filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                }, index * 500); // Delay between downloads to avoid browser blocking
+            });
 
-        showNotification(`Export complete: ${exportData.filename}`, 'success');
+            showNotification(`Exporting ${exportData.files.length} files...`, 'success');
+        } else {
+            // Single file download (original logic)
+            const blob = new Blob([exportData.content], { type: exportData.mimetype });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = exportData.filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+
+            showNotification(`Export complete: ${exportData.filename}`, 'success');
+        }
 
     } catch (error) {
         console.error('Export error:', error);
@@ -1151,7 +1408,8 @@ async function saveCrawl() {
             stats: crawlState.stats,
             urls: crawlData.urls,
             links: crawlData.links,
-            version: '1.0'
+            issues: crawlData.issues || [],
+            version: '1.1'
         };
 
         // Create and download the file
@@ -1250,6 +1508,27 @@ function loadCrawl() {
                 // If Links tab is currently active, load them immediately
                 if (isLinksTabActive()) {
                     updateLinksTable(saveData.links);
+                }
+            }
+
+            // Load issues data if present
+            if (saveData.issues && saveData.issues.length > 0) {
+                console.log(`Loading ${saveData.issues.length} issues...`);
+                crawlState.pendingIssues = saveData.issues;
+                // If Issues tab is currently active, load them immediately
+                if (isIssuesTabActive()) {
+                    updateIssuesTable(saveData.issues);
+                } else {
+                    // Update the badge count even if tab is not active
+                    const issuesTabButton = Array.from(document.querySelectorAll('.tab-btn')).find(btn => btn.textContent.includes('Issues'));
+                    if (issuesTabButton) {
+                        const errorCount = saveData.issues.filter(i => i.type === 'error').length;
+                        const warningCount = saveData.issues.filter(i => i.type === 'warning').length;
+                        let badgeColor = '#3b82f6';
+                        if (errorCount > 0) badgeColor = '#ef4444';
+                        else if (warningCount > 0) badgeColor = '#f59e0b';
+                        issuesTabButton.innerHTML = `Issues <span style="background: ${badgeColor}; color: white; padding: 2px 6px; border-radius: 12px; font-size: 12px;">${saveData.issues.length}</span>`;
+                    }
                 }
             }
 

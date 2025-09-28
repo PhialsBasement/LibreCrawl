@@ -37,7 +37,73 @@ let defaultSettings = {
     saveSession: false,
     enableProxy: false,
     proxyUrl: '',
-    customHeaders: ''
+    customHeaders: '',
+
+    // JavaScript rendering settings
+    enableJavaScript: false,
+    jsWaitTime: 3,
+    jsTimeout: 30,
+    jsBrowser: 'chromium',
+    jsHeadless: true,
+    jsUserAgent: 'LibreCrawl/1.0 (Web Crawler with JavaScript)',
+    jsViewportWidth: 1920,
+    jsViewportHeight: 1080,
+    jsMaxConcurrentPages: 3,
+
+    // Issue exclusion patterns
+    issueExclusionPatterns: `/cgi-bin/*
+/wp-admin/*
+/wp-content/plugins/*
+/wp-content/themes/*
+/admin/*
+/administrator/*
+/_admin/*
+/backend/*
+/cpanel/*
+/phpmyadmin/*
+/pma/*
+/webmail/*
+/.git/*
+/.svn/*
+/.env
+/.htaccess
+/.htpasswd
+/node_modules/*
+/vendor/*
+/bower_components/*
+/api/internal/*
+/private/*
+/system/*
+/core/*
+/includes/*
+/lib/*
+/src/*
+/dist/*
+/test/*
+/tests/*
+/spec/*
+/specs/*
+/_next/*
+/.next/*
+/build/*
+/builds/*
+/tmp/*
+/temp/*
+/cache/*
+/logs/*
+/config/*
+/configs/*
+/settings/*
+*.json
+*.xml
+*.yaml
+*.yml
+*.toml
+*.log
+*.bak
+*.backup
+*.old
+*.orig`
 };
 
 // Initialize settings when page loads
@@ -57,6 +123,30 @@ function setupSettingsEventHandlers() {
             }
         });
     }
+
+    // JavaScript checkbox handler
+    const enableJavaScriptCheckbox = document.getElementById('enableJavaScript');
+    if (enableJavaScriptCheckbox) {
+        enableJavaScriptCheckbox.addEventListener('change', function() {
+            const jsSettingsGroups = [
+                'jsSettings', 'jsTimeoutGroup', 'jsBrowserGroup', 'jsHeadlessGroup',
+                'jsUserAgentGroup', 'jsViewportGroup', 'jsConcurrencyGroup', 'jsWarning'
+            ];
+
+            jsSettingsGroups.forEach(groupId => {
+                const group = document.getElementById(groupId);
+                if (group) {
+                    group.style.display = this.checked ? 'block' : 'none';
+                }
+            });
+        });
+    }
+}
+
+function resetIssueExclusions() {
+    const defaultPatterns = currentSettings.issueExclusionPatterns || defaultSettings.issueExclusionPatterns;
+    document.getElementById('issueExclusionPatterns').value = defaultPatterns;
+    alert('Issue exclusion patterns have been reset to defaults');
 }
 
 function openSettings() {
@@ -116,6 +206,20 @@ function populateSettingsForm() {
     if (proxySettings) {
         proxySettings.style.display = enableProxy ? 'block' : 'none';
     }
+
+    // Show/hide JavaScript settings
+    const enableJavaScript = currentSettings.enableJavaScript;
+    const jsSettingsGroups = [
+        'jsSettings', 'jsTimeoutGroup', 'jsBrowserGroup', 'jsHeadlessGroup',
+        'jsUserAgentGroup', 'jsViewportGroup', 'jsConcurrencyGroup', 'jsWarning'
+    ];
+
+    jsSettingsGroups.forEach(groupId => {
+        const group = document.getElementById(groupId);
+        if (group) {
+            group.style.display = enableJavaScript ? 'block' : 'none';
+        }
+    });
 }
 
 function collectSettingsFromForm() {
@@ -127,7 +231,9 @@ function collectSettingsFromForm() {
         'userAgent', 'timeout', 'retries', 'acceptLanguage', 'respectRobotsTxt', 'allowCookies', 'discoverSitemaps', 'enablePageSpeed', 'googleApiKey',
         'includeExtensions', 'excludeExtensions', 'includePatterns', 'excludePatterns', 'maxFileSize',
         'exportFormat', 'concurrency', 'memoryLimit', 'logLevel', 'saveSession',
-        'enableProxy', 'proxyUrl', 'customHeaders'
+        'enableProxy', 'proxyUrl', 'customHeaders',
+        'enableJavaScript', 'jsWaitTime', 'jsTimeout', 'jsBrowser', 'jsHeadless', 'jsUserAgent', 'jsViewportWidth', 'jsViewportHeight', 'jsMaxConcurrentPages',
+        'issueExclusionPatterns'
     ];
 
     formFields.forEach(fieldId => {
@@ -232,6 +338,33 @@ function validateSettings(settings) {
 
     if (settings.memoryLimit < 64 || settings.memoryLimit > 4096) {
         errors.push('Memory limit must be between 64 and 4096 MB');
+    }
+
+    // Validate JavaScript settings if enabled
+    if (settings.enableJavaScript) {
+        if (settings.jsWaitTime < 0 || settings.jsWaitTime > 30) {
+            errors.push('JavaScript wait time must be between 0 and 30 seconds');
+        }
+
+        if (settings.jsTimeout < 5 || settings.jsTimeout > 120) {
+            errors.push('JavaScript timeout must be between 5 and 120 seconds');
+        }
+
+        if (settings.jsViewportWidth < 800 || settings.jsViewportWidth > 4000) {
+            errors.push('JavaScript viewport width must be between 800 and 4000 pixels');
+        }
+
+        if (settings.jsViewportHeight < 600 || settings.jsViewportHeight > 3000) {
+            errors.push('JavaScript viewport height must be between 600 and 3000 pixels');
+        }
+
+        if (settings.jsMaxConcurrentPages < 1 || settings.jsMaxConcurrentPages > 10) {
+            errors.push('JavaScript concurrent pages must be between 1 and 10');
+        }
+
+        if (!settings.jsUserAgent.trim()) {
+            errors.push('JavaScript user agent cannot be empty');
+        }
     }
 
     // Validate proxy URL if proxy is enabled

@@ -45,7 +45,73 @@ class SettingsManager:
             'saveSession': False,
             'enableProxy': False,
             'proxyUrl': '',
-            'customHeaders': ''
+            'customHeaders': '',
+
+            # JavaScript rendering settings
+            'enableJavaScript': False,
+            'jsWaitTime': 3,
+            'jsTimeout': 30,
+            'jsBrowser': 'chromium',
+            'jsHeadless': True,
+            'jsUserAgent': 'LibreCrawl/1.0 (Web Crawler with JavaScript)',
+            'jsViewportWidth': 1920,
+            'jsViewportHeight': 1080,
+            'jsMaxConcurrentPages': 3,
+
+            # Issue exclusion patterns
+            'issueExclusionPatterns': '''/cgi-bin/*
+/wp-admin/*
+/wp-content/plugins/*
+/wp-content/themes/*
+/admin/*
+/administrator/*
+/_admin/*
+/backend/*
+/cpanel/*
+/phpmyadmin/*
+/pma/*
+/webmail/*
+/.git/*
+/.svn/*
+/.env
+/.htaccess
+/.htpasswd
+/node_modules/*
+/vendor/*
+/bower_components/*
+/api/internal/*
+/private/*
+/system/*
+/core/*
+/includes/*
+/lib/*
+/src/*
+/dist/*
+/test/*
+/tests/*
+/spec/*
+/specs/*
+/_next/*
+/.next/*
+/build/*
+/builds/*
+/tmp/*
+/temp/*
+/cache/*
+/logs/*
+/config/*
+/configs/*
+/settings/*
+*.json
+*.xml
+*.yaml
+*.yml
+*.toml
+*.log
+*.bak
+*.backup
+*.old
+*.orig'''
         }
 
         self.current_settings = self.load_settings()
@@ -128,7 +194,12 @@ class SettingsManager:
                 'retries': (0, 10),
                 'maxFileSize': (1, 1000),
                 'concurrency': (1, 50),
-                'memoryLimit': (64, 4096)
+                'memoryLimit': (64, 4096),
+                'jsWaitTime': (0, 30),
+                'jsTimeout': (5, 120),
+                'jsViewportWidth': (800, 4000),
+                'jsViewportHeight': (600, 3000),
+                'jsMaxConcurrentPages': (1, 10)
             }
 
             for key, (min_val, max_val) in numeric_validations.items():
@@ -191,7 +262,17 @@ class SettingsManager:
             'custom_headers': self._parse_custom_headers(settings['customHeaders']),
             'discover_sitemaps': settings['discoverSitemaps'],
             'enable_pagespeed': settings['enablePageSpeed'],
-            'google_api_key': settings['googleApiKey']
+            'google_api_key': settings['googleApiKey'],
+            'enable_javascript': settings['enableJavaScript'],
+            'js_wait_time': settings['jsWaitTime'],
+            'js_timeout': settings['jsTimeout'],
+            'js_browser': settings['jsBrowser'],
+            'js_headless': settings['jsHeadless'],
+            'js_user_agent': settings['jsUserAgent'],
+            'js_viewport_width': settings['jsViewportWidth'],
+            'js_viewport_height': settings['jsViewportHeight'],
+            'js_max_concurrent_pages': settings['jsMaxConcurrentPages'],
+            'issue_exclusion_patterns': [p.strip() for p in settings['issueExclusionPatterns'].split('\n') if p.strip()]
         }
 
     def _parse_custom_headers(self, headers_text):

@@ -182,6 +182,7 @@
                                             <th>JSON-LD</th>
                                             <th>Links (Int/Ext)</th>
                                             <th>Images</th>
+                                            <th>JS</th>
                                             <th>Details</th>
                                         </tr>
                                     </thead>
@@ -293,21 +294,38 @@
                         </div>
 
                         <div id="issues-tab" class="tab-pane">
+                            <!-- Severity Filters -->
+                            <div class="filter-bar" style="margin-bottom: 20px; display: flex; gap: 10px; justify-content: center; align-items: center;">
+                                <button class="filter-item active" onclick="filterIssues('all')" data-filter="all" style="background: #374151; border: 1px solid #4b5563; color: white; padding: 8px 16px; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-size: 14px; font-weight: 500; min-width: 120px;">
+                                    All Issues <span id="issues-all-count" style="opacity: 0.7;">(0)</span>
+                                </button>
+                                <button class="filter-item" onclick="filterIssues('error')" data-filter="error" style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: #ef4444; padding: 8px 16px; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-size: 14px; font-weight: 500; min-width: 100px;">
+                                    <span>❌</span> Errors <span id="issues-error-count" style="opacity: 0.7;">(0)</span>
+                                </button>
+                                <button class="filter-item" onclick="filterIssues('warning')" data-filter="warning" style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); color: #f59e0b; padding: 8px 16px; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-size: 14px; font-weight: 500; min-width: 120px;">
+                                    <span>⚠️</span> Warnings <span id="issues-warning-count" style="opacity: 0.7;">(0)</span>
+                                </button>
+                                <button class="filter-item" onclick="filterIssues('info')" data-filter="info" style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); color: #3b82f6; padding: 8px 16px; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-size: 14px; font-weight: 500; min-width: 90px;">
+                                    <span>ℹ️</span> Info <span id="issues-info-count" style="opacity: 0.7;">(0)</span>
+                                </button>
+                            </div>
+
                             <div class="table-container">
                                 <table class="data-table" id="issuesTable">
                                     <thead>
                                         <tr>
-                                            <th>Issue Type</th>
-                                            <th>URL</th>
-                                            <th>Description</th>
-                                            <th>Severity</th>
+                                            <th style="width: 35%;">URL</th>
+                                            <th style="width: 10%;">Type</th>
+                                            <th style="width: 15%;">Category</th>
+                                            <th style="width: 20%;">Issue</th>
+                                            <th style="width: 20%;">Details</th>
                                         </tr>
                                     </thead>
                                     <tbody id="issuesTableBody">
                                         <!-- Issues will be populated here -->
                                     </tbody>
                                 </table>
-                                <div class="empty-state" id="issuesEmptyState">
+                                <div class="empty-state" id="issuesEmptyState" style="display: none;">
                                     <div class="empty-state-content">
                                         <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                                             <circle cx="12" cy="12" r="10"/>
@@ -359,6 +377,8 @@
                     <button class="settings-tab-btn" onclick="switchSettingsTab('requests')">Requests</button>
                     <button class="settings-tab-btn" onclick="switchSettingsTab('filters')">Filters</button>
                     <button class="settings-tab-btn" onclick="switchSettingsTab('export')">Export</button>
+                    <button class="settings-tab-btn" onclick="switchSettingsTab('javascript')">JavaScript</button>
+                    <button class="settings-tab-btn" onclick="switchSettingsTab('issues')">Issue Exclusion</button>
                     <button class="settings-tab-btn" onclick="switchSettingsTab('advanced')">Advanced</button>
                 </div>
 
@@ -608,6 +628,114 @@
                                 <input type="checkbox" name="exportFields" value="robots">
                                 Robots Meta
                             </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="exportFields" value="issues_detected">
+                                Issues Detected (separate export)
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- JavaScript Settings -->
+                <div id="javascript-settings" class="settings-tab-content">
+                    <h3>JavaScript Rendering Configuration</h3>
+
+                    <div class="setting-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="enableJavaScript">
+                            Enable JavaScript Rendering
+                        </label>
+                        <span class="setting-help">Render pages with JavaScript for dynamic content (slower but more accurate)</span>
+                    </div>
+
+                    <div class="setting-group" id="jsSettings" style="display: none;">
+                        <label for="jsWaitTime">JavaScript Wait Time (seconds)</label>
+                        <input type="number" id="jsWaitTime" value="3" min="0" max="30" step="0.5">
+                        <span class="setting-help">Time to wait for JavaScript to render after page load</span>
+                    </div>
+
+                    <div class="setting-group" id="jsTimeoutGroup" style="display: none;">
+                        <label for="jsTimeout">Page Load Timeout (seconds)</label>
+                        <input type="number" id="jsTimeout" value="30" min="5" max="120">
+                        <span class="setting-help">Maximum time to wait for page to load</span>
+                    </div>
+
+                    <div class="setting-group" id="jsBrowserGroup" style="display: none;">
+                        <label for="jsBrowser">Browser Engine</label>
+                        <select id="jsBrowser">
+                            <option value="chromium">Chromium (Recommended)</option>
+                            <option value="firefox">Firefox</option>
+                            <option value="webkit">WebKit (Safari)</option>
+                        </select>
+                        <span class="setting-help">Browser engine for JavaScript rendering</span>
+                    </div>
+
+                    <div class="setting-group" id="jsHeadlessGroup" style="display: none;">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="jsHeadless" checked>
+                            Headless Mode
+                        </label>
+                        <span class="setting-help">Run browser without visible window (recommended for performance)</span>
+                    </div>
+
+                    <div class="setting-group" id="jsUserAgentGroup" style="display: none;">
+                        <label for="jsUserAgent">JavaScript User Agent</label>
+                        <input type="text" id="jsUserAgent" value="LibreCrawl/1.0 (Web Crawler with JavaScript)">
+                        <span class="setting-help">User agent string for JavaScript-rendered pages</span>
+                    </div>
+
+                    <div class="setting-group" id="jsViewportGroup" style="display: none;">
+                        <label>Browser Viewport Size</label>
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <input type="number" id="jsViewportWidth" value="1920" min="800" max="4000" placeholder="Width">
+                            <span>×</span>
+                            <input type="number" id="jsViewportHeight" value="1080" min="600" max="3000" placeholder="Height">
+                        </div>
+                        <span class="setting-help">Browser window size for rendering (affects responsive layouts)</span>
+                    </div>
+
+                    <div class="setting-group" id="jsConcurrencyGroup" style="display: none;">
+                        <label for="jsMaxConcurrentPages">Max Concurrent Browser Pages</label>
+                        <input type="number" id="jsMaxConcurrentPages" value="3" min="1" max="10">
+                        <span class="setting-help">Number of browser pages for parallel JavaScript rendering (higher = faster but more memory)</span>
+                    </div>
+
+                    <div class="setting-group" id="jsWarning" style="display: none;">
+                        <div style="background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.3); border-radius: 6px; padding: 12px; color: #fbbf24;">
+                            <strong>⚠️ Performance Impact</strong><br>
+                            JavaScript rendering is significantly slower than HTTP-only crawling. Use for sites with dynamic content or when static crawling produces incomplete results.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Issue Exclusion Settings -->
+                <div id="issues-settings" class="settings-tab-content">
+                    <h3>Issue Exclusion Patterns</h3>
+                    <p class="setting-help">URLs matching these patterns will be excluded from issue detection. These are typically admin areas, development files, and framework internals that should never be indexed by search engines.</p>
+
+                    <div class="setting-group">
+                        <label for="issueExclusionPatterns">Exclusion Patterns (one per line)</label>
+                        <textarea id="issueExclusionPatterns" rows="20" placeholder="/admin/*
+/wp-admin/*
+*.json"></textarea>
+                        <span class="setting-help">Use * for wildcards. Examples: /admin/*, *.json, /test/*</span>
+                        <div style="margin-top: 10px;">
+                            <button type="button" onclick="resetIssueExclusions()" style="background: #6b7280; padding: 8px 16px; border-radius: 6px; border: none; color: white; cursor: pointer;">
+                                Reset to Defaults
+                            </button>
+                            <span class="setting-help" style="margin-left: 10px;">Restore the default exclusion patterns</span>
+                        </div>
+                    </div>
+
+                    <div class="setting-group">
+                        <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 6px; padding: 12px;">
+                            <strong>ℹ️ Default Exclusions Include:</strong><br>
+                            • WordPress admin areas (/wp-admin/*, /wp-content/plugins/*)<br>
+                            • Common admin panels (/admin/*, /administrator/*, /cpanel/*)<br>
+                            • Development files (/.git/*, /node_modules/*, /vendor/*)<br>
+                            • Build and cache directories (/build/*, /cache/*, /tmp/*)<br>
+                            • Configuration files (*.json, *.yaml, *.xml)<br>
+                            • Backup files (*.bak, *.backup, *.old)
                         </div>
                     </div>
                 </div>
