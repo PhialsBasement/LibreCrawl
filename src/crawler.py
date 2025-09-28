@@ -5,7 +5,7 @@ from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 from collections import deque
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
 import queue
 import xml.etree.ElementTree as ET
 import gzip
@@ -16,7 +16,19 @@ import nest_asyncio
 
 class WebCrawler:
     def __init__(self):
+        # Thread-local storage for per-thread sessions
+        self._thread_local = threading.local()
+
+        # Configure session with connection pooling for high concurrency
         self.session = requests.Session()
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=100,  # Number of connection pools to cache
+            pool_maxsize=100,      # Maximum number of connections to save in the pool
+            max_retries=0,         # We handle retries manually
+            pool_block=False       # Don't block when pool is full
+        )
+        self.session.mount('http://', adapter)
+        self.session.mount('https://', adapter)
         self.session.headers.update({
             'User-Agent': 'LibreCrawl/1.0 (Web Crawler)'
         })
@@ -33,6 +45,11 @@ class WebCrawler:
         self.urls_lock = threading.Lock()
         self.links_lock = threading.Lock()
         self.issues_lock = threading.Lock()
+        self.last_request_time = 0
+        self.rate_limit_lock = threading.Lock()
+        self._robots_checked_domains = set()
+        self._robots_cache = {}
+        self._robots_lock = threading.Lock()
 
         self.is_running = False
         self.is_paused = False
@@ -42,7 +59,7 @@ class WebCrawler:
         self.config = {
             'max_depth': 3,
             'max_urls': 1000,
-            'delay': 1.0,
+            'delay': 0.0,  # Default to no delay for maximum speed
             'follow_redirects': True,
             'crawl_external': False,
             'user_agent': 'LibreCrawl/1.0 (Web Crawler)',
@@ -56,7 +73,7 @@ class WebCrawler:
             'include_patterns': [],
             'exclude_patterns': [],
             'max_file_size': 50 * 1024 * 1024,  # 50MB
-            'concurrency': 5,
+            'concurrency': 20,
             'memory_limit': 512 * 1024 * 1024,  # 512MB
             'log_level': 'INFO',
             'enable_proxy': False,
@@ -217,9 +234,9 @@ class WebCrawler:
         max_workers = self.config.get('concurrency', 5)
         consecutive_empty_iterations = 0
         max_empty_iterations = 3
-        last_crawled_count = 0
+        last_crawled_count = -1  # Start at -1 to avoid false positive on first iteration
         no_progress_iterations = 0
-        max_no_progress = 10  # Force stop after 10 iterations with no progress
+        max_no_progress = 5000  # Force stop after ~5 seconds with no progress (5000 * 1ms)
 
         # Use async approach if JavaScript rendering is enabled
         if self.config.get('enable_javascript', False):
@@ -228,7 +245,7 @@ class WebCrawler:
             return
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            active_futures = set()
+            active_futures = {}  # Change to dict to track URLs with futures
 
             while self.is_running:
                 try:
@@ -237,55 +254,64 @@ class WebCrawler:
                         time.sleep(1)
                         continue
 
-                    # Submit new tasks if we have space and URLs
-                    while (len(active_futures) < max_workers and
-                           self.discovered_urls and
-                           self.is_running and
-                           self.stats['crawled'] < self.config['max_urls']):
+                    # Submit ALL available work at once (batch submission)
+                    urls_to_submit = []
+                    if len(active_futures) < max_workers and self.stats['crawled'] < self.config['max_urls']:
+                        # Calculate how many we can submit
+                        slots_available = max_workers - len(active_futures)
 
+                        # Grab multiple URLs at once with single lock
                         with self.urls_lock:
-                            if not self.discovered_urls:
-                                break
-                            current_url, depth = self.discovered_urls.popleft()
+                            while slots_available > 0 and self.discovered_urls:
+                                if not self.discovered_urls:
+                                    break
+                                current_url, depth = self.discovered_urls.popleft()
 
-                        # Skip if already visited or depth exceeded
-                        if current_url in self.visited_urls or depth > self.config['max_depth']:
-                            continue
+                                # Skip if already visited or depth exceeded
+                                if current_url in self.visited_urls or depth > self.config['max_depth']:
+                                    continue
 
-                        # Mark as visited immediately to prevent duplicates
-                        with self.urls_lock:
-                            self.visited_urls.add(current_url)
+                                # Mark as visited immediately to prevent duplicates
+                                self.visited_urls.add(current_url)
+                                urls_to_submit.append((current_url, depth))
+                                slots_available -= 1
 
-                        # Submit crawl task
-                        future = executor.submit(self._crawl_url_with_delay, current_url, depth)
-                        active_futures.add(future)
-                        consecutive_empty_iterations = 0
+                        # Submit all URLs outside of lock
+                        for current_url, depth in urls_to_submit:
+                            future = executor.submit(self._crawl_url_with_delay, current_url, depth)
+                            active_futures[future] = current_url
+                            consecutive_empty_iterations = 0
 
-                    # Process completed tasks
+                    # Wait for at least one future to complete instead of polling
                     if active_futures:
-                        completed_futures = set()
-                        try:
-                            # Use timeout to avoid blocking forever
-                            for future in as_completed(active_futures, timeout=1):
-                                completed_futures.add(future)
+                        # Use wait() to block until at least one completes
+                        done, pending = wait(active_futures.keys(), timeout=0.1, return_when=FIRST_COMPLETED)
+
+                        if done:
+                            results_to_add = []
+
+                            # Process all completed futures
+                            for future in done:
                                 try:
                                     result = future.result()
                                     if result:
-                                        with self.results_lock:
-                                            self.crawl_results.append(result)
-                                            self.stats['crawled'] += 1
-                                            self.stats['depth'] = max(self.stats['depth'], result.get('depth', 0))
-
-                                        # Detect issues for this URL
-                                        self._detect_issues(result)
+                                        results_to_add.append(result)
                                 except Exception as e:
-                                    print(f"Error in crawl task: {e}")
-                        except:
-                            # Timeout occurred, no completed futures
-                            pass
+                                    print(f"Error in crawl task for {active_futures[future]}: {e}")
+                                # Remove from active futures
+                                del active_futures[future]
 
-                        # Remove completed futures
-                        active_futures -= completed_futures
+                            # Batch add results with single lock
+                            if results_to_add:
+                                with self.results_lock:
+                                    for result in results_to_add:
+                                        self.crawl_results.append(result)
+                                        self.stats['crawled'] += 1
+                                        self.stats['depth'] = max(self.stats['depth'], result.get('depth', 0))
+
+                                # Detect issues for all results
+                                for result in results_to_add:
+                                    self._detect_issues(result)
 
                     # Check for completion conditions
                     if not self.discovered_urls and not active_futures:
@@ -293,7 +319,7 @@ class WebCrawler:
                         if consecutive_empty_iterations >= max_empty_iterations:
                             print("No more URLs to crawl, stopping...")
                             break
-                        time.sleep(1)
+                        time.sleep(0.01)  # Very short sleep when waiting for completion
                     else:
                         consecutive_empty_iterations = 0
 
@@ -306,18 +332,24 @@ class WebCrawler:
                         print("Crawl stopped by user")
                         break
 
-                    # Check for no progress (safety mechanism)
-                    if self.stats['crawled'] == last_crawled_count:
+                    # Check for no progress (safety mechanism) - only check when we have active work
+                    if active_futures or self.stats['crawled'] > 0:  # Only check after crawling has started
                         no_progress_iterations += 1
-                        if no_progress_iterations >= max_no_progress:
-                            print(f"No progress for {max_no_progress} iterations, forcing stop...")
-                            break
-                    else:
-                        no_progress_iterations = 0
-                        last_crawled_count = self.stats['crawled']
+                        if no_progress_iterations % 100 == 0:  # Check every 100ms
+                            if self.stats['crawled'] == last_crawled_count and len(active_futures) == 0:
+                                # Only force stop if truly stuck (no active work and no progress)
+                                if no_progress_iterations >= max_no_progress:
+                                    print(f"No progress for {max_no_progress/1000:.1f} seconds, forcing stop...")
+                                    print(f"Debug: crawled={self.stats['crawled']}, active_futures={len(active_futures)}, discovered_urls={len(self.discovered_urls)}")
+                                    break
+                            else:
+                                no_progress_iterations = 0
+                                last_crawled_count = self.stats['crawled']
 
-                    # Small delay to prevent tight loop
-                    time.sleep(0.1)
+                    # Only sleep if we have no active work to prevent CPU spinning
+                    if not active_futures and not self.discovered_urls:
+                        time.sleep(0.01)  # 10ms sleep when idle
+                    # Don't sleep when at capacity - let the loop run to check for completions
 
                 except Exception as e:
                     print(f"Error in crawl worker: {e}")
@@ -340,14 +372,36 @@ class WebCrawler:
         print(f"Crawl completed. Discovered: {self.stats['discovered']}, Crawled: {self.stats['crawled']}")
 
     def _crawl_url_with_delay(self, url, depth):
-        """Wrapper for _crawl_url with delay handling"""
-        result = self._crawl_url(url, depth)
-
-        # Apply delay after crawling if configured
+        """Wrapper for _crawl_url with global rate limiting"""
+        # Apply global rate limiting (not per-thread)
         if self.config['delay'] > 0:
-            time.sleep(self.config['delay'])
+            with self.rate_limit_lock:
+                time_since_last = time.time() - self.last_request_time
+                if time_since_last < self.config['delay']:
+                    time.sleep(self.config['delay'] - time_since_last)
+                self.last_request_time = time.time()
 
+        result = self._crawl_url(url, depth)
         return result
+
+    def _get_thread_session(self):
+        """Get or create a thread-local session for better concurrency"""
+        if not hasattr(self._thread_local, 'session'):
+            session = requests.Session()
+            adapter = requests.adapters.HTTPAdapter(
+                pool_connections=10,
+                pool_maxsize=10,
+                max_retries=0,
+                pool_block=False
+            )
+            session.mount('http://', adapter)
+            session.mount('https://', adapter)
+
+            # Copy headers from main session
+            session.headers.update(self.session.headers)
+            session.proxies = self.session.proxies
+            self._thread_local.session = session
+        return self._thread_local.session
 
     def update_config(self, new_config):
         """Update crawler configuration"""
@@ -391,11 +445,14 @@ class WebCrawler:
         last_exception = None
 
         try:
+            # Get thread-local session for better concurrency
+            session = self._get_thread_session()
+
             for attempt in range(retries + 1):
                 try:
                     # First, do a HEAD request to check file size if configured
                     if self.config.get('max_file_size', 0) > 0:
-                        head_response = self.session.head(
+                        head_response = session.head(
                             url,
                             timeout=self.config['timeout'],
                             allow_redirects=self.config['follow_redirects']
@@ -416,7 +473,7 @@ class WebCrawler:
                                 'error': f'File too large: {content_length} bytes (limit: {self.config["max_file_size"]})'
                             }
 
-                    response = self.session.get(
+                    response = session.get(
                         url,
                         timeout=self.config['timeout'],
                         allow_redirects=self.config['follow_redirects']
@@ -542,6 +599,9 @@ class WebCrawler:
         if not hasattr(self, '_all_discovered_urls'):
             self._all_discovered_urls = set()
 
+        # Batch process all links first (no locks)
+        urls_to_add = []
+
         for link in links:
             href = link['href'].strip()
             if not href or href.startswith('#') or href.startswith('mailto:') or href.startswith('tel:'):
@@ -556,25 +616,32 @@ class WebCrawler:
             if parsed.query:
                 clean_url += f"?{parsed.query}"
 
-            # Thread-safe checking and adding
-            with self.urls_lock:
-                # Skip if already discovered, visited, or queued
-                if (clean_url not in self.visited_urls and
-                    clean_url not in self._all_discovered_urls and
-                    clean_url != current_url):
+            # Check if this URL should be crawled based on settings (no lock needed)
+            if clean_url != current_url and self._should_crawl_url(clean_url):
+                urls_to_add.append((clean_url, depth))
 
-                    # Check if this URL should be crawled based on settings
-                    if self._should_crawl_url(clean_url):
+        # Single lock acquisition for batch update
+        if urls_to_add:
+            with self.urls_lock:
+                new_urls_count = 0
+                for clean_url, depth in urls_to_add:
+                    # Skip if already discovered, visited, or queued
+                    if (clean_url not in self.visited_urls and
+                        clean_url not in self._all_discovered_urls):
                         # Add to our tracking set
                         self._all_discovered_urls.add(clean_url)
-
                         # Add to queue
                         self.discovered_urls.append((clean_url, depth))
-                        self.stats['discovered'] += 1
+                        new_urls_count += 1
+
+                self.stats['discovered'] += new_urls_count
 
     def _collect_all_links(self, soup, source_url):
         """Collect all links for the Links tab display"""
         links = soup.find_all('a', href=True)
+
+        # Batch process all links first (no locks)
+        links_to_add = []
 
         for link in links:
             href = link['href'].strip()
@@ -619,19 +686,22 @@ class WebCrawler:
                     'target_status': target_status
                 }
 
-                # Thread-safe adding to links collection with duplicate checking
-                with self.links_lock:
-                    # Create unique key for source+target combination
-                    link_key = f"{link_data['source_url']}|{link_data['target_url']}"
-
-                    # Only add if not already seen
-                    if link_key not in self.links_set:
-                        self.links_set.add(link_key)
-                        self.all_links.append(link_data)
+                # Create unique key for source+target combination
+                link_key = f"{link_data['source_url']}|{link_data['target_url']}"
+                links_to_add.append((link_key, link_data))
 
             except Exception as e:
                 # Skip malformed URLs
                 continue
+
+        # Single lock acquisition for batch update
+        if links_to_add:
+            with self.links_lock:
+                for link_key, link_data in links_to_add:
+                    # Only add if not already seen
+                    if link_key not in self.links_set:
+                        self.links_set.add(link_key)
+                        self.all_links.append(link_data)
 
     def _should_crawl_url(self, url):
         """Check if URL should be crawled based on current settings"""
@@ -650,10 +720,17 @@ class WebCrawler:
             if url_domain_clean != base_domain_clean:
                 return False
 
-        # Check robots.txt if enabled
+        # Check robots.txt if enabled (skip for same-domain URLs after first check)
         if self.config['respect_robots']:
-            if not self._check_robots_txt(url):
-                return False
+            # Only check robots.txt for new domains to avoid repeated checks
+            parsed = urlparse(url)
+            domain_key = f"{parsed.scheme}://{parsed.netloc}"
+
+            # Check robots.txt only once per domain
+            if domain_key not in self._robots_checked_domains:
+                if not self._check_robots_txt(url):
+                    return False
+                self._robots_checked_domains.add(domain_key)
 
         # Check file extensions
         path = parsed.path.lower()
@@ -693,23 +770,26 @@ class WebCrawler:
             parsed = urlparse(url)
             robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
 
-            # Cache robots.txt parsers
-            if not hasattr(self, '_robots_cache'):
-                self._robots_cache = {}
+            # Thread-safe cache access
+            with self._robots_lock:
+                if robots_url not in self._robots_cache:
+                    rp = RobotFileParser()
+                    rp.set_url(robots_url)
+                    try:
+                        # This is a blocking call, but we cache it
+                        rp.read()
+                        self._robots_cache[robots_url] = rp
+                    except:
+                        # If robots.txt can't be fetched, mark as allowing all
+                        self._robots_cache[robots_url] = None
+                        return True
 
-            if robots_url not in self._robots_cache:
-                rp = RobotFileParser()
-                rp.set_url(robots_url)
-                try:
-                    rp.read()
-                    self._robots_cache[robots_url] = rp
-                except:
-                    # If robots.txt can't be fetched, allow crawling
+                rp = self._robots_cache[robots_url]
+                if rp is None:
                     return True
 
-            rp = self._robots_cache[robots_url]
-            user_agent = self.config.get('user_agent', '*')
-            return rp.can_fetch(user_agent, url)
+                user_agent = self.config.get('user_agent', '*')
+                return rp.can_fetch(user_agent, url)
 
         except Exception:
             # If robots.txt checking fails, allow crawling

@@ -4,7 +4,7 @@ let defaultSettings = {
     // Crawler settings
     maxDepth: 3,
     maxUrls: 1000,
-    crawlDelay: 1,
+    crawlDelay: 0,
     followRedirects: true,
     crawlExternalLinks: false,
 
@@ -31,7 +31,7 @@ let defaultSettings = {
     exportFields: ['url', 'status_code', 'title', 'meta_description', 'h1', 'word_count', 'response_time', 'analytics', 'og_tags', 'json_ld', 'internal_links', 'external_links', 'images'],
 
     // Advanced settings
-    concurrency: 5,
+    concurrency: 20,
     memoryLimit: 512,
     logLevel: 'INFO',
     saveSession: false,

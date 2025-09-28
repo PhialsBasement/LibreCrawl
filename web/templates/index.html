@@ -400,7 +400,7 @@
 
                     <div class="setting-group">
                         <label for="crawlDelay">Crawl Delay (seconds)</label>
-                        <input type="number" id="crawlDelay" value="1" min="0" max="60" step="0.1">
+                        <input type="number" id="crawlDelay" value="0" min="0" max="60" step="0.1">
                         <span class="setting-help">Delay between requests to be respectful</span>
                     </div>
 
@@ -418,6 +418,12 @@
                             Crawl External Links
                         </label>
                         <span class="setting-help">Include external domains in crawl</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="concurrency">Concurrent Threads/Workers</label>
+                        <input type="number" id="concurrency" value="20" min="1" max="50">
+                        <span class="setting-help">Number of simultaneous crawler threads (higher = faster but more resource intensive)</span>
                     </div>
                 </div>
 
@@ -743,12 +749,6 @@
                 <!-- Advanced Settings -->
                 <div id="advanced-settings" class="settings-tab-content">
                     <h3>Advanced Configuration</h3>
-
-                    <div class="setting-group">
-                        <label for="concurrency">Concurrent Requests</label>
-                        <input type="number" id="concurrency" value="5" min="1" max="50">
-                        <span class="setting-help">Number of simultaneous requests (higher = faster but more resource intensive)</span>
-                    </div>
 
                     <div class="setting-group">
                         <label for="memoryLimit">Memory Limit (MB)</label>

@@ -12,7 +12,7 @@ class SettingsManager:
             # Crawler settings
             'maxDepth': 3,
             'maxUrls': 1000,
-            'crawlDelay': 1,
+            'crawlDelay': 0,
             'followRedirects': True,
             'crawlExternalLinks': False,
 
@@ -39,7 +39,7 @@ class SettingsManager:
             'exportFields': ['url', 'status_code', 'title', 'meta_description', 'h1'],
 
             # Advanced settings
-            'concurrency': 5,
+            'concurrency': 20,
             'memoryLimit': 512,
             'logLevel': 'INFO',
             'saveSession': False,
