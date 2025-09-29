@@ -1091,18 +1091,39 @@ async function exportData() {
         const exportFormat = settings.exportFormat || 'csv';
         const exportFields = settings.exportFields || ['url', 'status_code', 'title', 'meta_description', 'h1'];
 
-        // Check if there's data to export
-        const status = await fetch('/api/crawl_status');
-        const statusData = await status.json();
+        // Check if there's data to export - use local state if available, otherwise check backend
+        let hasData = false;
+        let exportUrls = [];
+        let exportLinks = [];
+        let exportIssues = [];
 
-        if (!statusData.urls || statusData.urls.length === 0) {
+        if (crawlState.urls && crawlState.urls.length > 0) {
+            // Use local state data (from loaded crawl or current session)
+            hasData = true;
+            exportUrls = crawlState.urls;
+            exportLinks = crawlState.pendingLinks || [];
+            exportIssues = crawlState.pendingIssues || window.currentIssues || [];
+        } else {
+            // Check backend for active crawl data
+            const status = await fetch('/api/crawl_status');
+            const statusData = await status.json();
+
+            if (statusData.urls && statusData.urls.length > 0) {
+                hasData = true;
+                exportUrls = statusData.urls;
+                exportLinks = statusData.links || [];
+                exportIssues = statusData.issues || [];
+            }
+        }
+
+        if (!hasData) {
             showNotification('No crawl data to export', 'error');
             return;
         }
 
         showNotification('Preparing export...', 'info');
 
-        // Request export from backend
+        // Request export from backend, including local data if available
         const exportResponse = await fetch('/api/export_data', {
             method: 'POST',
             headers: {
@@ -1110,7 +1131,13 @@ async function exportData() {
             },
             body: JSON.stringify({
                 format: exportFormat,
-                fields: exportFields
+                fields: exportFields,
+                // Send local data if we have it (for loaded crawls)
+                localData: {
+                    urls: exportUrls,
+                    links: exportLinks,
+                    issues: exportIssues
+                }
             })
         });
 
