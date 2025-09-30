@@ -32,6 +32,7 @@ LibreCrawl crawls websites and gives you detailed information about pages, links
 ```bash
 pip install -r requirements.txt
 ```
+***IMPORTANT: YOU MUST INSTALL pywebview==4.4.1 AND NOT ANY VERSION PAST 5.0, THE AUTHOR OF THE LIBRARY HAS CAUSED SOME ISSUES IN REGARDS TO DOWNLOADS***
 
 3. For JavaScript rendering support (optional):
 ```bash
