@@ -5,6 +5,8 @@ let crawlState = {
     startTime: null,
     baseUrl: null,
     urls: [],
+    links: [],
+    issues: [],
     stats: {
         discovered: 0,
         crawled: 0,
@@ -149,6 +151,8 @@ function clearCrawlData() {
     clearAllTables();
     resetStats();
     crawlState.urls = [];
+    crawlState.links = [];
+    crawlState.issues = [];
     crawlState.baseUrl = null;
     crawlState.filters.active = null;
     crawlState.pendingLinks = null;
@@ -263,19 +267,27 @@ function updateCrawlData(data) {
     }
 
     // Update links tables only if Links tab is active to improve performance
-    if (data.links && isLinksTabActive()) {
-        updateLinksTable(data.links);
-    } else if (data.links) {
-        // Store links data for when user switches to Links tab
-        crawlState.pendingLinks = data.links;
+    if (data.links) {
+        // Always store links data in crawlState
+        crawlState.links = data.links;
+        if (isLinksTabActive()) {
+            updateLinksTable(data.links);
+        } else {
+            // Store in pendingLinks for lazy loading when switching to tab
+            crawlState.pendingLinks = data.links;
+        }
     }
 
     // Update issues table only if Issues tab is active
-    if (data.issues && isIssuesTabActive()) {
-        updateIssuesTable(data.issues);
-    } else if (data.issues) {
-        // Store issues data for when user switches to Issues tab
-        crawlState.pendingIssues = data.issues;
+    if (data.issues) {
+        // Always store issues data in crawlState
+        crawlState.issues = data.issues;
+        if (isIssuesTabActive()) {
+            updateIssuesTable(data.issues);
+        } else {
+            // Store in pendingIssues for lazy loading when switching to tab
+            crawlState.pendingIssues = data.issues;
+        }
     }
 
     // Update filter counts
@@ -1091,29 +1103,28 @@ async function exportData() {
         const exportFormat = settings.exportFormat || 'csv';
         const exportFields = settings.exportFields || ['url', 'status_code', 'title', 'meta_description', 'h1'];
 
-        // Check if there's data to export - use local state if available, otherwise check backend
+        // Check if there's data to export - always fetch fresh data from backend
         let hasData = false;
         let exportUrls = [];
         let exportLinks = [];
         let exportIssues = [];
 
-        if (crawlState.urls && crawlState.urls.length > 0) {
-            // Use local state data (from loaded crawl or current session)
+        // Always fetch from backend to ensure we have the latest data including links
+        const status = await fetch('/api/crawl_status');
+        const statusData = await status.json();
+
+        if (statusData.urls && statusData.urls.length > 0) {
+            hasData = true;
+            exportUrls = statusData.urls;
+            exportLinks = statusData.links || [];
+            exportIssues = statusData.issues || [];
+        } else if (crawlState.urls && crawlState.urls.length > 0) {
+            // Fallback to local state if backend has no data (e.g., loaded crawl)
             hasData = true;
             exportUrls = crawlState.urls;
-            exportLinks = crawlState.pendingLinks || [];
-            exportIssues = crawlState.pendingIssues || window.currentIssues || [];
-        } else {
-            // Check backend for active crawl data
-            const status = await fetch('/api/crawl_status');
-            const statusData = await status.json();
-
-            if (statusData.urls && statusData.urls.length > 0) {
-                hasData = true;
-                exportUrls = statusData.urls;
-                exportLinks = statusData.links || [];
-                exportIssues = statusData.issues || [];
-            }
+            // Get links and issues from stored state
+            exportLinks = crawlState.links || [];
+            exportIssues = crawlState.issues || window.currentIssues || [];
         }
 
         if (!hasData) {
@@ -1424,18 +1435,37 @@ async function saveCrawl() {
             return;
         }
 
-        // Get current crawl data
-        const status = await fetch('/api/crawl_status');
-        const crawlData = await status.json();
+        // Get current crawl data from backend or use local state
+        let urls = crawlState.urls;
+        let links = crawlState.links;
+        let issues = crawlState.issues;
+        let stats = crawlState.stats;
+
+        // Try to get fresh data from backend if available
+        try {
+            const status = await fetch('/api/crawl_status');
+            const crawlData = await status.json();
+            if (crawlData.urls && crawlData.urls.length > 0) {
+                urls = crawlData.urls;
+                links = crawlData.links || links;
+                issues = crawlData.issues || issues;
+                // Update stats to include latest PageSpeed results if available
+                if (crawlData.stats) {
+                    stats = crawlData.stats;
+                }
+            }
+        } catch (e) {
+            console.log('Using local state for save:', e);
+        }
 
         // Add metadata
         const saveData = {
             timestamp: new Date().toISOString(),
             baseUrl: crawlState.baseUrl,
-            stats: crawlState.stats,
-            urls: crawlData.urls,
-            links: crawlData.links,
-            issues: crawlData.issues || [],
+            stats: stats,
+            urls: urls,
+            links: links,
+            issues: issues,
             version: '1.1'
         };
 
@@ -1493,6 +1523,8 @@ function loadCrawl() {
             crawlState.baseUrl = saveData.baseUrl;
             crawlState.stats = saveData.stats;
             crawlState.urls = [];
+            crawlState.links = saveData.links || [];
+            crawlState.issues = saveData.issues || [];
 
             // Update UI
             document.getElementById('urlInput').value = saveData.baseUrl || '';
@@ -1563,6 +1595,12 @@ function loadCrawl() {
             updateFilterCounts();
             updateStatusCodesTable();
             updateCrawlButtons();
+
+            // Display PageSpeed results if available
+            if (saveData.stats && saveData.stats.pagespeed_results) {
+                console.log(`Loading ${saveData.stats.pagespeed_results.length} PageSpeed results...`);
+                displayPageSpeedResults(saveData.stats.pagespeed_results);
+            }
 
             // Force refresh of all tables
             setTimeout(() => {
