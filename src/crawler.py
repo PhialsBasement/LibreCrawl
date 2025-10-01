@@ -74,19 +74,77 @@ class WebCrawler:
             'js_viewport_height': 1080,
             'js_max_concurrent_pages': 3,
             'issue_exclusion_patterns': [
-                '/cgi-bin/*', '/wp-admin/*', '/wp-content/plugins/*', '/wp-content/themes/*',
-                '/admin/*', '/administrator/*', '/_admin/*', '/backend/*',
-                '/cpanel/*', '/phpmyadmin/*', '/pma/*', '/webmail/*',
-                '/.git/*', '/.svn/*', '/.env', '/.htaccess', '/.htpasswd',
-                '/node_modules/*', '/vendor/*', '/bower_components/*',
-                '/api/internal/*', '/private/*', '/system/*', '/core/*',
-                '/includes/*', '/lib/*', '/src/*', '/dist/*',
-                '/test/*', '/tests/*', '/spec/*', '/specs/*',
-                '/_next/*', '/.next/*', '/build/*', '/builds/*',
-                '/tmp/*', '/temp/*', '/cache/*', '/logs/*',
-                '/config/*', '/configs/*', '/settings/*',
-                '*.json', '*.xml', '*.yaml', '*.yml', '*.toml',
-                '*.log', '*.bak', '*.backup', '*.old', '*.orig'
+                # WordPress admin & system paths
+                '/wp-admin/*', '/wp-content/plugins/*', '/wp-content/themes/*', '/wp-content/uploads/*',
+                '/wp-includes/*', '/wp-login.php', '/wp-cron.php', '/xmlrpc.php',
+                '/wp-json/*', '/wp-activate.php', '/wp-signup.php', '/wp-trackback.php',
+
+                # Auth & user management pages
+                '/login*', '/signin*', '/sign-in*', '/log-in*', '/auth/*', '/authenticate/*',
+                '/register*', '/signup*', '/sign-up*', '/registration/*',
+                '/logout*', '/signout*', '/sign-out*', '/log-out*',
+                '/forgot-password*', '/reset-password*', '/password-reset*', '/recover-password*',
+                '/change-password*', '/account/password/*', '/user/password/*',
+                '/activate/*', '/verification/*', '/verify/*', '/confirm/*',
+
+                # Admin panels & dashboards
+                '/admin/*', '/administrator/*', '/_admin/*', '/backend/*', '/dashboard/*',
+                '/cpanel/*', '/phpmyadmin/*', '/pma/*', '/webmail/*', '/plesk/*',
+                '/control-panel/*', '/manage/*', '/manager/*',
+
+                # E-commerce checkout & cart
+                '/checkout/*', '/cart/*', '/basket/*', '/payment/*', '/billing/*',
+                '/order/*', '/orders/*', '/purchase/*',
+
+                # User account pages
+                '/account/*', '/profile/*', '/settings/*', '/preferences/*',
+                '/my-account/*', '/user/*', '/member/*', '/members/*',
+
+                # CGI & server scripts
+                '/cgi-bin/*', '/cgi/*', '/fcgi-bin/*',
+
+                # Version control & config
+                '/.git/*', '/.svn/*', '/.hg/*', '/.bzr/*', '/.cvs/*',
+                '/.env', '/.env.*', '/.htaccess', '/.htpasswd',
+                '/web.config', '/app.config', '/composer.json', '/package.json',
+
+                # Development & build artifacts
+                '/node_modules/*', '/vendor/*', '/bower_components/*', '/jspm_packages/*',
+                '/includes/*', '/lib/*', '/libs/*', '/src/*', '/dist/*', '/build/*', '/builds/*',
+                '/_next/*', '/.next/*', '/out/*', '/_nuxt/*', '/.nuxt/*',
+
+                # Testing & development
+                '/test/*', '/tests/*', '/spec/*', '/specs/*', '/__tests__/*',
+                '/debug/*', '/dev/*', '/development/*', '/staging/*',
+
+                # API internal endpoints
+                '/api/internal/*', '/api/admin/*', '/api/private/*',
+
+                # System & internal
+                '/private/*', '/system/*', '/core/*', '/internal/*',
+                '/tmp/*', '/temp/*', '/cache/*', '/logs/*', '/log/*',
+                '/backup/*', '/backups/*', '/old/*', '/archive/*', '/archives/*',
+                '/config/*', '/configs/*', '/configuration/*',
+
+                # Media upload forms
+                '/upload/*', '/uploads/*', '/uploader/*', '/file-upload/*',
+
+                # Search & filtering (often noisy for SEO)
+                '/search*', '*/search/*', '?s=*', '?search=*',
+                '*/filter/*', '?filter=*', '*/sort/*', '?sort=*',
+
+                # Printer-friendly & special views
+                '/print/*', '?print=*', '/preview/*', '?preview=*',
+                '/embed/*', '?embed=*', '/amp/*', '/amp',
+
+                # Feed URLs
+                '/feed/*', '/feeds/*', '/rss/*', '*.rss', '/atom/*', '*.atom',
+
+                # Common file types to exclude from issues
+                '*.json', '*.xml', '*.yaml', '*.yml', '*.toml', '*.ini', '*.conf',
+                '*.log', '*.txt', '*.csv', '*.sql', '*.db',
+                '*.bak', '*.backup', '*.old', '*.orig', '*.tmp', '*.swp',
+                '*.map', '*.min.js', '*.min.css'
             ]
         }
 
