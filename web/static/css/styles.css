@@ -976,7 +976,7 @@ body {
 
 .links-section .data-table th:nth-child(1),
 .links-section .data-table td:nth-child(1) {
-    width: 25%;
+    width: 22%;
     max-width: 300px;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -985,7 +985,7 @@ body {
 
 .links-section .data-table th:nth-child(2),
 .links-section .data-table td:nth-child(2) {
-    width: 35%;
+    width: 30%;
     max-width: 400px;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -994,7 +994,7 @@ body {
 
 .links-section .data-table th:nth-child(3),
 .links-section .data-table td:nth-child(3) {
-    width: 25%;
+    width: 22%;
     max-width: 200px;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1003,8 +1003,17 @@ body {
 
 .links-section .data-table th:nth-child(4),
 .links-section .data-table td:nth-child(4) {
-    width: 15%;
+    width: 13%;
     max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.links-section .data-table th:nth-child(5),
+.links-section .data-table td:nth-child(5) {
+    width: 13%;
+    max-width: 120px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

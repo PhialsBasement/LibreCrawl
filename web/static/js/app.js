@@ -476,12 +476,14 @@ function updateLinksTable(links) {
     limitedInternalLinks.forEach(link => {
         const row = document.createElement('tr');
         const status = link.target_status ? link.target_status : 'Not crawled';
+        const placement = link.placement || 'body';
 
         row.innerHTML = `
             <td title="${link.source_url}">${link.source_url}</td>
             <td title="${link.target_url}">${link.target_url}</td>
             <td title="${link.anchor_text}">${link.anchor_text}</td>
             <td>${status}</td>
+            <td>${placement}</td>
         `;
         internalFragment.appendChild(row);
     });
@@ -489,12 +491,14 @@ function updateLinksTable(links) {
     // Create rows for external links
     limitedExternalLinks.forEach(link => {
         const row = document.createElement('tr');
+        const placement = link.placement || 'body';
 
         row.innerHTML = `
             <td title="${link.source_url}">${link.source_url}</td>
             <td title="${link.target_url}">${link.target_url}</td>
             <td title="${link.anchor_text}">${link.anchor_text}</td>
             <td>${link.target_domain}</td>
+            <td>${placement}</td>
         `;
         externalFragment.appendChild(row);
     });
@@ -1570,23 +1574,47 @@ function loadCrawl() {
                 }
             }
 
-            // Load issues data if present
+            // Load issues data if present - filter them based on current exclusion settings
             if (saveData.issues && saveData.issues.length > 0) {
                 console.log(`Loading ${saveData.issues.length} issues...`);
-                crawlState.pendingIssues = saveData.issues;
-                // If Issues tab is currently active, load them immediately
-                if (isIssuesTabActive()) {
-                    updateIssuesTable(saveData.issues);
-                } else {
-                    // Update the badge count even if tab is not active
-                    const issuesTabButton = Array.from(document.querySelectorAll('.tab-btn')).find(btn => btn.textContent.includes('Issues'));
-                    if (issuesTabButton) {
-                        const errorCount = saveData.issues.filter(i => i.type === 'error').length;
-                        const warningCount = saveData.issues.filter(i => i.type === 'warning').length;
-                        let badgeColor = '#3b82f6';
-                        if (errorCount > 0) badgeColor = '#ef4444';
-                        else if (warningCount > 0) badgeColor = '#f59e0b';
-                        issuesTabButton.innerHTML = `Issues <span style="background: ${badgeColor}; color: white; padding: 2px 6px; border-radius: 12px; font-size: 12px;">${saveData.issues.length}</span>`;
+
+                // Filter issues using current exclusion patterns
+                try {
+                    const filterResponse = await fetch('/api/filter_issues', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ issues: saveData.issues })
+                    });
+                    const filterData = await filterResponse.json();
+
+                    const filteredIssues = filterData.success ? filterData.issues : saveData.issues;
+                    console.log(`Filtered to ${filteredIssues.length} issues after exclusions`);
+
+                    crawlState.issues = filteredIssues;
+                    crawlState.pendingIssues = filteredIssues;
+
+                    // If Issues tab is currently active, load them immediately
+                    if (isIssuesTabActive()) {
+                        updateIssuesTable(filteredIssues);
+                    } else {
+                        // Update the badge count even if tab is not active
+                        const issuesTabButton = Array.from(document.querySelectorAll('.tab-btn')).find(btn => btn.textContent.includes('Issues'));
+                        if (issuesTabButton) {
+                            const errorCount = filteredIssues.filter(i => i.type === 'error').length;
+                            const warningCount = filteredIssues.filter(i => i.type === 'warning').length;
+                            let badgeColor = '#3b82f6';
+                            if (errorCount > 0) badgeColor = '#ef4444';
+                            else if (warningCount > 0) badgeColor = '#f59e0b';
+                            issuesTabButton.innerHTML = `Issues <span style="background: ${badgeColor}; color: white; padding: 2px 6px; border-radius: 12px; font-size: 12px;">${filteredIssues.length}</span>`;
+                        }
+                    }
+                } catch (error) {
+                    console.error('Failed to filter issues:', error);
+                    // Fall back to unfiltered issues if filtering fails
+                    crawlState.issues = saveData.issues;
+                    crawlState.pendingIssues = saveData.issues;
+                    if (isIssuesTabActive()) {
+                        updateIssuesTable(saveData.issues);
                     }
                 }
             }

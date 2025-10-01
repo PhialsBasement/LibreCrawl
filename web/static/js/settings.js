@@ -51,59 +51,211 @@ let defaultSettings = {
     jsMaxConcurrentPages: 3,
 
     // Issue exclusion patterns
-    issueExclusionPatterns: `/cgi-bin/*
+    issueExclusionPatterns: `# WordPress admin & system paths
 /wp-admin/*
 /wp-content/plugins/*
 /wp-content/themes/*
+/wp-content/uploads/*
+/wp-includes/*
+/wp-login.php
+/wp-cron.php
+/xmlrpc.php
+/wp-json/*
+/wp-activate.php
+/wp-signup.php
+/wp-trackback.php
+
+# Auth & user management pages
+/login*
+/signin*
+/sign-in*
+/log-in*
+/auth/*
+/authenticate/*
+/register*
+/signup*
+/sign-up*
+/registration/*
+/logout*
+/signout*
+/sign-out*
+/log-out*
+/forgot-password*
+/reset-password*
+/password-reset*
+/recover-password*
+/change-password*
+/account/password/*
+/user/password/*
+/activate/*
+/verification/*
+/verify/*
+/confirm/*
+
+# Admin panels & dashboards
 /admin/*
 /administrator/*
 /_admin/*
 /backend/*
+/dashboard/*
 /cpanel/*
 /phpmyadmin/*
 /pma/*
 /webmail/*
+/plesk/*
+/control-panel/*
+/manage/*
+/manager/*
+
+# E-commerce checkout & cart
+/checkout/*
+/cart/*
+/basket/*
+/payment/*
+/billing/*
+/order/*
+/orders/*
+/purchase/*
+
+# User account pages
+/account/*
+/profile/*
+/settings/*
+/preferences/*
+/my-account/*
+/user/*
+/member/*
+/members/*
+
+# CGI & server scripts
+/cgi-bin/*
+/cgi/*
+/fcgi-bin/*
+
+# Version control & config
 /.git/*
 /.svn/*
+/.hg/*
+/.bzr/*
+/.cvs/*
 /.env
+/.env.*
 /.htaccess
 /.htpasswd
+/web.config
+/app.config
+/composer.json
+/package.json
+
+# Development & build artifacts
 /node_modules/*
 /vendor/*
 /bower_components/*
-/api/internal/*
-/private/*
-/system/*
-/core/*
+/jspm_packages/*
 /includes/*
 /lib/*
+/libs/*
 /src/*
 /dist/*
+/build/*
+/builds/*
+/_next/*
+/.next/*
+/out/*
+/_nuxt/*
+/.nuxt/*
+
+# Testing & development
 /test/*
 /tests/*
 /spec/*
 /specs/*
-/_next/*
-/.next/*
-/build/*
-/builds/*
+/__tests__/*
+/debug/*
+/dev/*
+/development/*
+/staging/*
+
+# API internal endpoints
+/api/internal/*
+/api/admin/*
+/api/private/*
+
+# System & internal
+/private/*
+/system/*
+/core/*
+/internal/*
 /tmp/*
 /temp/*
 /cache/*
 /logs/*
+/log/*
+/backup/*
+/backups/*
+/old/*
+/archive/*
+/archives/*
 /config/*
 /configs/*
-/settings/*
+/configuration/*
+
+# Media upload forms
+/upload/*
+/uploads/*
+/uploader/*
+/file-upload/*
+
+# Search & filtering (often noisy for SEO)
+/search*
+*/search/*
+?s=*
+?search=*
+*/filter/*
+?filter=*
+*/sort/*
+?sort=*
+
+# Printer-friendly & special views
+/print/*
+?print=*
+/preview/*
+?preview=*
+/embed/*
+?embed=*
+/amp/*
+/amp
+
+# Feed URLs
+/feed/*
+/feeds/*
+/rss/*
+*.rss
+/atom/*
+*.atom
+
+# Common file types to exclude from issues
 *.json
 *.xml
 *.yaml
 *.yml
 *.toml
+*.ini
+*.conf
 *.log
+*.txt
+*.csv
+*.sql
+*.db
 *.bak
 *.backup
 *.old
-*.orig`
+*.orig
+*.tmp
+*.swp
+*.map
+*.min.js
+*.min.css`
 };
 
 // Initialize settings when page loads
@@ -144,8 +296,8 @@ function setupSettingsEventHandlers() {
 }
 
 function resetIssueExclusions() {
-    const defaultPatterns = currentSettings.issueExclusionPatterns || defaultSettings.issueExclusionPatterns;
-    document.getElementById('issueExclusionPatterns').value = defaultPatterns;
+    // Always use the hardcoded defaults, not current settings
+    document.getElementById('issueExclusionPatterns').value = defaultSettings.issueExclusionPatterns;
     alert('Issue exclusion patterns have been reset to defaults');
 }
 

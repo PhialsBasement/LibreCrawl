@@ -85,13 +85,17 @@ class LinkManager:
                         target_status = result['status_code']
                         break
 
+                # Determine placement (navigation, footer, body)
+                placement = self._detect_link_placement(link)
+
                 link_data = {
                     'source_url': source_url,
                     'target_url': clean_url,
                     'anchor_text': anchor_text or '(no text)',
                     'is_internal': is_internal,
                     'target_domain': parsed_target.netloc,
-                    'target_status': target_status
+                    'target_status': target_status,
+                    'placement': placement
                 }
 
                 # Thread-safe adding to links collection with duplicate checking
@@ -104,6 +108,38 @@ class LinkManager:
 
             except Exception:
                 continue
+
+    def _detect_link_placement(self, link_element):
+        """Detect where on the page a link is placed"""
+        # Check parent elements up the tree
+        current = link_element.parent
+
+        while current and current.name:
+            # Check for footer
+            if current.name == 'footer':
+                return 'footer'
+
+            # Check for footer by class/id
+            classes = current.get('class', [])
+            element_id = current.get('id', '')
+            classes_str = ' '.join(classes).lower() if classes else ''
+
+            if 'footer' in classes_str or 'footer' in element_id.lower():
+                return 'footer'
+
+            # Check for navigation
+            if current.name in ['nav', 'header']:
+                return 'navigation'
+
+            # Check for navigation by class/id
+            if any(keyword in classes_str or keyword in element_id.lower()
+                   for keyword in ['nav', 'menu', 'header']):
+                return 'navigation'
+
+            current = current.parent
+
+        # Default to body if not in nav or footer
+        return 'body'
 
     def is_internal(self, url):
         """Check if URL is internal to the base domain"""

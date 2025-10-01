@@ -7,8 +7,13 @@ class SettingsManager:
         self.settings_file = Path.home() / '.librecrawl' / 'settings.json'
         self.settings_dir = self.settings_file.parent
 
-        # Default settings
-        self.default_settings = {
+        # Load default settings
+        self.default_settings = self._get_default_settings()
+        self.current_settings = self.load_settings()
+
+    def _get_default_settings(self):
+        """Get fresh default settings"""
+        return {
             # Crawler settings
             'maxDepth': 3,
             'maxUrls': 1000,
@@ -266,8 +271,6 @@ class SettingsManager:
 *.min.css'''
         }
 
-        self.current_settings = self.load_settings()
-
     def ensure_settings_dir(self):
         """Ensure the settings directory exists"""
         self.settings_dir.mkdir(parents=True, exist_ok=True)
@@ -327,7 +330,9 @@ class SettingsManager:
 
     def reset_settings(self):
         """Reset settings to defaults"""
-        return self.save_settings(self.default_settings)
+        # Get fresh defaults from the method to ensure latest patterns are used
+        fresh_defaults = self._get_default_settings()
+        return self.save_settings(fresh_defaults)
 
     def validate_settings(self, settings):
         """Validate settings values"""

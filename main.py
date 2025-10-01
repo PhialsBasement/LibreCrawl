@@ -98,7 +98,7 @@ def generate_xml_export(urls, fields):
 def generate_links_csv_export(links):
     """Generate CSV export for links data"""
     output = StringIO()
-    fieldnames = ['source_url', 'target_url', 'anchor_text', 'is_internal', 'target_domain', 'target_status']
+    fieldnames = ['source_url', 'target_url', 'anchor_text', 'is_internal', 'target_domain', 'target_status', 'placement']
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
 
@@ -109,7 +109,8 @@ def generate_links_csv_export(links):
             'anchor_text': link.get('anchor_text', ''),
             'is_internal': 'Yes' if link.get('is_internal') else 'No',
             'target_domain': link.get('target_domain', ''),
-            'target_status': link.get('target_status', 'Not crawled')
+            'target_status': link.get('target_status', 'Not crawled'),
+            'placement': link.get('placement', 'body')
         }
         writer.writerow(row)
 
@@ -118,6 +119,40 @@ def generate_links_csv_export(links):
 def generate_links_json_export(links):
     """Generate JSON export for links data"""
     return json.dumps(links, indent=2)
+
+def filter_issues_by_exclusion_patterns(issues, exclusion_patterns):
+    """Filter issues based on exclusion patterns (applies current settings to loaded crawls)"""
+    from fnmatch import fnmatch
+    from urllib.parse import urlparse
+
+    if not exclusion_patterns:
+        return issues
+
+    filtered_issues = []
+
+    for issue in issues:
+        url = issue.get('url', '')
+        parsed = urlparse(url)
+        path = parsed.path
+
+        # Check if URL matches any exclusion pattern
+        should_exclude = False
+        for pattern in exclusion_patterns:
+            if not pattern.strip() or pattern.strip().startswith('#'):
+                continue
+
+            if '*' in pattern:
+                if fnmatch(path, pattern):
+                    should_exclude = True
+                    break
+            elif path == pattern or path.startswith(pattern.rstrip('*')):
+                should_exclude = True
+                break
+
+        if not should_exclude:
+            filtered_issues.append(issue)
+
+    return filtered_issues
 
 def generate_issues_csv_export(issues):
     """Generate CSV export for issues data"""
@@ -190,7 +225,36 @@ def stop_crawl():
 
 @app.route('/api/crawl_status')
 def crawl_status():
-    return jsonify(crawler.get_status())
+    status_data = crawler.get_status()
+
+    # Apply current issue exclusion patterns to displayed issues
+    issues = status_data.get('issues', [])
+    if issues:
+        current_settings = settings_manager.get_settings()
+        exclusion_patterns_text = current_settings.get('issueExclusionPatterns', '')
+        exclusion_patterns = [p.strip() for p in exclusion_patterns_text.split('\n') if p.strip()]
+        filtered_issues = filter_issues_by_exclusion_patterns(issues, exclusion_patterns)
+        status_data['issues'] = filtered_issues
+
+    return jsonify(status_data)
+
+@app.route('/api/filter_issues', methods=['POST'])
+def filter_issues():
+    try:
+        data = request.get_json()
+        issues = data.get('issues', [])
+
+        # Get current exclusion patterns
+        current_settings = settings_manager.get_settings()
+        exclusion_patterns_text = current_settings.get('issueExclusionPatterns', '')
+        exclusion_patterns = [p.strip() for p in exclusion_patterns_text.split('\n') if p.strip()]
+
+        # Filter issues
+        filtered_issues = filter_issues_by_exclusion_patterns(issues, exclusion_patterns)
+
+        return jsonify({'success': True, 'issues': filtered_issues})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/get_settings')
 def get_settings():
@@ -265,6 +329,22 @@ def export_data():
 
         if not urls:
             return jsonify({'success': False, 'error': 'No data to export'})
+
+        # Update link statuses from crawled URLs (fixes missing status codes in exports)
+        if links and urls:
+            status_lookup = {url_data['url']: url_data.get('status_code') for url_data in urls}
+            for link in links:
+                target_url = link.get('target_url')
+                if target_url in status_lookup:
+                    link['target_status'] = status_lookup[target_url]
+
+        # Apply current issue exclusion patterns (works for loaded crawls too)
+        if issues:
+            current_settings = settings_manager.get_settings()
+            exclusion_patterns_text = current_settings.get('issueExclusionPatterns', '')
+            exclusion_patterns = [p.strip() for p in exclusion_patterns_text.split('\n') if p.strip()]
+            issues = filter_issues_by_exclusion_patterns(issues, exclusion_patterns)
+            print(f"DEBUG: After exclusion filter, {len(issues)} issues remain")
 
         # Collect files to export based on special field selections
         files_to_export = []
