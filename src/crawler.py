@@ -324,6 +324,10 @@ class WebCrawler:
         # Get link manager stats
         link_stats = self.link_manager.get_stats() if self.link_manager else {'discovered': 0}
 
+        # Update link statuses before returning (ensures all crawled URLs have their status)
+        if self.link_manager:
+            self.link_manager.update_link_statuses(self.crawl_results)
+
         return {
             'status': status,
             'stats': {

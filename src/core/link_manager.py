@@ -140,6 +140,17 @@ class LinkManager:
                 'pending': len(self.discovered_urls)
             }
 
+    def update_link_statuses(self, crawl_results):
+        """Update target_status for all links based on crawl results"""
+        # Build a fast lookup dict
+        status_lookup = {result['url']: result['status_code'] for result in crawl_results}
+
+        with self.links_lock:
+            for link in self.all_links:
+                target_url = link['target_url']
+                if target_url in status_lookup:
+                    link['target_status'] = status_lookup[target_url]
+
     def reset(self):
         """Reset all state"""
         with self.urls_lock:
