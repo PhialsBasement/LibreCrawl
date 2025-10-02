@@ -3,7 +3,7 @@ let currentSettings = {};
 let defaultSettings = {
     // Crawler settings
     maxDepth: 3,
-    maxUrls: 1000,
+    maxUrls: 0,  // 0 = unlimited with database storage
     crawlDelay: 1,
     followRedirects: true,
     crawlExternalLinks: false,
@@ -464,8 +464,8 @@ function validateSettings(settings) {
         errors.push('Max depth must be between 1 and 10');
     }
 
-    if (settings.maxUrls < 1 || settings.maxUrls > 50000) {
-        errors.push('Max URLs must be between 1 and 50,000');
+    if (settings.maxUrls < 0) {
+        errors.push('Max URLs must be 0 (unlimited) or greater');
     }
 
     if (settings.crawlDelay < 0 || settings.crawlDelay > 60) {

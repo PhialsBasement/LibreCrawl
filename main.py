@@ -8,12 +8,14 @@ from io import StringIO
 from flask import Flask, render_template, request, jsonify
 from src.crawler import WebCrawler
 from src.settings_manager import SettingsManager
+from src.database import CrawlDatabase
 
 app = Flask(__name__, template_folder='web/templates', static_folder='web/static')
 
 # Global instances
 crawler = WebCrawler()
 settings_manager = SettingsManager()
+db = CrawlDatabase()  # SQLite database for unlimited URLs
 
 def generate_csv_export(urls, fields):
     """Generate CSV export content"""
@@ -456,6 +458,88 @@ def export_data():
                 'filename': file_data['filename']
             })
 
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/urls/paginated', methods=['GET'])
+def get_urls_paginated():
+    """Get paginated URLs for virtual scrolling"""
+    try:
+        session_id = request.args.get('session_id', type=int)
+        offset = request.args.get('offset', 0, type=int)
+        limit = request.args.get('limit', 100, type=int)
+
+        # Build filters
+        filters = {}
+        if request.args.get('is_internal') is not None:
+            filters['is_internal'] = request.args.get('is_internal') == 'true'
+        if request.args.get('status_min'):
+            filters['status_code_min'] = int(request.args.get('status_min'))
+        if request.args.get('status_max'):
+            filters['status_code_max'] = int(request.args.get('status_max'))
+
+        # Get data from database
+        urls = db.get_urls_paginated(session_id, offset, limit, filters)
+        total = db.get_urls_count(session_id, filters)
+
+        return jsonify({
+            'success': True,
+            'urls': urls,
+            'total': total,
+            'offset': offset,
+            'limit': limit
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/links/paginated', methods=['GET'])
+def get_links_paginated():
+    """Get paginated links for virtual scrolling"""
+    try:
+        session_id = request.args.get('session_id', type=int)
+        offset = request.args.get('offset', 0, type=int)
+        limit = request.args.get('limit', 100, type=int)
+        internal_only = request.args.get('internal_only')
+
+        internal_filter = None
+        if internal_only is not None:
+            internal_filter = internal_only == 'true'
+
+        links = db.get_links_paginated(session_id, offset, limit, internal_filter)
+
+        return jsonify({
+            'success': True,
+            'links': links,
+            'offset': offset,
+            'limit': limit
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/issues/paginated', methods=['GET'])
+def get_issues_paginated():
+    """Get paginated issues for virtual scrolling"""
+    try:
+        session_id = request.args.get('session_id', type=int)
+        offset = request.args.get('offset', 0, type=int)
+        limit = request.args.get('limit', 100, type=int)
+        issue_type = request.args.get('type')
+
+        issues = db.get_issues_paginated(session_id, offset, limit, issue_type)
+
+        # Apply exclusion patterns
+        if issues:
+            current_settings = settings_manager.get_settings()
+            exclusion_patterns_text = current_settings.get('issueExclusionPatterns', '')
+            exclusion_patterns = [p.strip() for p in exclusion_patterns_text.split('\n') if p.strip()]
+            issues = filter_issues_by_exclusion_patterns(issues, exclusion_patterns)
+
+        return jsonify({
+            'success': True,
+            'issues': issues,
+            'offset': offset,
+            'limit': limit
+        })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 

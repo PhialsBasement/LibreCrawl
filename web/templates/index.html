@@ -395,9 +395,9 @@
                     </div>
 
                     <div class="setting-group">
-                        <label for="maxUrls">Maximum URLs to Crawl</label>
-                        <input type="number" id="maxUrls" value="1000" min="1" max="50000">
-                        <span class="setting-help">Stop crawling after this many URLs</span>
+                        <label for="maxUrls">Maximum URLs to Crawl (0 = unlimited)</label>
+                        <input type="number" id="maxUrls" value="0" min="0">
+                        <span class="setting-help">Stop crawling after this many URLs (0 for unlimited with database storage)</span>
                     </div>
 
                     <div class="setting-group">
@@ -806,6 +806,7 @@
         </div>
     </div>
 
+    <script src="/static/js/virtual-scroll.js"></script>
     <script src="/static/js/app.js"></script>
     <script src="/static/js/settings.js"></script>
 </body>
