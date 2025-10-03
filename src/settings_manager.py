@@ -16,7 +16,7 @@ class SettingsManager:
         return {
             # Crawler settings
             'maxDepth': 3,
-            'maxUrls': 1000,
+            'maxUrls': 5000000,
             'crawlDelay': 1,
             'followRedirects': True,
             'crawlExternalLinks': False,
@@ -345,7 +345,7 @@ class SettingsManager:
             # Validate numeric ranges
             numeric_validations = {
                 'maxDepth': (1, 10),
-                'maxUrls': (1, 50000),
+                'maxUrls': (1, 5000000),
                 'crawlDelay': (0, 60),
                 'timeout': (1, 120),
                 'retries': (0, 10),

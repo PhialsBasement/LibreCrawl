@@ -411,6 +411,8 @@ body {
     flex: 1;
     overflow: auto;
     padding: 20px;
+    position: relative;
+    height: 700px;
 }
 
 .data-table {

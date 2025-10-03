@@ -18,6 +18,16 @@ let crawlState = {
     }
 };
 
+// Virtual Scrollers
+let virtualScrollers = {
+    overview: null,
+    internal: null,
+    external: null,
+    internalLinks: null,
+    externalLinks: null,
+    issues: null
+};
+
 // Initialize application
 document.addEventListener('DOMContentLoaded', function() {
     initializeApp();
@@ -412,8 +422,82 @@ function updateTimer() {
 
 // Table Management
 function initializeTables() {
-    // Initialize empty tables
+    // Initialize virtual scrollers for all tables
+    initializeVirtualScrollers();
+    // Clear any existing data
     clearAllTables();
+}
+
+function initializeVirtualScrollers() {
+    try {
+        // Overview table
+        const overviewContainer = document.querySelector('#overview-tab .table-container');
+        if (overviewContainer && overviewContainer.querySelector('tbody')) {
+            virtualScrollers.overview = new VirtualScroller(overviewContainer, {
+                rowHeight: 40,
+                buffer: 5,
+                renderRow: renderOverviewRow
+            });
+            console.log('Overview virtual scroller initialized');
+        }
+
+        // Internal URLs table
+        const internalContainer = document.querySelector('#internal-tab .table-container');
+        if (internalContainer && internalContainer.querySelector('tbody')) {
+            virtualScrollers.internal = new VirtualScroller(internalContainer, {
+                rowHeight: 40,
+                buffer: 5,
+                renderRow: renderInternalRow
+            });
+            console.log('Internal virtual scroller initialized');
+        }
+
+        // External URLs table
+        const externalContainer = document.querySelector('#external-tab .table-container');
+        if (externalContainer && externalContainer.querySelector('tbody')) {
+            virtualScrollers.external = new VirtualScroller(externalContainer, {
+                rowHeight: 40,
+                buffer: 5,
+                renderRow: renderExternalRow
+            });
+            console.log('External virtual scroller initialized');
+        }
+
+        // Internal Links table
+        const internalLinksContainer = document.querySelector('#links-tab .internal-links-container');
+        if (internalLinksContainer && internalLinksContainer.querySelector('tbody')) {
+            virtualScrollers.internalLinks = new VirtualScroller(internalLinksContainer, {
+                rowHeight: 40,
+                buffer: 5,
+                renderRow: renderInternalLinkRow
+            });
+            console.log('Internal links virtual scroller initialized');
+        }
+
+        // External Links table
+        const externalLinksContainer = document.querySelector('#links-tab .external-links-container');
+        if (externalLinksContainer && externalLinksContainer.querySelector('tbody')) {
+            virtualScrollers.externalLinks = new VirtualScroller(externalLinksContainer, {
+                rowHeight: 40,
+                buffer: 5,
+                renderRow: renderExternalLinkRow
+            });
+            console.log('External links virtual scroller initialized');
+        }
+
+        // Issues table
+        const issuesContainer = document.querySelector('#issues-tab .table-container');
+        if (issuesContainer && issuesContainer.querySelector('tbody')) {
+            virtualScrollers.issues = new VirtualScroller(issuesContainer, {
+                rowHeight: 40,
+                buffer: 5,
+                renderRow: renderIssueRow
+            });
+            console.log('Issues virtual scroller initialized');
+        }
+    } catch (error) {
+        console.error('Error initializing virtual scrollers:', error);
+    }
 }
 
 function isLinksTabActive() {
@@ -427,16 +511,6 @@ function isIssuesTabActive() {
 }
 
 function updateLinksTable(links) {
-    // Performance optimization: use document fragment for batch DOM updates
-    const internalFragment = document.createDocumentFragment();
-    const externalFragment = document.createDocumentFragment();
-
-    // Clear existing links data
-    const internalBody = document.getElementById('internalLinksTableBody');
-    const externalBody = document.getElementById('externalLinksTableBody');
-    internalBody.innerHTML = '';
-    externalBody.innerHTML = '';
-
     // Create a lookup map of URL statuses from crawled URLs
     const urlStatusMap = new Map();
     if (crawlState.urls && crawlState.urls.length > 0) {
@@ -467,53 +541,16 @@ function updateLinksTable(links) {
     const internalLinks = uniqueLinks.filter(link => link.is_internal);
     const externalLinks = uniqueLinks.filter(link => !link.is_internal);
 
-    // Limit the number of rows to prevent performance issues
-    const maxRows = 1000;
-    const limitedInternalLinks = internalLinks.slice(0, maxRows);
-    const limitedExternalLinks = externalLinks.slice(0, maxRows);
-
-    // Create rows for internal links
-    limitedInternalLinks.forEach(link => {
-        const row = document.createElement('tr');
-        const status = link.target_status ? link.target_status : 'Not crawled';
-        const placement = link.placement || 'body';
-
-        row.innerHTML = `
-            <td title="${link.source_url}">${link.source_url}</td>
-            <td title="${link.target_url}">${link.target_url}</td>
-            <td title="${link.anchor_text}">${link.anchor_text}</td>
-            <td>${status}</td>
-            <td>${placement}</td>
-        `;
-        internalFragment.appendChild(row);
-    });
-
-    // Create rows for external links
-    limitedExternalLinks.forEach(link => {
-        const row = document.createElement('tr');
-        const placement = link.placement || 'body';
-
-        row.innerHTML = `
-            <td title="${link.source_url}">${link.source_url}</td>
-            <td title="${link.target_url}">${link.target_url}</td>
-            <td title="${link.anchor_text}">${link.anchor_text}</td>
-            <td>${link.target_domain}</td>
-            <td>${placement}</td>
-        `;
-        externalFragment.appendChild(row);
-    });
-
-    // Append all rows at once for better performance
-    internalBody.appendChild(internalFragment);
-    externalBody.appendChild(externalFragment);
-
-    // Show count if links were limited
-    if (internalLinks.length > maxRows) {
-        console.log(`Showing ${maxRows} of ${internalLinks.length} internal links`);
+    // Use virtual scrollers for links tables
+    if (virtualScrollers.internalLinks) {
+        virtualScrollers.internalLinks.setData(internalLinks);
     }
-    if (externalLinks.length > maxRows) {
-        console.log(`Showing ${maxRows} of ${externalLinks.length} external links`);
+
+    if (virtualScrollers.externalLinks) {
+        virtualScrollers.externalLinks.setData(externalLinks);
     }
+
+    console.log(`Links loaded: ${internalLinks.length} internal, ${externalLinks.length} external`);
 }
 
 function updateIssuesTable(issues) {
@@ -524,14 +561,8 @@ function updateIssuesTable(issues) {
     // Store issues globally for filtering
     window.currentIssues = issues;
 
-    const issuesTableBody = document.getElementById('issuesTableBody');
     const emptyState = document.getElementById('issuesEmptyState');
     const issuesTable = document.getElementById('issuesTable');
-
-    if (!issuesTableBody) return;
-
-    // Clear existing content
-    issuesTableBody.innerHTML = '';
 
     // Count by type
     let errorCount = 0;
@@ -558,48 +589,10 @@ function updateIssuesTable(issues) {
         if (emptyState) emptyState.style.display = 'none';
         if (issuesTable) issuesTable.style.display = 'table';
 
-        // Create rows for each issue
-        const fragment = document.createDocumentFragment();
-
-        issues.forEach(issue => {
-            const row = document.createElement('tr');
-            row.setAttribute('data-issue-type', issue.type);
-
-            // Set row style based on issue type
-            if (issue.type === 'error') {
-                row.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
-            } else if (issue.type === 'warning') {
-                row.style.backgroundColor = 'rgba(245, 158, 11, 0.1)';
-            } else {
-                row.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
-            }
-
-            // Create type indicator
-            let typeIcon = '';
-            let typeColor = '';
-            if (issue.type === 'error') {
-                typeIcon = '❌';
-                typeColor = '#ef4444';
-            } else if (issue.type === 'warning') {
-                typeIcon = '⚠️';
-                typeColor = '#f59e0b';
-            } else {
-                typeIcon = 'ℹ️';
-                typeColor = '#3b82f6';
-            }
-
-            row.innerHTML = `
-                <td style="word-break: break-all;" title="${issue.url}">${issue.url}</td>
-                <td><span style="color: ${typeColor};">${typeIcon}</span> ${issue.type}</td>
-                <td>${issue.category}</td>
-                <td>${issue.issue}</td>
-                <td style="word-break: break-word;" title="${issue.details}">${issue.details}</td>
-            `;
-
-            fragment.appendChild(row);
-        });
-
-        issuesTableBody.appendChild(fragment);
+        // Use virtual scroller for issues
+        if (virtualScrollers.issues) {
+            virtualScrollers.issues.setData(issues);
+        }
     }
 
     // Update issue count in tab button (find the button, not the tab content)
@@ -619,12 +612,33 @@ function updateIssuesTable(issues) {
 }
 
 function clearAllTables() {
-    const tableIds = ['overviewTableBody', 'internalTableBody', 'externalTableBody', 'statusCodesTableBody', 'internalLinksTableBody', 'externalLinksTableBody', 'issuesTableBody'];
-    tableIds.forEach(id => {
-        const element = document.getElementById(id);
-        if (element) element.innerHTML = '';
-    });
+    // Clear virtual scrollers if they exist
+    if (virtualScrollers.overview) {
+        virtualScrollers.overview.clear();
+    }
+    if (virtualScrollers.internal) {
+        virtualScrollers.internal.clear();
+    }
+    if (virtualScrollers.external) {
+        virtualScrollers.external.clear();
+    }
+    if (virtualScrollers.internalLinks) {
+        virtualScrollers.internalLinks.clear();
+    }
+    if (virtualScrollers.externalLinks) {
+        virtualScrollers.externalLinks.clear();
+    }
+    if (virtualScrollers.issues) {
+        virtualScrollers.issues.clear();
+    }
+
+    // Clear status codes table (not virtualized)
+    const statusCodesBody = document.getElementById('statusCodesTableBody');
+    if (statusCodesBody) statusCodesBody.innerHTML = '';
+
     crawlState.urls = [];
+
+    console.log('All tables cleared');
 }
 
 function formatAnalyticsInfo(analytics) {
@@ -648,48 +662,15 @@ function addUrlToTable(urlData) {
 
     crawlState.urls.push(urlData);
 
-    // Add to overview table with comprehensive data
-    const analyticsInfo = formatAnalyticsInfo(urlData.analytics || {});
-    const ogTagsCount = Object.keys(urlData.og_tags || {}).length;
-    const jsonLdCount = (urlData.json_ld || []).length;
-    const linksInfo = `${urlData.internal_links || 0}/${urlData.external_links || 0}`;
-    const imagesCount = (urlData.images || []).length;
-    const jsRendered = urlData.javascript_rendered ? '✅ JS' : '';
+    // Update virtual scrollers with new data
+    if (virtualScrollers.overview) {
+        virtualScrollers.overview.appendData([urlData]);
+    }
 
-    addRowToTable('overviewTableBody', [
-        urlData.url,
-        urlData.status_code,
-        urlData.title || '',
-        (urlData.meta_description || '').substring(0, 50) + (urlData.meta_description && urlData.meta_description.length > 50 ? '...' : ''),
-        urlData.h1 || '',
-        urlData.word_count || 0,
-        urlData.response_time || 0,
-        analyticsInfo,
-        ogTagsCount > 0 ? `${ogTagsCount} tags` : '',
-        jsonLdCount > 0 ? `${jsonLdCount} scripts` : '',
-        linksInfo,
-        imagesCount > 0 ? `${imagesCount} images` : '',
-        jsRendered,
-        `<button class="details-btn" onclick="showUrlDetails('${urlData.url}')">📊 Details</button>`
-    ]);
-
-    // Add to appropriate filtered table
-    if (urlData.is_internal) {
-        addRowToTable('internalTableBody', [
-            urlData.url,
-            urlData.status_code,
-            urlData.content_type || '',
-            urlData.size || 0,
-            urlData.title || ''
-        ]);
-    } else {
-        addRowToTable('externalTableBody', [
-            urlData.url,
-            urlData.status_code,
-            urlData.content_type || '',
-            urlData.size || 0,
-            urlData.title || ''
-        ]);
+    if (urlData.is_internal && virtualScrollers.internal) {
+        virtualScrollers.internal.appendData([urlData]);
+    } else if (!urlData.is_internal && virtualScrollers.external) {
+        virtualScrollers.external.appendData([urlData]);
     }
 
     // Reapply current filter if one is active
@@ -1651,4 +1632,137 @@ function loadCrawl() {
     document.body.appendChild(fileInput);
     fileInput.click();
     document.body.removeChild(fileInput);
+}
+
+// ========================================
+// Virtual Scroller Render Functions
+// ========================================
+
+function renderOverviewRow(row, urlData, index) {
+    const analyticsInfo = formatAnalyticsInfo(urlData.analytics || {});
+    const ogTagsCount = Object.keys(urlData.og_tags || {}).length;
+    const jsonLdCount = (urlData.json_ld || []).length;
+    const linksInfo = `${urlData.internal_links || 0}/${urlData.external_links || 0}`;
+    const imagesCount = (urlData.images || []).length;
+    const jsRendered = urlData.javascript_rendered ? '✅ JS' : '';
+
+    const cells = [
+        urlData.url,
+        urlData.status_code,
+        urlData.title || '',
+        (urlData.meta_description || '').substring(0, 50) + (urlData.meta_description && urlData.meta_description.length > 50 ? '...' : ''),
+        urlData.h1 || '',
+        urlData.word_count || 0,
+        urlData.response_time || 0,
+        analyticsInfo,
+        ogTagsCount > 0 ? `${ogTagsCount} tags` : '',
+        jsonLdCount > 0 ? `${jsonLdCount} scripts` : '',
+        linksInfo,
+        imagesCount > 0 ? `${imagesCount} images` : '',
+        jsRendered,
+        `<button class="details-btn" onclick="showUrlDetails('${urlData.url.replace(/'/g, "\\'")}')">📊 Details</button>`
+    ];
+
+    cells.forEach(cellData => {
+        const cell = document.createElement('td');
+        if (typeof cellData === 'string' && cellData.includes('<button')) {
+            cell.innerHTML = cellData;
+        } else {
+            cell.textContent = cellData;
+        }
+        row.appendChild(cell);
+    });
+}
+
+function renderInternalRow(row, urlData, index) {
+    const cells = [
+        urlData.url,
+        urlData.status_code,
+        urlData.content_type || '',
+        urlData.size || 0,
+        urlData.title || ''
+    ];
+
+    cells.forEach(cellData => {
+        const cell = document.createElement('td');
+        cell.textContent = cellData;
+        row.appendChild(cell);
+    });
+}
+
+function renderExternalRow(row, urlData, index) {
+    const cells = [
+        urlData.url,
+        urlData.status_code,
+        urlData.content_type || '',
+        urlData.size || 0,
+        urlData.title || ''
+    ];
+
+    cells.forEach(cellData => {
+        const cell = document.createElement('td');
+        cell.textContent = cellData;
+        row.appendChild(cell);
+    });
+}
+
+function renderInternalLinkRow(row, link, index) {
+    const statusBadge = link.target_status ? `<span class="status-badge status-${Math.floor(link.target_status / 100)}xx">${link.target_status}</span>` : '';
+    const placement = link.placement ? link.placement.charAt(0).toUpperCase() + link.placement.slice(1) : 'Unknown';
+
+    row.innerHTML = `
+        <td style="word-break: break-all;">${link.source_url}</td>
+        <td style="word-break: break-all;">${link.target_url}</td>
+        <td>${statusBadge}</td>
+        <td>${link.anchor_text || ''}</td>
+        <td>${placement}</td>
+    `;
+}
+
+function renderExternalLinkRow(row, link, index) {
+    const statusBadge = link.target_status ? `<span class="status-badge status-${Math.floor(link.target_status / 100)}xx">${link.target_status}</span>` : '';
+    const placement = link.placement ? link.placement.charAt(0).toUpperCase() + link.placement.slice(1) : 'Unknown';
+
+    row.innerHTML = `
+        <td style="word-break: break-all;">${link.source_url}</td>
+        <td style="word-break: break-all;">${link.target_url}</td>
+        <td>${statusBadge}</td>
+        <td>${link.target_domain}</td>
+        <td>${placement}</td>
+    `;
+}
+
+function renderIssueRow(row, issue, index) {
+    row.setAttribute('data-issue-type', issue.type);
+
+    // Set row style based on issue type
+    if (issue.type === 'error') {
+        row.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
+    } else if (issue.type === 'warning') {
+        row.style.backgroundColor = 'rgba(245, 158, 11, 0.1)';
+    } else {
+        row.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
+    }
+
+    // Create type indicator
+    let typeIcon = '';
+    let typeColor = '';
+    if (issue.type === 'error') {
+        typeIcon = '❌';
+        typeColor = '#ef4444';
+    } else if (issue.type === 'warning') {
+        typeIcon = '⚠️';
+        typeColor = '#f59e0b';
+    } else {
+        typeIcon = 'ℹ️';
+        typeColor = '#3b82f6';
+    }
+
+    row.innerHTML = `
+        <td style="word-break: break-all;" title="${issue.url}">${issue.url}</td>
+        <td><span style="color: ${typeColor};">${typeIcon}</span> ${issue.type}</td>
+        <td>${issue.category}</td>
+        <td>${issue.issue}</td>
+        <td style="word-break: break-word;" title="${issue.details}">${issue.details}</td>
+    `;
 }
