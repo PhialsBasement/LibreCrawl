@@ -328,6 +328,8 @@ class WebCrawler:
         if self.link_manager:
             self.link_manager.update_link_statuses(self.crawl_results)
 
+        print(f"get_status called - crawl_results length: {len(self.crawl_results)}, status: {status}, crawled: {self.stats['crawled']}")
+
         return {
             'status': status,
             'stats': {
@@ -406,11 +408,8 @@ class WebCrawler:
                         if depth > self.config['max_depth']:
                             continue
 
-                        # SMOOTH RATE LIMITING: Only apply if delay > 0
-                        if self.config.get('delay', 0) > 0:
-                            self.rate_limiter.acquire()
-
-                        # Submit crawl task
+                        # Submit crawl task immediately - rate limiting happens inside the worker
+                        print(f"Submitting task for: {current_url}")
                         future = executor.submit(self._crawl_url, current_url, depth)
                         active_futures[future] = current_url
 
@@ -426,6 +425,7 @@ class WebCrawler:
                                         self.crawl_results.append(result)
                                         self.stats['crawled'] += 1
                                         self.stats['depth'] = max(self.stats['depth'], result.get('depth', 0))
+                                        print(f"Added URL to results: {result['url']} - Total in results: {len(self.crawl_results)}")
 
                                     # Detect issues
                                     self.issue_detector.detect_issues(result)
@@ -475,6 +475,7 @@ class WebCrawler:
 
     def _crawl_url_with_requests(self, url, depth):
         """Crawl a single URL using traditional HTTP requests"""
+        print(f"Starting crawl of {url}")
         retries = self.config.get('retries', 3)
         start_time = time.time()
 
@@ -731,6 +732,7 @@ class WebCrawler:
                                     self.crawl_results.append(result)
                                     self.stats['crawled'] += 1
                                     self.stats['depth'] = max(self.stats['depth'], result.get('depth', 0))
+                                    print(f"Added URL to results (JS): {result['url']} - Total in results: {len(self.crawl_results)}")
 
                                 # Detect issues
                                 self.issue_detector.detect_issues(result)
