@@ -269,6 +269,11 @@ function updateCrawlData(data) {
     crawlState.stats = data.stats || crawlState.stats;
     updateStatsDisplay();
 
+    // Update memory statistics
+    if (data.memory && data.memory_data) {
+        updateMemoryDisplay(data.memory, data.memory_data);
+    }
+
     // Update tables with new URLs
     if (data.urls) {
         data.urls.forEach(url => {
@@ -343,6 +348,29 @@ function updateStatsDisplay() {
     document.getElementById('crawledCount').textContent = crawlState.stats.crawled;
     document.getElementById('crawlDepth').textContent = crawlState.stats.depth;
     document.getElementById('crawlSpeed').textContent = crawlState.stats.speed + ' URLs/sec';
+}
+
+function updateMemoryDisplay(memoryData, memoryDataSizes) {
+    if (!memoryData || !memoryDataSizes) return;
+
+    // Actual data size (deep measurement)
+    const dataMB = memoryDataSizes.total_deep_mb || 0;
+    document.getElementById('memCurrent').textContent = dataMB.toFixed(1) + ' MB';
+
+    // KB per URL (actual data)
+    const kbPerUrl = memoryDataSizes.avg_per_url_kb || 0;
+    document.getElementById('memPeak').textContent = kbPerUrl.toFixed(1) + ' KB/URL';
+
+    // Estimate for 1M URLs (data only)
+    const estimate1M = (kbPerUrl * 1000000) / 1024; // Convert to MB
+    const estimate1MDisplay = estimate1M > 1024
+        ? (estimate1M / 1024).toFixed(1) + ' GB'
+        : estimate1M.toFixed(0) + ' MB';
+    document.getElementById('memEstimate1M').textContent = estimate1MDisplay;
+
+    // System available
+    const availableMB = memoryData.system?.available_mb || 0;
+    document.getElementById('memAvailable').textContent = availableMB.toFixed(0) + ' MB';
 }
 
 function updateCrawlButtons() {

@@ -4,16 +4,81 @@ import time
 import csv
 import json
 import xml.etree.ElementTree as ET
+import uuid
 from io import StringIO
-from flask import Flask, render_template, request, jsonify
+from datetime import datetime, timedelta
+from flask import Flask, render_template, request, jsonify, session
 from src.crawler import WebCrawler
 from src.settings_manager import SettingsManager
 
 app = Flask(__name__, template_folder='web/templates', static_folder='web/static')
+app.secret_key = 'librecrawl-secret-key-change-in-production'  # TODO: Use environment variable in production
 
-# Global instances
-crawler = WebCrawler()
+# Multi-tenant crawler instances
+crawler_instances = {}  # session_id -> {'crawler': WebCrawler, 'last_accessed': datetime}
+instances_lock = threading.Lock()
+
+# Global settings manager (shared across all users)
 settings_manager = SettingsManager()
+
+def get_or_create_crawler():
+    """Get or create a crawler instance for the current session"""
+    # Get or create session ID
+    if 'session_id' not in session:
+        session['session_id'] = str(uuid.uuid4())
+
+    session_id = session['session_id']
+
+    with instances_lock:
+        # Check if crawler exists for this session
+        if session_id not in crawler_instances:
+            print(f"Creating new crawler instance for session: {session_id}")
+            crawler_instances[session_id] = {
+                'crawler': WebCrawler(),
+                'last_accessed': datetime.now()
+            }
+        else:
+            # Update last accessed time
+            crawler_instances[session_id]['last_accessed'] = datetime.now()
+
+        return crawler_instances[session_id]['crawler']
+
+def cleanup_old_instances():
+    """Remove crawler instances that haven't been accessed in 1 hour"""
+    timeout = timedelta(hours=1)
+    now = datetime.now()
+
+    with instances_lock:
+        sessions_to_remove = []
+        for session_id, instance_data in crawler_instances.items():
+            if now - instance_data['last_accessed'] > timeout:
+                sessions_to_remove.append(session_id)
+
+        for session_id in sessions_to_remove:
+            print(f"Cleaning up crawler instance for session: {session_id}")
+            # Stop any running crawls
+            try:
+                crawler_instances[session_id]['crawler'].stop_crawl()
+            except:
+                pass
+            del crawler_instances[session_id]
+
+        if sessions_to_remove:
+            print(f"Cleaned up {len(sessions_to_remove)} inactive crawler instances")
+
+def start_cleanup_thread():
+    """Start background thread to cleanup old instances"""
+    def cleanup_loop():
+        while True:
+            time.sleep(300)  # Check every 5 minutes
+            try:
+                cleanup_old_instances()
+            except Exception as e:
+                print(f"Error in cleanup thread: {e}")
+
+    cleanup_thread = threading.Thread(target=cleanup_loop, daemon=True)
+    cleanup_thread.start()
+    print("Started crawler instance cleanup thread")
 
 def generate_csv_export(urls, fields):
     """Generate CSV export content"""
@@ -200,6 +265,11 @@ def generate_issues_json_export(issues):
 def index():
     return render_template('index.html')
 
+@app.route('/debug/memory')
+def debug_memory_page():
+    """Debug page with nice UI for memory monitoring"""
+    return render_template('debug_memory.html')
+
 @app.route('/api/start_crawl', methods=['POST'])
 def start_crawl():
     data = request.get_json()
@@ -207,6 +277,9 @@ def start_crawl():
 
     if not url:
         return jsonify({'success': False, 'error': 'URL is required'})
+
+    # Get or create crawler for this session
+    crawler = get_or_create_crawler()
 
     # Apply current settings to crawler before starting
     try:
@@ -220,11 +293,13 @@ def start_crawl():
 
 @app.route('/api/stop_crawl', methods=['POST'])
 def stop_crawl():
+    crawler = get_or_create_crawler()
     success, message = crawler.stop_crawl()
     return jsonify({'success': success, 'message': message})
 
 @app.route('/api/crawl_status')
 def crawl_status():
+    crawler = get_or_create_crawler()
     status_data = crawler.get_status()
 
     # Apply current issue exclusion patterns to displayed issues
@@ -237,6 +312,71 @@ def crawl_status():
         status_data['issues'] = filtered_issues
 
     return jsonify(status_data)
+
+@app.route('/api/debug/memory')
+def debug_memory():
+    """Debug endpoint showing memory stats for all active crawler instances"""
+    from src.core.memory_profiler import MemoryProfiler
+
+    with instances_lock:
+        memory_stats = {
+            'total_instances': len(crawler_instances),
+            'instances': []
+        }
+
+        for session_id, instance_data in crawler_instances.items():
+            crawler = instance_data['crawler']
+            stats = crawler.memory_monitor.get_stats()
+
+            # Get accurate data sizes
+            data_sizes = MemoryProfiler.get_crawler_data_size(
+                crawler.crawl_results,
+                crawler.link_manager.all_links if crawler.link_manager else [],
+                crawler.issue_detector.detected_issues if crawler.issue_detector else []
+            )
+
+            memory_stats['instances'].append({
+                'session_id': session_id[:8] + '...',  # Truncate for privacy
+                'last_accessed': instance_data['last_accessed'].isoformat(),
+                'urls_crawled': len(crawler.crawl_results),
+                'memory': stats,
+                'data_sizes': data_sizes
+            })
+
+        return jsonify(memory_stats)
+
+@app.route('/api/debug/memory/profile')
+def debug_memory_profile():
+    """Detailed memory profiling - what's actually using the RAM"""
+    from src.core.memory_profiler import MemoryProfiler
+
+    with instances_lock:
+        profiles = []
+
+        for session_id, instance_data in crawler_instances.items():
+            crawler = instance_data['crawler']
+
+            # Get object breakdown
+            breakdown = MemoryProfiler.get_object_memory_breakdown()
+
+            # Get crawler-specific data sizes
+            data_sizes = MemoryProfiler.get_crawler_data_size(
+                crawler.crawl_results,
+                crawler.link_manager.all_links if crawler.link_manager else [],
+                crawler.issue_detector.detected_issues if crawler.issue_detector else []
+            )
+
+            profiles.append({
+                'session_id': session_id[:8] + '...',
+                'urls_crawled': len(crawler.crawl_results),
+                'object_breakdown': breakdown,
+                'data_sizes': data_sizes
+            })
+
+        return jsonify({
+            'total_instances': len(crawler_instances),
+            'profiles': profiles
+        })
 
 @app.route('/api/filter_issues', methods=['POST'])
 def filter_issues():
@@ -284,6 +424,7 @@ def reset_settings():
 @app.route('/api/update_crawler_settings', methods=['POST'])
 def update_crawler_settings():
     try:
+        crawler = get_or_create_crawler()
         # Get current settings and update crawler configuration
         crawler_config = settings_manager.get_crawler_config()
         crawler.update_config(crawler_config)
@@ -294,6 +435,7 @@ def update_crawler_settings():
 @app.route('/api/pause_crawl', methods=['POST'])
 def pause_crawl():
     try:
+        crawler = get_or_create_crawler()
         success, message = crawler.pause_crawl()
         return jsonify({'success': success, 'message': message})
     except Exception as e:
@@ -302,6 +444,7 @@ def pause_crawl():
 @app.route('/api/resume_crawl', methods=['POST'])
 def resume_crawl():
     try:
+        crawler = get_or_create_crawler()
         success, message = crawler.resume_crawl()
         return jsonify({'success': success, 'message': message})
     except Exception as e:
@@ -322,6 +465,7 @@ def export_data():
             issues = local_data.get('issues', [])
         else:
             # Get current crawl results
+            crawler = get_or_create_crawler()
             crawl_data = crawler.get_status()
             urls = crawl_data.get('urls', [])
             links = crawl_data.get('links', [])
@@ -460,6 +604,8 @@ def export_data():
         return jsonify({'success': False, 'error': str(e)})
 
 def start_flask():
+    # Start cleanup thread for old crawler instances
+    start_cleanup_thread()
     app.run(host='127.0.0.1', port=5000, debug=False, use_reloader=False)
 
 def main():

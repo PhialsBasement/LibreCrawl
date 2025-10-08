@@ -19,6 +19,7 @@ from src.core.link_manager import LinkManager
 from src.core.js_renderer import JavaScriptRenderer
 from src.core.sitemap_parser import SitemapParser
 from src.core.issue_detector import IssueDetector
+from src.core.memory_monitor import MemoryMonitor
 
 
 class WebCrawler:
@@ -45,6 +46,7 @@ class WebCrawler:
         self.sitemap_parser = None
         self.issue_detector = None
         self.seo_extractor = SEOExtractor()
+        self.memory_monitor = MemoryMonitor()
 
         # Results storage
         self.crawl_results = []
@@ -261,6 +263,9 @@ class WebCrawler:
             'start_time': time.time()
         }
 
+        # Start memory monitoring
+        self.memory_monitor.start_monitoring()
+
     def _discover_and_add_sitemap_urls(self, base_url):
         """Discover sitemaps and add URLs to crawl queue"""
         sitemap_urls = self.sitemap_parser.discover_sitemaps(base_url)
@@ -328,6 +333,17 @@ class WebCrawler:
         if self.link_manager:
             self.link_manager.update_link_statuses(self.crawl_results)
 
+        # Update memory stats
+        self.memory_monitor.update()
+
+        # Get actual data size for accurate estimates
+        from src.core.memory_profiler import MemoryProfiler
+        data_sizes = MemoryProfiler.get_crawler_data_size(
+            self.crawl_results,
+            self.link_manager.all_links if self.link_manager else [],
+            self.issue_detector.detected_issues if self.issue_detector else []
+        )
+
         print(f"get_status called - crawl_results length: {len(self.crawl_results)}, status: {status}, crawled: {self.stats['crawled']}")
 
         return {
@@ -340,7 +356,9 @@ class WebCrawler:
             'links': self.link_manager.all_links.copy() if self.link_manager else [],
             'issues': self.issue_detector.get_issues() if self.issue_detector else [],
             'progress': min(100, (self.stats['crawled'] / max(link_stats['discovered'], 1)) * 100),
-            'is_running_pagespeed': self.is_running_pagespeed
+            'is_running_pagespeed': self.is_running_pagespeed,
+            'memory': self.memory_monitor.get_stats(),
+            'memory_data': data_sizes
         }
 
     def update_config(self, new_config):
