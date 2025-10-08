@@ -422,10 +422,16 @@ function updateTimer() {
 
 // Table Management
 function initializeTables() {
+    // Clear any existing data first
+    clearAllTables();
     // Initialize virtual scrollers for all tables
     initializeVirtualScrollers();
-    // Clear any existing data
-    clearAllTables();
+    // Initialize column resizers after virtual scrollers
+    setTimeout(() => {
+        if (window.initializeColumnResizers) {
+            initializeColumnResizers();
+        }
+    }, 100);
 }
 
 function initializeVirtualScrollers() {
@@ -434,8 +440,8 @@ function initializeVirtualScrollers() {
         const overviewContainer = document.querySelector('#overview-tab .table-container');
         if (overviewContainer && overviewContainer.querySelector('tbody')) {
             virtualScrollers.overview = new VirtualScroller(overviewContainer, {
-                rowHeight: 40,
-                buffer: 5,
+                rowHeight: 100,
+                buffer: 25,
                 renderRow: renderOverviewRow
             });
             console.log('Overview virtual scroller initialized');
@@ -445,8 +451,8 @@ function initializeVirtualScrollers() {
         const internalContainer = document.querySelector('#internal-tab .table-container');
         if (internalContainer && internalContainer.querySelector('tbody')) {
             virtualScrollers.internal = new VirtualScroller(internalContainer, {
-                rowHeight: 40,
-                buffer: 5,
+                rowHeight: 80,
+                buffer: 25,
                 renderRow: renderInternalRow
             });
             console.log('Internal virtual scroller initialized');
@@ -456,8 +462,8 @@ function initializeVirtualScrollers() {
         const externalContainer = document.querySelector('#external-tab .table-container');
         if (externalContainer && externalContainer.querySelector('tbody')) {
             virtualScrollers.external = new VirtualScroller(externalContainer, {
-                rowHeight: 40,
-                buffer: 5,
+                rowHeight: 80,
+                buffer: 25,
                 renderRow: renderExternalRow
             });
             console.log('External virtual scroller initialized');
@@ -467,8 +473,8 @@ function initializeVirtualScrollers() {
         const internalLinksContainer = document.querySelector('#links-tab .internal-links-container');
         if (internalLinksContainer && internalLinksContainer.querySelector('tbody')) {
             virtualScrollers.internalLinks = new VirtualScroller(internalLinksContainer, {
-                rowHeight: 40,
-                buffer: 5,
+                rowHeight: 80,
+                buffer: 25,
                 renderRow: renderInternalLinkRow
             });
             console.log('Internal links virtual scroller initialized');
@@ -478,8 +484,8 @@ function initializeVirtualScrollers() {
         const externalLinksContainer = document.querySelector('#links-tab .external-links-container');
         if (externalLinksContainer && externalLinksContainer.querySelector('tbody')) {
             virtualScrollers.externalLinks = new VirtualScroller(externalLinksContainer, {
-                rowHeight: 40,
-                buffer: 5,
+                rowHeight: 80,
+                buffer: 25,
                 renderRow: renderExternalLinkRow
             });
             console.log('External links virtual scroller initialized');
@@ -489,8 +495,8 @@ function initializeVirtualScrollers() {
         const issuesContainer = document.querySelector('#issues-tab .table-container');
         if (issuesContainer && issuesContainer.querySelector('tbody')) {
             virtualScrollers.issues = new VirtualScroller(issuesContainer, {
-                rowHeight: 40,
-                buffer: 5,
+                rowHeight: 80,
+                buffer: 25,
                 renderRow: renderIssueRow
             });
             console.log('Issues virtual scroller initialized');

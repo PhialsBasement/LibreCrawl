@@ -421,6 +421,7 @@ body {
     background: rgba(255, 255, 255, 0.02);
     border-radius: 8px;
     overflow: hidden;
+    table-layout: fixed;
 }
 
 .data-table th {
@@ -433,6 +434,11 @@ body {
     border-bottom: 1px solid #475569;
     text-transform: uppercase;
     letter-spacing: 0.8px;
+    white-space: nowrap;
+    position: relative;
+    min-width: 80px;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .data-table td {
@@ -441,6 +447,9 @@ body {
     font-size: 14px;
     color: #e2e8f0;
     font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .data-table tbody tr:hover {

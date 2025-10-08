@@ -64,6 +64,7 @@ class VirtualScroller {
 
         // Ensure container can scroll
         this.container.style.overflowY = 'auto';
+        this.container.style.overflowX = 'auto';
         this.container.style.position = 'relative';
 
         console.log('VirtualScroller initialized with', columnCount, 'columns');
@@ -104,7 +105,10 @@ class VirtualScroller {
         const bufferedStart = Math.max(0, start - this.buffer);
         const bufferedEnd = Math.min(this.data.length, start + visibleCount + this.buffer);
 
-        return { start: bufferedStart, end: bufferedEnd };
+        return {
+            start: Math.floor(bufferedStart),
+            end: Math.ceil(bufferedEnd)
+        };
     }
 
     render() {
@@ -126,8 +130,10 @@ class VirtualScroller {
 
         const { start, end } = this.getVisibleRange();
 
-        // Only re-render if range changed significantly
-        if (start === this.visibleStart && end === this.visibleEnd) {
+        // Only re-render if range changed by at least 3 rows to reduce flickering
+        const threshold = 3;
+        if (Math.abs(start - this.visibleStart) < threshold &&
+            Math.abs(end - this.visibleEnd) < threshold) {
             return;
         }
 
