@@ -3,7 +3,7 @@ let currentSettings = {};
 let defaultSettings = {
     // Crawler settings
     maxDepth: 3,
-    maxUrls: 1000,
+    maxUrls: 5000000,
     crawlDelay: 1,
     followRedirects: true,
     crawlExternalLinks: false,
@@ -49,6 +49,9 @@ let defaultSettings = {
     jsViewportWidth: 1920,
     jsViewportHeight: 1080,
     jsMaxConcurrentPages: 3,
+
+    // Custom CSS styling
+    customCSS: '',
 
     // Issue exclusion patterns
     issueExclusionPatterns: `# WordPress admin & system paths
@@ -262,6 +265,7 @@ let defaultSettings = {
 document.addEventListener('DOMContentLoaded', function() {
     loadSettings();
     setupSettingsEventHandlers();
+    applyCustomCSS();
 });
 
 function setupSettingsEventHandlers() {
@@ -385,7 +389,7 @@ function collectSettingsFromForm() {
         'exportFormat', 'concurrency', 'memoryLimit', 'logLevel', 'saveSession',
         'enableProxy', 'proxyUrl', 'customHeaders',
         'enableJavaScript', 'jsWaitTime', 'jsTimeout', 'jsBrowser', 'jsHeadless', 'jsUserAgent', 'jsViewportWidth', 'jsViewportHeight', 'jsMaxConcurrentPages',
-        'issueExclusionPatterns'
+        'customCSS', 'issueExclusionPatterns'
     ];
 
     formFields.forEach(fieldId => {
@@ -419,7 +423,26 @@ function saveSettings() {
         return;
     }
 
-    // Save to backend
+    // Save to localStorage first (primary storage for persistence)
+    try {
+        localStorage.setItem('librecrawl_settings', JSON.stringify(newSettings));
+        console.log('Settings saved to localStorage');
+    } catch (error) {
+        console.error('Failed to save to localStorage:', error);
+        showNotification('Warning: Settings may not persist', 'warning');
+    }
+
+    // Update current settings
+    currentSettings = { ...newSettings };
+
+    // Apply custom CSS immediately
+    applyCustomCSS();
+
+    // Close settings modal
+    closeSettings();
+    showNotification('Settings saved successfully', 'success');
+
+    // Sync to backend for crawler configuration
     fetch('/api/save_settings', {
         method: 'POST',
         headers: {
@@ -429,30 +452,38 @@ function saveSettings() {
     })
     .then(response => response.json())
     .then(data => {
-        if (data.success) {
-            currentSettings = { ...newSettings };
-            closeSettings();
-            showNotification('Settings saved successfully', 'success');
+        if (!data.success) {
+            console.warn('Backend sync failed:', data.error);
+        }
 
-            // Update crawler with new settings if it's running
-            if (crawlState.isRunning) {
-                updateCrawlerSettings();
-            }
-        } else {
-            showNotification('Failed to save settings: ' + data.error, 'error');
+        // Update crawler with new settings if it's running
+        if (window.crawlState && window.crawlState.isRunning) {
+            updateCrawlerSettings();
         }
     })
     .catch(error => {
-        console.error('Error saving settings:', error);
-        showNotification('Error saving settings', 'error');
+        console.error('Error syncing settings to backend:', error);
     });
 }
 
 function resetSettings() {
     if (confirm('Are you sure you want to reset all settings to their default values?')) {
         currentSettings = { ...defaultSettings };
+
+        // Clear localStorage
+        try {
+            localStorage.removeItem('librecrawl_settings');
+            console.log('Settings cleared from localStorage');
+        } catch (error) {
+            console.error('Failed to clear localStorage:', error);
+        }
+
         populateSettingsForm();
+        applyCustomCSS(); // Remove any custom CSS
         showNotification('Settings reset to defaults', 'info');
+
+        // Sync reset to backend
+        syncSettingsToBackend();
     }
 }
 
@@ -464,8 +495,8 @@ function validateSettings(settings) {
         errors.push('Max depth must be between 1 and 10');
     }
 
-    if (settings.maxUrls < 1 || settings.maxUrls > 50000) {
-        errors.push('Max URLs must be between 1 and 50,000');
+    if (settings.maxUrls < 1 || settings.maxUrls > 5000000) {
+        errors.push('Max URLs must be between 1 and 5,000,000');
     }
 
     if (settings.crawlDelay < 0 || settings.crawlDelay > 60) {
@@ -545,12 +576,35 @@ function validateSettings(settings) {
 }
 
 function loadSettings() {
-    // Load settings from backend
+    // Try to load from localStorage first (browser-specific persistence)
+    try {
+        const savedSettings = localStorage.getItem('librecrawl_settings');
+        if (savedSettings) {
+            const parsed = JSON.parse(savedSettings);
+            currentSettings = { ...defaultSettings, ...parsed };
+            console.log('Settings loaded from localStorage');
+
+            // Apply custom CSS after loading settings
+            applyCustomCSS();
+
+            // Sync to backend for crawler configuration
+            syncSettingsToBackend();
+            return;
+        }
+    } catch (error) {
+        console.warn('Failed to load settings from localStorage:', error);
+    }
+
+    // Fallback: Load from backend (legacy support)
     fetch('/api/get_settings')
         .then(response => response.json())
         .then(data => {
             if (data.success) {
                 currentSettings = { ...defaultSettings, ...data.settings };
+                // Save to localStorage for future loads
+                localStorage.setItem('librecrawl_settings', JSON.stringify(currentSettings));
+                // Apply custom CSS after loading settings
+                applyCustomCSS();
             } else {
                 console.warn('Failed to load settings, using defaults');
                 currentSettings = { ...defaultSettings };
@@ -560,6 +614,20 @@ function loadSettings() {
             console.error('Error loading settings:', error);
             currentSettings = { ...defaultSettings };
         });
+}
+
+function syncSettingsToBackend() {
+    // Send settings to backend without waiting for response
+    // This ensures crawler gets the right config
+    fetch('/api/save_settings', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(currentSettings)
+    }).catch(error => {
+        console.warn('Failed to sync settings to backend:', error);
+    });
 }
 
 function updateCrawlerSettings() {
@@ -701,3 +769,24 @@ document.addEventListener('keydown', function(event) {
 window.getCurrentSettings = function() {
     return currentSettings;
 };
+
+// Apply custom CSS to the page
+function applyCustomCSS() {
+    // Remove existing custom CSS if present
+    const existingStyle = document.getElementById('custom-user-styles');
+    if (existingStyle) {
+        existingStyle.remove();
+    }
+
+    // Get custom CSS from settings
+    const customCSS = currentSettings.customCSS || '';
+
+    // Only inject if there's CSS to apply
+    if (customCSS.trim()) {
+        const styleElement = document.createElement('style');
+        styleElement.id = 'custom-user-styles';
+        styleElement.textContent = customCSS;
+        document.head.appendChild(styleElement);
+        console.log('Custom CSS applied');
+    }
+}

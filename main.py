@@ -1,10 +1,10 @@
-import webview
 import threading
 import time
 import csv
 import json
 import xml.etree.ElementTree as ET
 import uuid
+import webbrowser
 from io import StringIO
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, session
@@ -15,11 +15,8 @@ app = Flask(__name__, template_folder='web/templates', static_folder='web/static
 app.secret_key = 'librecrawl-secret-key-change-in-production'  # TODO: Use environment variable in production
 
 # Multi-tenant crawler instances
-crawler_instances = {}  # session_id -> {'crawler': WebCrawler, 'last_accessed': datetime}
+crawler_instances = {}  # session_id -> {'crawler': WebCrawler, 'settings': SettingsManager, 'last_accessed': datetime}
 instances_lock = threading.Lock()
-
-# Global settings manager (shared across all users)
-settings_manager = SettingsManager()
 
 def get_or_create_crawler():
     """Get or create a crawler instance for the current session"""
@@ -35,6 +32,7 @@ def get_or_create_crawler():
             print(f"Creating new crawler instance for session: {session_id}")
             crawler_instances[session_id] = {
                 'crawler': WebCrawler(),
+                'settings': SettingsManager(session_id=session_id),  # Per-session settings
                 'last_accessed': datetime.now()
             }
         else:
@@ -42,6 +40,29 @@ def get_or_create_crawler():
             crawler_instances[session_id]['last_accessed'] = datetime.now()
 
         return crawler_instances[session_id]['crawler']
+
+def get_session_settings():
+    """Get the settings manager for the current session"""
+    # Get or create session ID
+    if 'session_id' not in session:
+        session['session_id'] = str(uuid.uuid4())
+
+    session_id = session['session_id']
+
+    with instances_lock:
+        # Create instance if it doesn't exist
+        if session_id not in crawler_instances:
+            print(f"Creating new settings instance for session: {session_id}")
+            crawler_instances[session_id] = {
+                'crawler': WebCrawler(),
+                'settings': SettingsManager(session_id=session_id),
+                'last_accessed': datetime.now()
+            }
+        else:
+            # Update last accessed time
+            crawler_instances[session_id]['last_accessed'] = datetime.now()
+
+        return crawler_instances[session_id]['settings']
 
 def cleanup_old_instances():
     """Remove crawler instances that haven't been accessed in 1 hour"""
@@ -280,6 +301,7 @@ def start_crawl():
 
     # Get or create crawler for this session
     crawler = get_or_create_crawler()
+    settings_manager = get_session_settings()
 
     # Apply current settings to crawler before starting
     try:
@@ -300,6 +322,7 @@ def stop_crawl():
 @app.route('/api/crawl_status')
 def crawl_status():
     crawler = get_or_create_crawler()
+    settings_manager = get_session_settings()
     status_data = crawler.get_status()
 
     # Apply current issue exclusion patterns to displayed issues
@@ -383,6 +406,7 @@ def filter_issues():
     try:
         data = request.get_json()
         issues = data.get('issues', [])
+        settings_manager = get_session_settings()
 
         # Get current exclusion patterns
         current_settings = settings_manager.get_settings()
@@ -399,6 +423,7 @@ def filter_issues():
 @app.route('/api/get_settings')
 def get_settings():
     try:
+        settings_manager = get_session_settings()
         settings = settings_manager.get_settings()
         return jsonify({'success': True, 'settings': settings})
     except Exception as e:
@@ -408,6 +433,7 @@ def get_settings():
 def save_settings():
     try:
         data = request.get_json()
+        settings_manager = get_session_settings()
         success, message = settings_manager.save_settings(data)
         return jsonify({'success': success, 'message': message})
     except Exception as e:
@@ -416,6 +442,7 @@ def save_settings():
 @app.route('/api/reset_settings', methods=['POST'])
 def reset_settings():
     try:
+        settings_manager = get_session_settings()
         success, message = settings_manager.reset_settings()
         return jsonify({'success': success, 'message': message})
     except Exception as e:
@@ -425,6 +452,7 @@ def reset_settings():
 def update_crawler_settings():
     try:
         crawler = get_or_create_crawler()
+        settings_manager = get_session_settings()
         # Get current settings and update crawler configuration
         crawler_config = settings_manager.get_crawler_config()
         crawler.update_config(crawler_config)
@@ -484,6 +512,7 @@ def export_data():
 
         # Apply current issue exclusion patterns (works for loaded crawls too)
         if issues:
+            settings_manager = get_session_settings()
             current_settings = settings_manager.get_settings()
             exclusion_patterns_text = current_settings.get('issueExclusionPatterns', '')
             exclusion_patterns = [p.strip() for p in exclusion_patterns_text.split('\n') if p.strip()]
@@ -603,32 +632,31 @@ def export_data():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
-def start_flask():
+def main():
     # Start cleanup thread for old crawler instances
     start_cleanup_thread()
+
+    print("=" * 60)
+    print("LibreCrawl - SEO Spider")
+    print("=" * 60)
+    print(f"\n🚀 Server starting on http://0.0.0.0:5000")
+    print(f"🌐 Access from browser: http://localhost:5000")
+    print(f"📱 Access from network: http://<your-ip>:5000")
+    print(f"\n✨ Multi-tenancy enabled - each browser session is isolated")
+    print(f"💾 Settings stored in browser localStorage")
+    print(f"\nPress Ctrl+C to stop the server\n")
+    print("=" * 60 + "\n")
+
+    # Open browser in a separate thread after short delay
+    def open_browser():
+        time.sleep(1.5)  # Wait for Flask to start
+        webbrowser.open('http://localhost:5000')
+
+    browser_thread = threading.Thread(target=open_browser, daemon=True)
+    browser_thread.start()
+
+    # Run Flask server
     app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
-
-def main():
-    # Start Flask in a separate thread
-    flask_thread = threading.Thread(target=start_flask, daemon=True)
-    flask_thread.start()
-
-    # Give Flask a moment to start
-    import time
-    time.sleep(1)
-
-    # Create webview window
-    webview.create_window(
-        title='LibreCrawl - SEO Spider',
-        url='http://127.0.0.1:5000',
-        width=1400,
-        height=900,
-        min_size=(1000, 600),
-        resizable=True
-    )
-
-    # Start webview (this will block until window is closed)
-    webview.start(debug=False)
 
 if __name__ == '__main__':
     main()

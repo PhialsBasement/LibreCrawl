@@ -3,9 +3,22 @@ import os
 from pathlib import Path
 
 class SettingsManager:
-    def __init__(self):
-        self.settings_file = Path.home() / '.librecrawl' / 'settings.json'
-        self.settings_dir = self.settings_file.parent
+    def __init__(self, session_id=None):
+        """
+        Initialize settings manager
+        If session_id is provided, settings are session-specific (multi-tenancy)
+        If session_id is None, settings are global (legacy behavior)
+        """
+        self.session_id = session_id
+
+        if session_id:
+            # Session-specific settings (stored in memory, not persisted)
+            self.settings_file = None
+            self.settings_dir = None
+        else:
+            # Global settings (persisted to disk)
+            self.settings_file = Path.home() / '.librecrawl' / 'settings.json'
+            self.settings_dir = self.settings_file.parent
 
         # Load default settings
         self.default_settings = self._get_default_settings()
@@ -62,6 +75,9 @@ class SettingsManager:
             'jsViewportWidth': 1920,
             'jsViewportHeight': 1080,
             'jsMaxConcurrentPages': 3,
+
+            # Custom CSS styling
+            'customCSS': '',
 
             # Issue exclusion patterns
             'issueExclusionPatterns': '''# WordPress admin & system paths
@@ -278,7 +294,12 @@ class SettingsManager:
     def load_settings(self):
         """Load settings from file or return defaults"""
         try:
-            if self.settings_file.exists():
+            # Session-specific settings always start with defaults
+            if self.session_id:
+                return self.default_settings.copy()
+
+            # Global settings load from disk
+            if self.settings_file and self.settings_file.exists():
                 with open(self.settings_file, 'r', encoding='utf-8') as f:
                     saved_settings = json.load(f)
                     # Merge with defaults to ensure all keys are present
@@ -292,10 +313,8 @@ class SettingsManager:
             return self.default_settings.copy()
 
     def save_settings(self, settings):
-        """Save settings to file"""
+        """Save settings to file or memory"""
         try:
-            self.ensure_settings_dir()
-
             # Validate settings before saving
             if not self.validate_settings(settings):
                 return False, "Invalid settings provided"
@@ -304,7 +323,12 @@ class SettingsManager:
             self.current_settings = {**self.default_settings}
             self.current_settings.update(settings)
 
-            # Save to file
+            # Session-specific settings only stored in memory
+            if self.session_id:
+                return True, "Settings saved successfully (session-specific)"
+
+            # Global settings saved to disk
+            self.ensure_settings_dir()
             with open(self.settings_file, 'w', encoding='utf-8') as f:
                 json.dump(self.current_settings, f, indent=2, ensure_ascii=False)
 
