@@ -949,17 +949,22 @@ body {
 }
 
 /* Links Tab */
+.links-tab-scroll-container {
+    overflow-y: auto;
+    max-height: calc(100vh - 280px);
+    padding: 20px;
+}
+
 .links-sections {
     display: flex;
     flex-direction: column;
     gap: 30px;
-    height: 100%;
-    overflow: hidden;
 }
 
 .links-section {
     flex: 1;
     min-height: 250px;
+    max-height: 400px;
     display: flex;
     flex-direction: column;
     overflow: hidden;

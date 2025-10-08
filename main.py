@@ -606,7 +606,7 @@ def export_data():
 def start_flask():
     # Start cleanup thread for old crawler instances
     start_cleanup_thread()
-    app.run(host='127.0.0.1', port=5000, debug=False, use_reloader=False)
+    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
 
 def main():
     # Start Flask in a separate thread
