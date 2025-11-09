@@ -14,6 +14,7 @@ class LinkManager:
         self.all_discovered_urls = set()
         self.all_links = []
         self.links_set = set()
+        self.source_pages = {}  # Maps target_url -> list of source_urls
 
         self.urls_lock = threading.Lock()
         self.links_lock = threading.Lock()
@@ -38,6 +39,12 @@ class LinkManager:
 
             # Thread-safe checking and adding
             with self.urls_lock:
+                # Track source page for this URL
+                if clean_url not in self.source_pages:
+                    self.source_pages[clean_url] = []
+                if current_url not in self.source_pages[clean_url]:
+                    self.source_pages[clean_url].append(current_url)
+
                 if (clean_url not in self.visited_urls and
                     clean_url not in self.all_discovered_urls and
                     clean_url != current_url):
@@ -97,6 +104,13 @@ class LinkManager:
                     'target_status': target_status,
                     'placement': placement
                 }
+
+                # Track source page for this URL (for "Linked From" feature)
+                with self.urls_lock:
+                    if clean_url not in self.source_pages:
+                        self.source_pages[clean_url] = []
+                    if source_url not in self.source_pages[clean_url]:
+                        self.source_pages[clean_url].append(source_url)
 
                 # Thread-safe adding to links collection with duplicate checking
                 with self.links_lock:
@@ -187,12 +201,18 @@ class LinkManager:
                 if target_url in status_lookup:
                     link['target_status'] = status_lookup[target_url]
 
+    def get_source_pages(self, url):
+        """Get list of source pages that link to this URL"""
+        with self.urls_lock:
+            return self.source_pages.get(url, []).copy()
+
     def reset(self):
         """Reset all state"""
         with self.urls_lock:
             self.visited_urls.clear()
             self.discovered_urls.clear()
             self.all_discovered_urls.clear()
+            self.source_pages.clear()
 
         with self.links_lock:
             self.all_links.clear()

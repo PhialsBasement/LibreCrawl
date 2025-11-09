@@ -299,5 +299,6 @@ class SEOExtractor:
             'redirects': [],
             'hreflang': [],
             'schema_org': [],
+            'linked_from': [],
             'error': error
         }

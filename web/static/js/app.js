@@ -14,7 +14,8 @@ let crawlState = {
         speed: 0
     },
     filters: {
-        active: null
+        active: null,
+        issueFilter: 'all'
     }
 };
 
@@ -753,6 +754,9 @@ function switchTab(tabName) {
 
 // Issue Filtering
 function filterIssues(filterType) {
+    // Store the active filter
+    crawlState.filters.issueFilter = filterType;
+
     // Update active button state and colors
     document.querySelectorAll('#issues-tab .filter-item').forEach(btn => {
         btn.classList.remove('active');
@@ -794,16 +798,16 @@ function filterIssues(filterType) {
         }
     });
 
-    // Filter the table rows
-    const rows = document.querySelectorAll('#issuesTableBody tr');
-    rows.forEach(row => {
-        const issueType = row.getAttribute('data-issue-type');
-        if (filterType === 'all' || issueType === filterType) {
-            row.style.display = '';
-        } else {
-            row.style.display = 'none';
+    // Filter issues data and update virtual scroller
+    if (window.currentIssues && virtualScrollers.issues) {
+        let filteredIssues = window.currentIssues;
+
+        if (filterType !== 'all') {
+            filteredIssues = window.currentIssues.filter(issue => issue.type === filterType);
         }
-    });
+
+        virtualScrollers.issues.setData(filteredIssues);
+    }
 }
 
 // Filter Management
@@ -1310,6 +1314,23 @@ function showUrlDetails(url) {
                                 <div><strong>Size:</strong> ${urlData.size || 0} bytes</div>
                             </div>
                         </div>
+
+                        ${(urlData.linked_from && urlData.linked_from.length > 0) ? `
+                        <div class="details-section">
+                            <h4>🔗 Linked From</h4>
+                            <div class="details-grid">
+                                <div><strong>Found on ${urlData.linked_from.length} page${urlData.linked_from.length !== 1 ? 's' : ''}:</strong></div>
+                            </div>
+                            <div class="details-subsection">
+                                <ul style="list-style: none; padding: 0; margin: 10px 0;">
+                                    ${urlData.linked_from.slice(0, 20).map(sourceUrl =>
+                                        `<li style="padding: 5px 0; word-break: break-all;"><a href="${sourceUrl}" target="_blank" style="color: #8b5cf6; text-decoration: none;">${sourceUrl}</a></li>`
+                                    ).join('')}
+                                    ${urlData.linked_from.length > 20 ? `<li style="padding: 5px 0; font-style: italic; color: #9ca3af;">... and ${urlData.linked_from.length - 20} more</li>` : ''}
+                                </ul>
+                            </div>
+                        </div>
+                        ` : ''}
 
                         <div class="details-section">
                             <h4>🏗️ Structured Data</h4>

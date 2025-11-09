@@ -479,6 +479,9 @@ class WebCrawler:
             self._run_pagespeed_analysis()
             self.is_running_pagespeed = False
 
+        # Update all linked_from fields before completing
+        self._update_all_linked_from()
+
         # Mark crawl as complete
         self.is_running = False
         print(f"Crawl completed. Discovered: {self.stats['discovered']}, Crawled: {self.stats['crawled']}")
@@ -575,7 +578,8 @@ class WebCrawler:
                 'response_time': 0,
                 'redirects': [],
                 'hreflang': [],
-                'schema_org': []
+                'schema_org': [],
+                'linked_from': []
             }
 
             # Only parse HTML content
@@ -606,6 +610,8 @@ class WebCrawler:
                 if should_extract:
                     self.link_manager.extract_links(soup, url, depth + 1, self._should_crawl_url)
 
+            # Populate linked_from after all link collection is complete
+            result['linked_from'] = self.link_manager.get_source_pages(url)
             result['response_time'] = round((time.time() - start_time) * 1000, 2)
             return result
 
@@ -669,6 +675,7 @@ class WebCrawler:
                 'redirects': [],
                 'hreflang': [],
                 'schema_org': [],
+                'linked_from': [],
                 'javascript_rendered': True
             }
 
@@ -687,8 +694,6 @@ class WebCrawler:
             self.seo_extractor.extract_hreflang(soup, result)
             self.seo_extractor.extract_schema_org(soup, result)
 
-            result['response_time'] = round((time.time() - start_time) * 1000, 2)
-
             # Collect all links
             self.link_manager.collect_all_links(soup, url, self.crawl_results)
 
@@ -700,6 +705,10 @@ class WebCrawler:
 
             if should_extract:
                 self.link_manager.extract_links(soup, url, depth + 1, self._should_crawl_url)
+
+            # Populate linked_from after all link collection is complete
+            result['linked_from'] = self.link_manager.get_source_pages(url)
+            result['response_time'] = round((time.time() - start_time) * 1000, 2)
 
             return result
 
@@ -772,10 +781,27 @@ class WebCrawler:
                 self.is_running_pagespeed = False
 
         finally:
+            # Update all linked_from fields before completing
+            self._update_all_linked_from()
+
             # Clean up
             await self.js_renderer.cleanup()
             self.is_running = False
             print(f"Crawl completed. Discovered: {self.stats['discovered']}, Crawled: {self.stats['crawled']}")
+
+    def _update_all_linked_from(self):
+        """Update linked_from field for all crawled URLs based on collected source_pages data"""
+        print("Updating linked_from data for all URLs...")
+        updated_count = 0
+
+        for result in self.crawl_results:
+            url = result['url']
+            sources = self.link_manager.get_source_pages(url)
+            if sources:
+                result['linked_from'] = sources
+                updated_count += 1
+
+        print(f"Updated linked_from data for {updated_count} URLs")
 
     def _should_crawl_url(self, url):
         """Check if URL should be crawled based on settings"""
