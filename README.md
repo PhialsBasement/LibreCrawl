@@ -2,6 +2,8 @@
 
 A web-based multi-tenant crawler for SEO analysis and website auditing.
 
+🌐 **Website**: [librecrawl.com](https://librecrawl.com)
+
 ## What it does
 
 LibreCrawl crawls websites and gives you detailed information about pages, links, SEO elements, and performance. It's built as a web application using Python Flask with a modern web interface supporting multiple concurrent users.
