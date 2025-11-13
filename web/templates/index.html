@@ -275,7 +275,19 @@
                             <div class="links-tab-scroll-container">
                                 <div class="links-sections">
                                     <div class="links-section">
-                                        <h3 class="links-section-title">🔗 Internal Links</h3>
+                                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                            <h3 class="links-section-title">🔗 Internal Links</h3>
+                                            <div style="display: flex; gap: 10px; align-items: center;">
+                                                <select onchange="filterInternalLinks(this.value)" style="padding: 6px 12px; border-radius: 6px; border: 1px solid #4b5563; background: #1f2937; color: white; font-size: 13px;">
+                                                    <option value="all">All Status Codes</option>
+                                                    <option value="2xx">2xx Success</option>
+                                                    <option value="3xx">3xx Redirect</option>
+                                                    <option value="4xx">4xx Client Error</option>
+                                                    <option value="5xx">5xx Server Error</option>
+                                                </select>
+                                                <input type="text" placeholder="Search..." oninput="searchInternalLinks(this.value)" style="padding: 6px 12px; border-radius: 6px; border: 1px solid #4b5563; background: #1f2937; color: white; font-size: 13px; width: 200px;">
+                                            </div>
+                                        </div>
                                         <div class="table-container internal-links-container">
                                             <table class="data-table" id="internalLinksTable">
                                                 <thead>
@@ -295,14 +307,26 @@
                                     </div>
 
                                     <div class="links-section">
-                                        <h3 class="links-section-title">🌐 External Links</h3>
+                                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                            <h3 class="links-section-title">🌐 External Links</h3>
+                                            <div style="display: flex; gap: 10px; align-items: center;">
+                                                <select onchange="filterExternalLinks(this.value)" style="padding: 6px 12px; border-radius: 6px; border: 1px solid #4b5563; background: #1f2937; color: white; font-size: 13px;">
+                                                    <option value="all">All Status Codes</option>
+                                                    <option value="2xx">2xx Success</option>
+                                                    <option value="3xx">3xx Redirect</option>
+                                                    <option value="4xx">4xx Client Error</option>
+                                                    <option value="5xx">5xx Server Error</option>
+                                                </select>
+                                                <input type="text" placeholder="Search..." oninput="searchExternalLinks(this.value)" style="padding: 6px 12px; border-radius: 6px; border: 1px solid #4b5563; background: #1f2937; color: white; font-size: 13px; width: 200px;">
+                                            </div>
+                                        </div>
                                         <div class="table-container external-links-container">
                                             <table class="data-table" id="externalLinksTable">
                                                 <thead>
                                                     <tr>
                                                         <th>Source URL</th>
                                                         <th>Target URL</th>
-                                                        <th>Anchor Text</th>
+                                                        <th>Status</th>
                                                         <th>Domain</th>
                                                         <th>Placement</th>
                                                     </tr>

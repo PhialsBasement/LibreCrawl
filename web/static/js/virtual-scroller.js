@@ -73,6 +73,9 @@ class VirtualScroller {
     setData(data) {
         this.data = data;
         this.updateScrollHeight();
+        // Force render by resetting visible range to ensure UI updates
+        this.visibleStart = -1;
+        this.visibleEnd = -1;
         this.render();
     }
 
@@ -130,8 +133,9 @@ class VirtualScroller {
 
         const { start, end } = this.getVisibleRange();
 
-        // Only re-render if range changed by at least 3 rows to reduce flickering
-        const threshold = 3;
+        // Only re-render if range changed by at least 1 row to reduce flickering
+        // Reduced threshold from 3 to 1 to fix fast scrolling issue
+        const threshold = 1;
         if (Math.abs(start - this.visibleStart) < threshold &&
             Math.abs(end - this.visibleEnd) < threshold) {
             return;

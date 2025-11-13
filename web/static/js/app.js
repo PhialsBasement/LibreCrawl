@@ -15,7 +15,13 @@ let crawlState = {
     },
     filters: {
         active: null,
-        issueFilter: 'all'
+        issueFilter: 'all',
+        linksFilter: {
+            internalStatusCode: 'all',
+            externalStatusCode: 'all',
+            internalSearch: '',
+            externalSearch: ''
+        }
     }
 };
 
@@ -572,11 +578,75 @@ function updateLinksTable(links) {
         }
     });
 
-    // Separate internal and external links
-    const internalLinks = uniqueLinks.filter(link => link.is_internal);
-    const externalLinks = uniqueLinks.filter(link => !link.is_internal);
+    // Store unfiltered links in crawlState
+    crawlState.links = uniqueLinks;
 
-    // Use virtual scrollers for links tables
+    // Apply filters and update virtual scrollers
+    applyLinksFilter();
+
+    console.log(`Links loaded: ${crawlState.links.filter(l => l.is_internal).length} internal, ${crawlState.links.filter(l => !l.is_internal).length} external`);
+}
+
+function applyLinksFilter() {
+    if (!crawlState.links || crawlState.links.length === 0) return;
+
+    // Separate internal and external links
+    let internalLinks = crawlState.links.filter(link => link.is_internal);
+    let externalLinks = crawlState.links.filter(link => !link.is_internal);
+
+    // Apply status code filter for internal links
+    const internalStatusFilter = crawlState.filters.linksFilter.internalStatusCode;
+    if (internalStatusFilter && internalStatusFilter !== 'all') {
+        internalLinks = internalLinks.filter(link => {
+            if (!link.target_status) return false;
+            const status = parseInt(link.target_status);
+            switch (internalStatusFilter) {
+                case '2xx': return status >= 200 && status < 300;
+                case '3xx': return status >= 300 && status < 400;
+                case '4xx': return status >= 400 && status < 500;
+                case '5xx': return status >= 500;
+                default: return true;
+            }
+        });
+    }
+
+    // Apply search filter for internal links
+    const internalSearch = crawlState.filters.linksFilter.internalSearch.toLowerCase();
+    if (internalSearch) {
+        internalLinks = internalLinks.filter(link =>
+            link.source_url.toLowerCase().includes(internalSearch) ||
+            link.target_url.toLowerCase().includes(internalSearch) ||
+            (link.anchor_text && link.anchor_text.toLowerCase().includes(internalSearch))
+        );
+    }
+
+    // Apply status code filter for external links
+    const externalStatusFilter = crawlState.filters.linksFilter.externalStatusCode;
+    if (externalStatusFilter && externalStatusFilter !== 'all') {
+        externalLinks = externalLinks.filter(link => {
+            if (!link.target_status) return false;
+            const status = parseInt(link.target_status);
+            switch (externalStatusFilter) {
+                case '2xx': return status >= 200 && status < 300;
+                case '3xx': return status >= 300 && status < 400;
+                case '4xx': return status >= 400 && status < 500;
+                case '5xx': return status >= 500;
+                default: return true;
+            }
+        });
+    }
+
+    // Apply search filter for external links
+    const externalSearch = crawlState.filters.linksFilter.externalSearch.toLowerCase();
+    if (externalSearch) {
+        externalLinks = externalLinks.filter(link =>
+            link.source_url.toLowerCase().includes(externalSearch) ||
+            link.target_url.toLowerCase().includes(externalSearch) ||
+            (link.target_domain && link.target_domain.toLowerCase().includes(externalSearch))
+        );
+    }
+
+    // Update virtual scrollers with filtered data
     if (virtualScrollers.internalLinks) {
         virtualScrollers.internalLinks.setData(internalLinks);
     }
@@ -584,8 +654,26 @@ function updateLinksTable(links) {
     if (virtualScrollers.externalLinks) {
         virtualScrollers.externalLinks.setData(externalLinks);
     }
+}
 
-    console.log(`Links loaded: ${internalLinks.length} internal, ${externalLinks.length} external`);
+function filterInternalLinks(filterType) {
+    crawlState.filters.linksFilter.internalStatusCode = filterType;
+    applyLinksFilter();
+}
+
+function filterExternalLinks(filterType) {
+    crawlState.filters.linksFilter.externalStatusCode = filterType;
+    applyLinksFilter();
+}
+
+function searchInternalLinks(searchText) {
+    crawlState.filters.linksFilter.internalSearch = searchText;
+    applyLinksFilter();
+}
+
+function searchExternalLinks(searchText) {
+    crawlState.filters.linksFilter.externalSearch = searchText;
+    applyLinksFilter();
 }
 
 function updateIssuesTable(issues) {
@@ -823,16 +911,13 @@ function toggleFilter(filterType) {
 }
 
 function applyFilter(filterType) {
-    // Clear previous filter state
-    clearActiveFilters();
-
     // Set current filter as active
     crawlState.filters.active = filterType;
 
-    // Filter all tables based on the selected filter
-    filterTable('overviewTableBody', filterType);
-    filterTable('internalTableBody', filterType);
-    filterTable('externalTableBody', filterType);
+    // Filter the data arrays and update virtual scrollers
+    filterVirtualScrollerData('overview', filterType);
+    filterVirtualScrollerData('internal', filterType);
+    filterVirtualScrollerData('external', filterType);
 
     // Update Status Codes table with filtered data
     updateStatusCodesTable(filterType);
@@ -841,68 +926,75 @@ function applyFilter(filterType) {
 }
 
 function clearActiveFilters() {
-    // Show all rows in all tables
-    const tableIds = ['overviewTableBody', 'internalTableBody', 'externalTableBody'];
-    tableIds.forEach(tableId => {
-        const tbody = document.getElementById(tableId);
-        if (tbody) {
-            Array.from(tbody.rows).forEach(row => {
-                row.style.display = '';
-            });
-        }
-    });
+    crawlState.filters.active = null;
+
+    // Reset all virtual scrollers to show full data
+    if (virtualScrollers.overview) {
+        virtualScrollers.overview.setData(crawlState.urls);
+    }
+    if (virtualScrollers.internal) {
+        const internalUrls = crawlState.urls.filter(url => url.is_internal);
+        virtualScrollers.internal.setData(internalUrls);
+    }
+    if (virtualScrollers.external) {
+        const externalUrls = crawlState.urls.filter(url => !url.is_internal);
+        virtualScrollers.external.setData(externalUrls);
+    }
 
     // Reset Status Codes table to show all data
     updateStatusCodesTable();
 }
 
+function filterVirtualScrollerData(scrollerName, filterType) {
+    const scroller = virtualScrollers[scrollerName];
+    if (!scroller) return;
+
+    let filteredData = crawlState.urls;
+
+    // Apply base filter for internal/external tables
+    if (scrollerName === 'internal') {
+        filteredData = filteredData.filter(url => url.is_internal);
+    } else if (scrollerName === 'external') {
+        filteredData = filteredData.filter(url => !url.is_internal);
+    }
+
+    // Apply user-selected filter
+    if (filterType) {
+        filteredData = filteredData.filter(url => {
+            switch (filterType) {
+                case 'internal':
+                    return isInternalURL(url.url);
+                case 'external':
+                    return !isInternalURL(url.url);
+                case '2xx':
+                    return url.status_code >= 200 && url.status_code < 300;
+                case '3xx':
+                    return url.status_code >= 300 && url.status_code < 400;
+                case '4xx':
+                    return url.status_code >= 400 && url.status_code < 500;
+                case '5xx':
+                    return url.status_code >= 500;
+                case 'html':
+                    return (url.content_type || '').toLowerCase().includes('html');
+                case 'css':
+                    return (url.content_type || '').toLowerCase().includes('css');
+                case 'js':
+                    return (url.content_type || '').toLowerCase().includes('javascript');
+                case 'images':
+                    return (url.content_type || '').toLowerCase().includes('image');
+                default:
+                    return true;
+            }
+        });
+    }
+
+    scroller.setData(filteredData);
+}
+
+// Legacy function - kept for compatibility but no longer used
 function filterTable(tableBodyId, filterType) {
-    const tbody = document.getElementById(tableBodyId);
-    if (!tbody) return;
-
-    Array.from(tbody.rows).forEach(row => {
-        let shouldShow = true;
-        const url = row.cells[0]?.textContent || '';
-
-        switch (filterType) {
-            case 'internal':
-                // Use corrected JavaScript function that handles www/non-www
-                shouldShow = isInternalURL(url);
-                break;
-            case 'external':
-                // Use corrected JavaScript function that handles www/non-www
-                shouldShow = !isInternalURL(url);
-                break;
-            case '2xx':
-                shouldShow = isStatusCodeRange(row.cells[1]?.textContent, 200, 299);
-                break;
-            case '3xx':
-                shouldShow = isStatusCodeRange(row.cells[1]?.textContent, 300, 399);
-                break;
-            case '4xx':
-                shouldShow = isStatusCodeRange(row.cells[1]?.textContent, 400, 499);
-                break;
-            case '5xx':
-                shouldShow = isStatusCodeRange(row.cells[1]?.textContent, 500, 599);
-                break;
-            case 'html':
-                shouldShow = isContentType(row.cells[2]?.textContent || row.cells[3]?.textContent, 'html');
-                break;
-            case 'css':
-                shouldShow = isContentType(row.cells[2]?.textContent || row.cells[3]?.textContent, 'css');
-                break;
-            case 'js':
-                shouldShow = isContentType(row.cells[2]?.textContent || row.cells[3]?.textContent, 'javascript');
-                break;
-            case 'images':
-                shouldShow = isContentType(row.cells[2]?.textContent || row.cells[3]?.textContent, 'image');
-                break;
-            default:
-                shouldShow = true;
-        }
-
-        row.style.display = shouldShow ? '' : 'none';
-    });
+    // This function is deprecated in favor of filterVirtualScrollerData
+    // Kept for backwards compatibility only
 }
 
 function isInternalURL(url) {
@@ -1223,6 +1315,14 @@ async function exportData() {
     }
 }
 
+// Helper function to escape HTML for safe display
+function escapeHtml(text) {
+    if (!text) return text;
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
 function showUrlDetails(url) {
     // Find the URL data
     const urlData = crawlState.urls.find(u => u.url === url);
@@ -1230,6 +1330,19 @@ function showUrlDetails(url) {
         showNotification('URL data not found', 'error');
         return;
     }
+
+    // Escape all user-controlled text fields to prevent HTML injection
+    const safeUrl = escapeHtml(url);
+    const safeTitle = escapeHtml(urlData.title) || 'N/A';
+    const safeH1 = escapeHtml(urlData.h1) || 'N/A';
+    const safeMetaDesc = escapeHtml(urlData.meta_description) || 'N/A';
+    const safeLang = escapeHtml(urlData.lang) || 'N/A';
+    const safeCharset = escapeHtml(urlData.charset) || 'N/A';
+    const safeCanonical = escapeHtml(urlData.canonical_url) || 'N/A';
+    const safeRobots = escapeHtml(urlData.robots) || 'N/A';
+    const safeContentType = escapeHtml(urlData.content_type) || 'N/A';
+    const safeGa4Id = escapeHtml(urlData.analytics?.ga4_id) || 'N/A';
+    const safeGtmId = escapeHtml(urlData.analytics?.gtm_id) || 'N/A';
 
     // Create modal content
     const modalContent = `
@@ -1240,20 +1353,20 @@ function showUrlDetails(url) {
                     <button class="close-btn" onclick="closeUrlDetails()">×</button>
                 </div>
                 <div class="details-content">
-                    <div class="details-url">${url}</div>
+                    <div class="details-url">${safeUrl}</div>
 
                     <div class="details-sections">
                         <div class="details-section">
                             <h4>🔍 Basic SEO</h4>
                             <div class="details-grid">
-                                <div><strong>Title:</strong> ${urlData.title || 'N/A'}</div>
-                                <div><strong>H1:</strong> ${urlData.h1 || 'N/A'}</div>
-                                <div><strong>Meta Description:</strong> ${urlData.meta_description || 'N/A'}</div>
+                                <div><strong>Title:</strong> ${safeTitle}</div>
+                                <div><strong>H1:</strong> ${safeH1}</div>
+                                <div><strong>Meta Description:</strong> ${safeMetaDesc}</div>
                                 <div><strong>Word Count:</strong> ${urlData.word_count || 0}</div>
-                                <div><strong>Language:</strong> ${urlData.lang || 'N/A'}</div>
-                                <div><strong>Charset:</strong> ${urlData.charset || 'N/A'}</div>
-                                <div><strong>Canonical URL:</strong> ${urlData.canonical_url || 'N/A'}</div>
-                                <div><strong>Robots Meta:</strong> ${urlData.robots || 'N/A'}</div>
+                                <div><strong>Language:</strong> ${safeLang}</div>
+                                <div><strong>Charset:</strong> ${safeCharset}</div>
+                                <div><strong>Canonical URL:</strong> ${safeCanonical}</div>
+                                <div><strong>Robots Meta:</strong> ${safeRobots}</div>
                             </div>
                         </div>
 
@@ -1262,8 +1375,8 @@ function showUrlDetails(url) {
                             <div class="details-grid">
                                 <div><strong>Google Analytics:</strong> ${urlData.analytics?.google_analytics ? '✅ Yes' : '❌ No'}</div>
                                 <div><strong>GA4/Gtag:</strong> ${urlData.analytics?.gtag ? '✅ Yes' : '❌ No'}</div>
-                                <div><strong>GA4 ID:</strong> ${urlData.analytics?.ga4_id || 'N/A'}</div>
-                                <div><strong>GTM ID:</strong> ${urlData.analytics?.gtm_id || 'N/A'}</div>
+                                <div><strong>GA4 ID:</strong> ${safeGa4Id}</div>
+                                <div><strong>GTM ID:</strong> ${safeGtmId}</div>
                                 <div><strong>Facebook Pixel:</strong> ${urlData.analytics?.facebook_pixel ? '✅ Yes' : '❌ No'}</div>
                                 <div><strong>Hotjar:</strong> ${urlData.analytics?.hotjar ? '✅ Yes' : '❌ No'}</div>
                                 <div><strong>Mixpanel:</strong> ${urlData.analytics?.mixpanel ? '✅ Yes' : '❌ No'}</div>
@@ -1280,7 +1393,7 @@ function showUrlDetails(url) {
                                 <div class="details-subsection">
                                     <h5>OpenGraph Tags:</h5>
                                     ${Object.entries(urlData.og_tags || {}).map(([key, value]) =>
-                                        `<div><strong>og:${key}:</strong> ${value}</div>`
+                                        `<div><strong>og:${escapeHtml(key)}:</strong> ${escapeHtml(value)}</div>`
                                     ).join('')}
                                 </div>
                             ` : ''}
@@ -1288,7 +1401,7 @@ function showUrlDetails(url) {
                                 <div class="details-subsection">
                                     <h5>Twitter Cards:</h5>
                                     ${Object.entries(urlData.twitter_tags || {}).map(([key, value]) =>
-                                        `<div><strong>twitter:${key}:</strong> ${value}</div>`
+                                        `<div><strong>twitter:${escapeHtml(key)}:</strong> ${escapeHtml(value)}</div>`
                                     ).join('')}
                                 </div>
                             ` : ''}
@@ -1310,7 +1423,7 @@ function showUrlDetails(url) {
                             <div class="details-grid">
                                 <div><strong>Status Code:</strong> ${urlData.status_code}</div>
                                 <div><strong>Response Time:</strong> ${urlData.response_time || 0}ms</div>
-                                <div><strong>Content Type:</strong> ${urlData.content_type || 'N/A'}</div>
+                                <div><strong>Content Type:</strong> ${safeContentType}</div>
                                 <div><strong>Size:</strong> ${urlData.size || 0} bytes</div>
                             </div>
                         </div>
@@ -1323,9 +1436,10 @@ function showUrlDetails(url) {
                             </div>
                             <div class="details-subsection">
                                 <ul style="list-style: none; padding: 0; margin: 10px 0;">
-                                    ${urlData.linked_from.slice(0, 20).map(sourceUrl =>
-                                        `<li style="padding: 5px 0; word-break: break-all;"><a href="${sourceUrl}" target="_blank" style="color: #8b5cf6; text-decoration: none;">${sourceUrl}</a></li>`
-                                    ).join('')}
+                                    ${urlData.linked_from.slice(0, 20).map(sourceUrl => {
+                                        const escapedUrl = escapeHtml(sourceUrl);
+                                        return `<li style="padding: 5px 0; word-break: break-all;"><a href="${escapedUrl}" target="_blank" style="color: #8b5cf6; text-decoration: none;">${escapedUrl}</a></li>`;
+                                    }).join('')}
                                     ${urlData.linked_from.length > 20 ? `<li style="padding: 5px 0; font-style: italic; color: #9ca3af;">... and ${urlData.linked_from.length - 20} more</li>` : ''}
                                 </ul>
                             </div>
@@ -1341,7 +1455,7 @@ function showUrlDetails(url) {
                             ${(urlData.json_ld || []).length > 0 ? `
                                 <div class="details-subsection">
                                     <h5>JSON-LD Data:</h5>
-                                    <pre class="json-preview">${JSON.stringify(urlData.json_ld, null, 2)}</pre>
+                                    <pre class="json-preview">${escapeHtml(JSON.stringify(urlData.json_ld, null, 2))}</pre>
                                 </div>
                             ` : ''}
                         </div>
@@ -1782,7 +1896,7 @@ function renderExternalLinkRow(row, link, index) {
         <td style="word-break: break-all;">${link.source_url}</td>
         <td style="word-break: break-all;">${link.target_url}</td>
         <td>${statusBadge}</td>
-        <td>${link.target_domain}</td>
+        <td>${link.target_domain || ''}</td>
         <td>${placement}</td>
     `;
 }
