@@ -45,20 +45,32 @@ playwright install chromium
 
 4. Run the application:
 ```bash
+# Standard mode (with authentication and tier system)
 python main.py
+
+# Local mode (all users get admin tier, no rate limits)
+python main.py --local
+# or
+python main.py -l
 ```
 
 5. Open your browser and navigate to:
    - Local: `http://localhost:5000`
    - Network: `http://<your-ip>:5000`
 
-### Basic usage
+### Running Modes
 
-1. Enter a website URL in the input field
-2. Click "Start" to begin crawling
-3. View results in the different tabs (Overview, Internal, External, Links, Issues, PageSpeed)
-4. Use "Export" to save data or "Save Crawl" to resume later
-5. Customize the UI appearance in Settings > Custom CSS
+**Standard Mode** (default):
+- Full authentication system with login/register
+- Tier-based access control (Guest, User, Extra, Admin)
+- Guest users limited to 3 crawls per 24 hours (IP-based)
+- Ideal for public-facing demos or shared hosting
+
+**Local Mode** (`--local` or `-l`):
+- All users automatically get admin tier access
+- No rate limits or tier restrictions
+- Perfect for personal use or single-user self-hosting
+- Recommended for local development and testing
 
 ## Configuration
 
