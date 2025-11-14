@@ -3,6 +3,7 @@
 A web-based multi-tenant crawler for SEO analysis and website auditing.
 
 🌐 **Website**: [librecrawl.com](https://librecrawl.com)
+**Try the Live Demo:** [crawl.librecrawl.com](https://crawl.librecrawl.com/)
 
 ## What it does
 
