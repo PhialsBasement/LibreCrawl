@@ -5,6 +5,7 @@ import json
 import xml.etree.ElementTree as ET
 import uuid
 import webbrowser
+import argparse
 from io import StringIO
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
@@ -13,11 +14,26 @@ from src.crawler import WebCrawler
 from src.settings_manager import SettingsManager
 from src.auth_db import init_db, create_user, authenticate_user, get_user_by_id, log_guest_crawl, get_guest_crawls_last_24h
 
+# Parse command line arguments
+parser = argparse.ArgumentParser(description='LibreCrawl - SEO Spider Tool')
+parser.add_argument('--local', '-l', action='store_true',
+                    help='Run in local mode (all users get admin tier, no rate limits)')
+args = parser.parse_args()
+
+LOCAL_MODE = args.local
+
 app = Flask(__name__, template_folder='web/templates', static_folder='web/static')
-app.secret_key = 'EITHER-USE-OS-ENV-OR-WRITE-RNG-KEY-HERE'
+app.secret_key = 'librecrawl-secret-key-change-in-production'  # TODO: Use environment variable in production
 
 # Initialize database on startup
 init_db()
+
+if LOCAL_MODE:
+    print("=" * 60)
+    print("LOCAL MODE ENABLED")
+    print("All users will have admin tier access")
+    print("No rate limits or tier restrictions")
+    print("=" * 60)
 
 def get_client_ip():
     """Get the real client IP address, checking Cloudflare headers first"""
@@ -338,6 +354,24 @@ def register():
     password = data.get('password')
 
     success, message = create_user(username, email, password)
+
+    # In local mode, auto-verify and set to admin tier
+    if success and LOCAL_MODE:
+        from src.auth_db import verify_user, set_user_tier
+        # Get the user that was just created
+        import sqlite3
+        conn = sqlite3.connect('users.db')
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute('SELECT id FROM users WHERE username = ?', (username,))
+        user = cursor.fetchone()
+        conn.close()
+
+        if user:
+            verify_user(user['id'])
+            set_user_tier(user['id'], 'admin')
+            message = 'Account created and verified! You have admin access in local mode.'
+
     return jsonify({'success': success, 'message': message})
 
 @app.route('/api/login', methods=['POST'])
@@ -351,7 +385,8 @@ def login():
     if success:
         session['user_id'] = user_data['id']
         session['username'] = user_data['username']
-        session['tier'] = user_data['tier']
+        # In local mode, always give admin tier
+        session['tier'] = 'admin' if LOCAL_MODE else user_data['tier']
         session.permanent = True  # Remember login
 
     return jsonify({'success': success, 'message': message})
@@ -360,9 +395,10 @@ def login():
 def guest_login():
     """Login as a guest user (no account required, limited to 3 crawls/24h)"""
     # Create a guest session with no user_id but with tier='guest'
+    # In local mode, guests also get admin tier
     session['user_id'] = None
     session['username'] = 'Guest'
-    session['tier'] = 'guest'
+    session['tier'] = 'admin' if LOCAL_MODE else 'guest'
     session.permanent = False  # Don't persist guest sessions
 
     return jsonify({'success': True, 'message': 'Logged in as guest'})
@@ -428,8 +464,8 @@ def start_crawl():
     user_id = session.get('user_id')
     tier = session.get('tier', 'guest')
 
-    # Check guest limits (IP-based)
-    if tier == 'guest':
+    # Check guest limits (IP-based) - skip in local mode
+    if tier == 'guest' and not LOCAL_MODE:
         client_ip = get_client_ip()
         crawls_from_ip = get_guest_crawls_last_24h(client_ip)
 
@@ -817,7 +853,7 @@ def main():
     browser_thread.start()
 
     # Run Flask server
-    app.run(host='0.0.0.0', port=80, debug=False, use_reloader=False)
+    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
 
 if __name__ == '__main__':
     main()
