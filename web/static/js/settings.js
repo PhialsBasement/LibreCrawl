@@ -305,7 +305,28 @@ function resetIssueExclusions() {
     alert('Issue exclusion patterns have been reset to defaults');
 }
 
-function openSettings() {
+async function openSettings() {
+    // Get user tier info
+    let userTier = 'guest';
+    try {
+        const response = await fetch('/api/user/info');
+        const data = await response.json();
+        if (data.success) {
+            userTier = data.user.tier;
+        }
+    } catch (error) {
+        console.error('Failed to get user tier:', error);
+    }
+
+    // Block guests from accessing settings
+    if (userTier === 'guest') {
+        alert('Settings are not available for guest users.\n\nPlease register for a free account to customize crawler settings, filters, and more.\n\nClick "Logout" and then "Register here" to create an account.');
+        return;
+    }
+
+    // Hide tabs based on tier
+    applyTierRestrictions(userTier);
+
     // Load current settings into form
     populateSettingsForm();
 
@@ -316,6 +337,55 @@ function openSettings() {
     const firstInput = document.querySelector('.settings-tab-content.active input, .settings-tab-content.active select');
     if (firstInput) {
         setTimeout(() => firstInput.focus(), 100);
+    }
+}
+
+function applyTierRestrictions(tier) {
+    // Define which tabs each tier can see - MUST MATCH HTML TAB NAMES
+    const tierTabs = {
+        'guest': [],  // No settings tabs for guests
+        'user': ['crawler', 'export', 'issues'],
+        'extra': ['crawler', 'export', 'issues', 'filters', 'requests', 'customcss', 'javascript'],
+        'admin': ['crawler', 'requests', 'filters', 'export', 'javascript', 'issues', 'customcss', 'advanced']
+    };
+
+    const allowedTabs = tierTabs[tier] || [];
+
+    // Hide/show tab buttons based on tier
+    const allTabButtons = document.querySelectorAll('.settings-tab-btn');
+    allTabButtons.forEach(btn => {
+        const tabName = btn.getAttribute('onclick').match(/switchSettingsTab\('(.+?)'\)/)[1];
+        if (allowedTabs.includes(tabName)) {
+            btn.style.display = 'inline-block';
+        } else {
+            btn.style.display = 'none';
+        }
+    });
+
+    // If current active tab is not allowed, switch to first allowed tab
+    const activeTab = document.querySelector('.settings-tab-btn.active');
+    if (activeTab && activeTab.style.display === 'none' && allowedTabs.length > 0) {
+        // Click the first visible tab
+        const firstVisibleTab = document.querySelector('.settings-tab-btn[style*="inline-block"]');
+        if (firstVisibleTab) {
+            firstVisibleTab.click();
+        }
+    }
+
+    // Show message for guests
+    if (tier === 'guest') {
+        const settingsContent = document.querySelector('.settings-tabs');
+        if (settingsContent) {
+            const message = document.createElement('div');
+            message.style.cssText = 'padding: 40px; text-align: center; color: #9ca3af; font-size: 16px;';
+            message.innerHTML = `
+                <h3 style="color: #f3f4f6; margin-bottom: 16px;">Settings Access Restricted</h3>
+                <p>Guest accounts cannot modify settings.</p>
+                <p style="margin-top: 8px; font-size: 14px;">Please upgrade your account to access settings.</p>
+            `;
+            settingsContent.innerHTML = '';
+            settingsContent.appendChild(message);
+        }
     }
 }
 

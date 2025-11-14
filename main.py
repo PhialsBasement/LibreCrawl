@@ -7,12 +7,42 @@ import uuid
 import webbrowser
 from io import StringIO
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, jsonify, session
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from functools import wraps
 from src.crawler import WebCrawler
 from src.settings_manager import SettingsManager
+from src.auth_db import init_db, create_user, authenticate_user, get_user_by_id, log_guest_crawl, get_guest_crawls_last_24h
 
 app = Flask(__name__, template_folder='web/templates', static_folder='web/static')
-app.secret_key = 'librecrawl-secret-key-change-in-production'  # TODO: Use environment variable in production
+app.secret_key = 'EITHER-USE-OS-ENV-OR-WRITE-RNG-KEY-HERE'
+
+# Initialize database on startup
+init_db()
+
+def get_client_ip():
+    """Get the real client IP address, checking Cloudflare headers first"""
+    # Check Cloudflare header first
+    if 'CF-Connecting-IP' in request.headers:
+        return request.headers['CF-Connecting-IP']
+    # Check other common proxy headers
+    if 'X-Forwarded-For' in request.headers:
+        # X-Forwarded-For can contain multiple IPs, take the first one
+        return request.headers['X-Forwarded-For'].split(',')[0].strip()
+    if 'X-Real-IP' in request.headers:
+        return request.headers['X-Real-IP']
+    # Fall back to direct connection IP
+    return request.remote_addr
+
+def login_required(f):
+    """Decorator to require login for routes"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            if request.path.startswith('/api/'):
+                return jsonify({'success': False, 'error': 'Authentication required'}), 401
+            return redirect(url_for('login_page'))
+        return f(*args, **kwargs)
+    return decorated_function
 
 # Multi-tenant crawler instances
 crawler_instances = {}  # session_id -> {'crawler': WebCrawler, 'settings': SettingsManager, 'last_accessed': datetime}
@@ -25,14 +55,16 @@ def get_or_create_crawler():
         session['session_id'] = str(uuid.uuid4())
 
     session_id = session['session_id']
+    user_id = session.get('user_id')  # Get user_id from session
+    tier = session.get('tier', 'guest')  # Get tier from session
 
     with instances_lock:
         # Check if crawler exists for this session
         if session_id not in crawler_instances:
-            print(f"Creating new crawler instance for session: {session_id}")
+            print(f"Creating new crawler instance for session: {session_id}, user: {user_id}, tier: {tier}")
             crawler_instances[session_id] = {
                 'crawler': WebCrawler(),
-                'settings': SettingsManager(session_id=session_id),  # Per-session settings
+                'settings': SettingsManager(session_id=session_id, user_id=user_id, tier=tier),  # Per-user settings
                 'last_accessed': datetime.now()
             }
         else:
@@ -48,14 +80,16 @@ def get_session_settings():
         session['session_id'] = str(uuid.uuid4())
 
     session_id = session['session_id']
+    user_id = session.get('user_id')  # Get user_id from session
+    tier = session.get('tier', 'guest')  # Get tier from session
 
     with instances_lock:
         # Create instance if it doesn't exist
         if session_id not in crawler_instances:
-            print(f"Creating new settings instance for session: {session_id}")
+            print(f"Creating new settings instance for session: {session_id}, user: {user_id}, tier: {tier}")
             crawler_instances[session_id] = {
                 'crawler': WebCrawler(),
-                'settings': SettingsManager(session_id=session_id),
+                'settings': SettingsManager(session_id=session_id, user_id=user_id, tier=tier),
                 'last_accessed': datetime.now()
             }
         else:
@@ -282,22 +316,131 @@ def generate_issues_json_export(issues):
         'all_issues': issues
     }, indent=2)
 
+@app.route('/login')
+def login_page():
+    # Redirect to app if already logged in
+    if 'user_id' in session:
+        return redirect(url_for('index'))
+    return render_template('login.html')
+
+@app.route('/register')
+def register_page():
+    # Redirect to app if already logged in
+    if 'user_id' in session:
+        return redirect(url_for('index'))
+    return render_template('register.html')
+
+@app.route('/api/register', methods=['POST'])
+def register():
+    data = request.get_json()
+    username = data.get('username')
+    email = data.get('email')
+    password = data.get('password')
+
+    success, message = create_user(username, email, password)
+    return jsonify({'success': success, 'message': message})
+
+@app.route('/api/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+
+    success, message, user_data = authenticate_user(username, password)
+
+    if success:
+        session['user_id'] = user_data['id']
+        session['username'] = user_data['username']
+        session['tier'] = user_data['tier']
+        session.permanent = True  # Remember login
+
+    return jsonify({'success': success, 'message': message})
+
+@app.route('/api/guest-login', methods=['POST'])
+def guest_login():
+    """Login as a guest user (no account required, limited to 3 crawls/24h)"""
+    # Create a guest session with no user_id but with tier='guest'
+    session['user_id'] = None
+    session['username'] = 'Guest'
+    session['tier'] = 'guest'
+    session.permanent = False  # Don't persist guest sessions
+
+    return jsonify({'success': True, 'message': 'Logged in as guest'})
+
+@app.route('/api/logout', methods=['POST'])
+@login_required
+def logout():
+    session.clear()
+    return jsonify({'success': True, 'message': 'Logged out successfully'})
+
+@app.route('/api/user/info')
+@login_required
+def user_info():
+    """Get current user info including tier"""
+    from src.auth_db import get_crawls_last_24h
+    user_id = session.get('user_id')
+    tier = session.get('tier', 'guest')
+    username = session.get('username')
+
+    # Get crawl count
+    crawls_today = 0
+    if tier == 'guest':
+        # For guests, count from IP address
+        client_ip = get_client_ip()
+        crawls_today = get_guest_crawls_last_24h(client_ip)
+    else:
+        # For registered users, count from database
+        crawls_today = get_crawls_last_24h(user_id)
+
+    return jsonify({
+        'success': True,
+        'user': {
+            'id': user_id,
+            'username': username,
+            'tier': tier,
+            'crawls_today': crawls_today,
+            'crawls_remaining': max(0, 3 - crawls_today) if tier == 'guest' else -1
+        }
+    })
+
 @app.route('/')
+@login_required
 def index():
     return render_template('index.html')
 
 @app.route('/debug/memory')
+@login_required
 def debug_memory_page():
     """Debug page with nice UI for memory monitoring"""
     return render_template('debug_memory.html')
 
 @app.route('/api/start_crawl', methods=['POST'])
+@login_required
 def start_crawl():
+    from src.auth_db import get_crawls_last_24h, log_crawl_start
+
     data = request.get_json()
     url = data.get('url')
 
     if not url:
         return jsonify({'success': False, 'error': 'URL is required'})
+
+    user_id = session.get('user_id')
+    tier = session.get('tier', 'guest')
+
+    # Check guest limits (IP-based)
+    if tier == 'guest':
+        client_ip = get_client_ip()
+        crawls_from_ip = get_guest_crawls_last_24h(client_ip)
+
+        if crawls_from_ip >= 3:
+            return jsonify({
+                'success': False,
+                'error': 'Guest limit reached: 3 crawls per 24 hours from your IP address. Please register for unlimited crawls.'
+            })
+
+        # Log this guest crawl
+        log_guest_crawl(client_ip)
 
     # Get or create crawler for this session
     crawler = get_or_create_crawler()
@@ -311,15 +454,23 @@ def start_crawl():
         print(f"Warning: Could not apply settings: {e}")
 
     success, message = crawler.start_crawl(url)
+
+    # Log crawl start
+    if success:
+        crawl_id = log_crawl_start(user_id, url)
+        session['current_crawl_id'] = crawl_id
+
     return jsonify({'success': success, 'message': message})
 
 @app.route('/api/stop_crawl', methods=['POST'])
+@login_required
 def stop_crawl():
     crawler = get_or_create_crawler()
     success, message = crawler.stop_crawl()
     return jsonify({'success': success, 'message': message})
 
 @app.route('/api/crawl_status')
+@login_required
 def crawl_status():
     crawler = get_or_create_crawler()
     settings_manager = get_session_settings()
@@ -337,6 +488,7 @@ def crawl_status():
     return jsonify(status_data)
 
 @app.route('/api/debug/memory')
+@login_required
 def debug_memory():
     """Debug endpoint showing memory stats for all active crawler instances"""
     from src.core.memory_profiler import MemoryProfiler
@@ -369,6 +521,7 @@ def debug_memory():
         return jsonify(memory_stats)
 
 @app.route('/api/debug/memory/profile')
+@login_required
 def debug_memory_profile():
     """Detailed memory profiling - what's actually using the RAM"""
     from src.core.memory_profiler import MemoryProfiler
@@ -402,6 +555,7 @@ def debug_memory_profile():
         })
 
 @app.route('/api/filter_issues', methods=['POST'])
+@login_required
 def filter_issues():
     try:
         data = request.get_json()
@@ -421,6 +575,7 @@ def filter_issues():
         return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/get_settings')
+@login_required
 def get_settings():
     try:
         settings_manager = get_session_settings()
@@ -430,6 +585,7 @@ def get_settings():
         return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/save_settings', methods=['POST'])
+@login_required
 def save_settings():
     try:
         data = request.get_json()
@@ -440,6 +596,7 @@ def save_settings():
         return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/reset_settings', methods=['POST'])
+@login_required
 def reset_settings():
     try:
         settings_manager = get_session_settings()
@@ -449,6 +606,7 @@ def reset_settings():
         return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/update_crawler_settings', methods=['POST'])
+@login_required
 def update_crawler_settings():
     try:
         crawler = get_or_create_crawler()
@@ -461,6 +619,7 @@ def update_crawler_settings():
         return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/pause_crawl', methods=['POST'])
+@login_required
 def pause_crawl():
     try:
         crawler = get_or_create_crawler()
@@ -470,6 +629,7 @@ def pause_crawl():
         return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/resume_crawl', methods=['POST'])
+@login_required
 def resume_crawl():
     try:
         crawler = get_or_create_crawler()
@@ -479,6 +639,7 @@ def resume_crawl():
         return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/export_data', methods=['POST'])
+@login_required
 def export_data():
     try:
         data = request.get_json()
@@ -656,7 +817,7 @@ def main():
     browser_thread.start()
 
     # Run Flask server
-    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
+    app.run(host='0.0.0.0', port=80, debug=False, use_reloader=False)
 
 if __name__ == '__main__':
     main()

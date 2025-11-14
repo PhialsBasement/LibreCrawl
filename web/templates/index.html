@@ -14,10 +14,12 @@
             <div class="header-content">
                 <h1 class="app-title">LibreCrawl</h1>
                 <div class="header-actions">
+                    <span id="userInfo" style="margin-right: 15px; color: #6b7280; font-size: 14px;"></span>
                     <button class="btn btn-secondary" onclick="openSettings()">Settings</button>
                     <button class="btn btn-secondary" onclick="exportData()">Export</button>
                     <button class="btn btn-success" id="saveCrawlBtn" onclick="saveCrawl()" disabled>Save Crawl</button>
                     <button class="btn btn-primary" id="loadCrawlBtn" onclick="loadCrawl()">Load Crawl</button>
+                    <button class="btn btn-danger" onclick="logout()" style="margin-left: 10px;">Logout</button>
                 </div>
             </div>
         </header>

@@ -47,6 +47,9 @@ function initializeApp() {
     // Initialize tables
     initializeTables();
 
+    // Load user info
+    loadUserInfo();
+
     // Set initial focus
     document.getElementById('urlInput').focus();
 
@@ -217,6 +220,8 @@ function startPythonCrawl(url) {
     .then(data => {
         if (data.success) {
             updateStatus('Crawling in progress...');
+            // Refresh user info to update crawl count
+            loadUserInfo();
             // Start polling for updates
             pollCrawlProgress();
         } else {
@@ -1197,10 +1202,57 @@ function isValidUrl(string) {
     }
 }
 
-// Placeholder functions for menu actions
-function openSettings() {
-    console.log('Settings clicked');
-    // Implementation would go here
+// This is defined in settings.js - no need to redefine here
+
+async function logout() {
+    try {
+        const response = await fetch('/api/logout', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            // Redirect to login page
+            window.location.href = '/login';
+        } else {
+            console.error('Logout failed:', data.message);
+            // Still redirect even if logout fails
+            window.location.href = '/login';
+        }
+    } catch (error) {
+        console.error('Logout error:', error);
+        // Redirect anyway
+        window.location.href = '/login';
+    }
+}
+
+async function loadUserInfo() {
+    try {
+        const response = await fetch('/api/user/info');
+        const data = await response.json();
+
+        if (data.success && data.user) {
+            const user = data.user;
+            const userInfoElement = document.getElementById('userInfo');
+
+            if (user.tier === 'guest') {
+                // Show crawls remaining for guests
+                const remaining = user.crawls_remaining;
+                userInfoElement.textContent = `Guest (${remaining}/3 crawls remaining)`;
+                userInfoElement.style.color = remaining === 0 ? '#dc2626' : '#6b7280';
+            } else {
+                // Show username and tier for registered users
+                userInfoElement.textContent = `${user.username} (${user.tier})`;
+                userInfoElement.style.color = '#6b7280';
+            }
+        }
+    } catch (error) {
+        console.error('Error loading user info:', error);
+    }
 }
 
 async function exportData() {

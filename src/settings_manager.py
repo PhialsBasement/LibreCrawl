@@ -3,26 +3,71 @@ import os
 from pathlib import Path
 
 class SettingsManager:
-    def __init__(self, session_id=None):
+    def __init__(self, session_id=None, user_id=None, tier='guest'):
         """
         Initialize settings manager
-        If session_id is provided, settings are session-specific (multi-tenancy)
-        If session_id is None, settings are global (legacy behavior)
+        user_id: Database user ID for per-user settings storage
+        session_id: Session ID (deprecated, kept for compatibility)
+        tier: User tier (guest, user, extra, admin)
         """
         self.session_id = session_id
-
-        if session_id:
-            # Session-specific settings (stored in memory, not persisted)
-            self.settings_file = None
-            self.settings_dir = None
-        else:
-            # Global settings (persisted to disk)
-            self.settings_file = Path.home() / '.librecrawl' / 'settings.json'
-            self.settings_dir = self.settings_file.parent
+        self.user_id = user_id
+        self.tier = tier
 
         # Load default settings
         self.default_settings = self._get_default_settings()
         self.current_settings = self.load_settings()
+
+    def _get_tier_allowed_settings(self):
+        """Get settings keys allowed for each tier - MAPPED DIRECTLY FROM HTML TABS"""
+        # guest: can only crawl, no settings control
+        guest_settings = []
+
+        # user: Crawler, Export, Issue Exclusion tabs
+        user_settings = [
+            # Crawler tab
+            'maxDepth', 'maxUrls', 'crawlDelay', 'followRedirects', 'crawlExternalLinks',
+            # Export tab
+            'exportFormat', 'exportFields',
+            # Issues tab
+            'issueExclusionPatterns'
+        ]
+
+        # extra: all in user + Filters, Requests, Custom CSS, JavaScript tabs
+        # NOTE: Advanced tab settings (concurrency, memoryLimit, logLevel, saveSession,
+        #       enableProxy, proxyUrl, customHeaders) are ADMIN ONLY
+        extra_settings = user_settings + [
+            # Requests tab
+            'userAgent', 'timeout', 'retries', 'acceptLanguage', 'respectRobotsTxt', 'allowCookies',
+            'discoverSitemaps', 'enablePageSpeed', 'googleApiKey',
+            # Filters tab
+            'includeExtensions', 'excludeExtensions', 'includePatterns', 'excludePatterns', 'maxFileSize',
+            # JavaScript tab
+            'enableJavaScript', 'jsWaitTime', 'jsTimeout', 'jsBrowser', 'jsHeadless',
+            'jsUserAgent', 'jsViewportWidth', 'jsViewportHeight', 'jsMaxConcurrentPages',
+            # Custom CSS tab
+            'customCSS'
+        ]
+
+        # admin: all settings including Advanced tab
+        admin_settings = list(self.default_settings.keys())
+
+        return {
+            'guest': guest_settings,
+            'user': user_settings,
+            'extra': extra_settings,
+            'admin': admin_settings
+        }
+
+    def filter_settings_by_tier(self, settings):
+        """Filter settings to only include ones allowed for this tier"""
+        allowed = self._get_tier_allowed_settings().get(self.tier, [])
+        if not allowed:  # guest gets nothing
+            return {}
+        if self.tier == 'admin':  # admin gets everything
+            return settings
+        # Filter to allowed keys only
+        return {k: v for k, v in settings.items() if k in allowed}
 
     def _get_default_settings(self):
         """Get fresh default settings"""
@@ -287,52 +332,58 @@ class SettingsManager:
 *.min.css'''
         }
 
-    def ensure_settings_dir(self):
-        """Ensure the settings directory exists"""
-        self.settings_dir.mkdir(parents=True, exist_ok=True)
-
     def load_settings(self):
-        """Load settings from file or return defaults"""
+        """Load settings from database or return defaults"""
         try:
-            # Session-specific settings always start with defaults
-            if self.session_id:
-                return self.default_settings.copy()
-
-            # Global settings load from disk
-            if self.settings_file and self.settings_file.exists():
-                with open(self.settings_file, 'r', encoding='utf-8') as f:
-                    saved_settings = json.load(f)
+            # If user_id is provided, load from database
+            if self.user_id:
+                from src.auth_db import get_user_settings
+                saved_settings = get_user_settings(self.user_id)
+                if saved_settings:
                     # Merge with defaults to ensure all keys are present
                     settings = {**self.default_settings}
                     settings.update(saved_settings)
                     return settings
-            else:
-                return self.default_settings.copy()
+
+            # Otherwise return defaults
+            return self.default_settings.copy()
+
         except Exception as e:
             print(f"Error loading settings: {e}")
             return self.default_settings.copy()
 
     def save_settings(self, settings):
-        """Save settings to file or memory"""
+        """Save settings to database (filtered by tier)"""
         try:
+            # Filter settings by tier to prevent unauthorized changes
+            filtered_settings = self.filter_settings_by_tier(settings)
+
             # Validate settings before saving
-            if not self.validate_settings(settings):
+            # Only validate the filtered settings that the user is allowed to change
+            test_settings = {**self.default_settings}
+            test_settings.update(filtered_settings)
+            if not self.validate_settings(test_settings):
                 return False, "Invalid settings provided"
 
-            # Update current settings
-            self.current_settings = {**self.default_settings}
-            self.current_settings.update(settings)
+            # Load current settings from database to preserve unauthorized keys
+            if self.user_id:
+                from src.auth_db import get_user_settings, save_user_settings
+                current_db_settings = get_user_settings(self.user_id) or self.default_settings.copy()
 
-            # Session-specific settings only stored in memory
-            if self.session_id:
-                return True, "Settings saved successfully (session-specific)"
+                # Update only the filtered (allowed) keys
+                current_db_settings.update(filtered_settings)
 
-            # Global settings saved to disk
-            self.ensure_settings_dir()
-            with open(self.settings_file, 'w', encoding='utf-8') as f:
-                json.dump(self.current_settings, f, indent=2, ensure_ascii=False)
+                # Save back to database
+                success, message = save_user_settings(self.user_id, current_db_settings)
 
-            return True, "Settings saved successfully"
+                # Update in-memory settings
+                self.current_settings = current_db_settings
+
+                return success, message
+
+            # If no user_id, just keep in memory (session-specific)
+            self.current_settings.update(filtered_settings)
+            return True, "Settings saved successfully (session-specific)"
 
         except Exception as e:
             return False, f"Error saving settings: {str(e)}"
@@ -466,26 +517,3 @@ class SettingsManager:
                     key, value = line.split(':', 1)
                     headers[key.strip()] = value.strip()
         return headers
-
-    def export_settings(self, file_path):
-        """Export settings to a file"""
-        try:
-            with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(self.current_settings, f, indent=2, ensure_ascii=False)
-            return True, "Settings exported successfully"
-        except Exception as e:
-            return False, f"Error exporting settings: {str(e)}"
-
-    def import_settings(self, file_path):
-        """Import settings from a file"""
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                imported_settings = json.load(f)
-
-            if self.validate_settings(imported_settings):
-                return self.save_settings(imported_settings)
-            else:
-                return False, "Invalid settings file format"
-
-        except Exception as e:
-            return False, f"Error importing settings: {str(e)}"
