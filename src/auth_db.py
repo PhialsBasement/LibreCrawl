@@ -219,6 +219,17 @@ def get_all_users():
         print(f"Error fetching users: {e}")
         return []
 
+def verify_user(user_id):
+    """Verify a user account (for admin purposes)"""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute('UPDATE users SET verified = 1 WHERE id = ?', (user_id,))
+        return True, "User verified successfully"
+    except Exception as e:
+        print(f"Error verifying user: {e}")
+        return False, str(e)
+
 def save_user_settings(user_id, settings_dict):
     """Save settings for a user (stores as JSON)"""
     import json

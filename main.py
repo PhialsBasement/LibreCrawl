@@ -357,20 +357,25 @@ def register():
 
     # In local mode, auto-verify and set to admin tier
     if success and LOCAL_MODE:
-        from src.auth_db import verify_user, set_user_tier
-        # Get the user that was just created
-        import sqlite3
-        conn = sqlite3.connect('users.db')
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute('SELECT id FROM users WHERE username = ?', (username,))
-        user = cursor.fetchone()
-        conn.close()
+        try:
+            from src.auth_db import verify_user, set_user_tier
+            # Get the user that was just created
+            import sqlite3
+            conn = sqlite3.connect('users.db')
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute('SELECT id FROM users WHERE username = ?', (username,))
+            user = cursor.fetchone()
+            conn.close()
 
-        if user:
-            verify_user(user['id'])
-            set_user_tier(user['id'], 'admin')
-            message = 'Account created and verified! You have admin access in local mode.'
+            if user:
+                verify_user(user['id'])
+                set_user_tier(user['id'], 'admin')
+                message = 'Account created and verified! You have admin access in local mode.'
+        except Exception as e:
+            print(f"Error during local mode auto-verification: {e}")
+            # Don't fail the registration, just log the error
+            # The account is still created successfully
 
     return jsonify({'success': success, 'message': message})
 
