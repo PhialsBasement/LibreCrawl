@@ -189,6 +189,11 @@ function clearCrawlData() {
     document.getElementById('issues-warning-count').textContent = '(0)';
     document.getElementById('issues-info-count').textContent = '(0)';
 
+    // Clear visualization
+    if (typeof window.clearVisualization === 'function') {
+        window.clearVisualization();
+    }
+
     // Clear filter states
     document.querySelectorAll('.filter-item').forEach(item => {
         item.classList.remove('active');
@@ -264,11 +269,21 @@ function pollCrawlProgress() {
                 updateStatus('Crawling in progress...');
             }
 
+            // Update visualization if visualization tab is active
+            const vizTab = document.getElementById('visualization-tab');
+            if (vizTab && vizTab.classList.contains('active') && typeof loadVisualizationData === 'function') {
+                loadVisualizationData();
+            }
+
             if (crawlState.isRunning && data.status !== 'completed') {
                 setTimeout(pollCrawlProgress, 1000); // Poll every second
             } else if (data.status === 'completed') {
                 stopCrawl();
                 updateStatus('Crawl completed');
+                // Update visualization one final time when crawl completes
+                if (typeof loadVisualizationData === 'function') {
+                    loadVisualizationData();
+                }
             }
         })
         .catch(error => {
@@ -842,6 +857,14 @@ function switchTab(tabName) {
     if (tabName === 'issues' && crawlState.pendingIssues) {
         updateIssuesTable(crawlState.pendingIssues);
         crawlState.pendingIssues = null; // Clear pending data
+    }
+
+    // Initialize visualization if switching to Visualization tab
+    if (tabName === 'visualization' && typeof initVisualization === 'function') {
+        // Small delay to ensure the tab is visible before initializing
+        setTimeout(() => {
+            initVisualization();
+        }, 100);
     }
 }
 
@@ -1840,6 +1863,11 @@ function loadCrawl() {
                 const externalCount = document.getElementById('externalTableBody').children.length;
                 console.log(`Table counts - Overview: ${overviewCount}, Internal: ${internalCount}, External: ${externalCount}`);
             }, 100);
+
+            // Update visualization if it exists and has been initialized
+            if (typeof window.updateVisualizationFromLoadedData === 'function') {
+                window.updateVisualizationFromLoadedData(saveData.urls, saveData.links);
+            }
 
             showNotification(`Crawl loaded: ${saveData.stats.crawled} URLs from ${new Date(saveData.timestamp).toLocaleDateString()}`, 'success');
 

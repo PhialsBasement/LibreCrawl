@@ -1199,3 +1199,168 @@ body {
     text-align: center;
     font-size: 14px;
 }
+
+/* Visualization Tab Styles */
+.visualization-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    gap: 16px;
+    padding: 20px;
+}
+
+.visualization-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #475569;
+}
+
+.visualization-header h3 {
+    font-size: 18px;
+    font-weight: 600;
+    color: #f1f5f9;
+}
+
+.visualization-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.visualization-controls select {
+    padding: 8px 12px;
+    background: #1f2937;
+    border: 1px solid #4b5563;
+    border-radius: 6px;
+    color: #e5e7eb;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.visualization-controls select:hover {
+    border-color: #8b5cf6;
+}
+
+.visualization-controls select:focus {
+    outline: none;
+    border-color: #8b5cf6;
+    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
+}
+
+.graph-container {
+    flex: 1;
+    background: rgba(15, 23, 42, 0.5);
+    border: 1px solid #475569;
+    border-radius: 12px;
+    position: relative;
+    min-height: 500px;
+    overflow: hidden;
+}
+
+.graph-placeholder {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    color: #6b7280;
+}
+
+.graph-placeholder svg {
+    margin-bottom: 20px;
+    opacity: 0.5;
+    stroke-width: 1.5;
+}
+
+.graph-placeholder h3 {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #9ca3af;
+}
+
+.graph-placeholder p {
+    font-size: 14px;
+    color: #6b7280;
+}
+
+.visualization-legend {
+    display: flex;
+    gap: 24px;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(15, 23, 42, 0.3);
+    border-radius: 8px;
+    border: 1px solid #475569;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: #cbd5e1;
+}
+
+.legend-color {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+/* Cytoscape tooltip styling */
+.cy-tooltip {
+    position: absolute;
+    background: rgba(15, 23, 42, 0.95);
+    border: 1px solid #8b5cf6;
+    border-radius: 8px;
+    padding: 12px 16px;
+    color: #e5e7eb;
+    font-size: 13px;
+    pointer-events: none;
+    z-index: 9999;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+    max-width: 400px;
+}
+
+.cy-tooltip .tooltip-url {
+    font-weight: 600;
+    color: #8b5cf6;
+    margin-bottom: 8px;
+    word-break: break-all;
+}
+
+.cy-tooltip .tooltip-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+    color: #cbd5e1;
+}
+
+.cy-tooltip .tooltip-status {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 11px;
+    margin-top: 4px;
+}
+
+.cy-tooltip .status-2xx { background: rgba(16, 185, 129, 0.2); color: #10b981; }
+.cy-tooltip .status-3xx { background: rgba(59, 130, 246, 0.2); color: #3b82f6; }
+.cy-tooltip .status-4xx { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
+.cy-tooltip .status-5xx { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+
+/* Cytoscape node interaction states */
+.highlighted {
+    opacity: 1 !important;
+}
+
+.dimmed {
+    opacity: 0.2 !important;
+}

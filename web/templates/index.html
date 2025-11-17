@@ -2,10 +2,10 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LibreCrawl - SEO Spider</title>
     <link rel="stylesheet" href="/static/css/styles.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
 </head>
 <body>
     <div class="app-container">
@@ -186,6 +186,7 @@
                         <button class="tab-btn" onclick="switchTab('links')">Links</button>
                         <button class="tab-btn" onclick="switchTab('issues')">Issues</button>
                         <button class="tab-btn" onclick="switchTab('pagespeed')">PageSpeed</button>
+                        <button class="tab-btn" onclick="switchTab('visualization')">Visualization</button>
                     </div>
 
                     <div class="tab-content">
@@ -398,6 +399,72 @@
                                     <div class="pagespeed-placeholder">
                                         <p>🚀 PageSpeed analysis will appear here after crawl completion</p>
                                         <p>Enable PageSpeed Analysis in settings to get Core Web Vitals and performance scores</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="visualization-tab" class="tab-pane">
+                            <div class="visualization-container">
+                                <div class="visualization-header">
+                                    <h3>Site Structure Visualization</h3>
+                                    <div class="visualization-controls">
+                                        <select id="vizLayout" onchange="changeLayout(this.value)">
+                                            <option value="cose">Force-Directed</option>
+                                            <option value="breadthfirst">Hierarchical</option>
+                                            <option value="circle">Circle</option>
+                                            <option value="concentric">Concentric</option>
+                                            <option value="grid">Grid</option>
+                                        </select>
+                                        <select id="vizFilter" onchange="filterVisualization(this.value)">
+                                            <option value="all">All Pages</option>
+                                            <option value="html">HTML Only</option>
+                                            <option value="2xx">2xx Success</option>
+                                            <option value="3xx">3xx Redirects</option>
+                                            <option value="4xx">4xx Errors</option>
+                                            <option value="5xx">5xx Errors</option>
+                                        </select>
+                                        <button class="btn btn-secondary" onclick="resetVisualization()">Reset View</button>
+                                        <button class="btn btn-secondary" onclick="exportVisualizationImage()">Export PNG</button>
+                                    </div>
+                                </div>
+                                <div id="cy" class="graph-container">
+                                    <div class="graph-placeholder">
+                                        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                            <circle cx="12" cy="12" r="3"/>
+                                            <circle cx="6" cy="6" r="2"/>
+                                            <circle cx="18" cy="6" r="2"/>
+                                            <circle cx="6" cy="18" r="2"/>
+                                            <circle cx="18" cy="18" r="2"/>
+                                            <line x1="12" y1="12" x2="6" y2="6"/>
+                                            <line x1="12" y1="12" x2="18" y2="6"/>
+                                            <line x1="12" y1="12" x2="6" y2="18"/>
+                                            <line x1="12" y1="12" x2="18" y2="18"/>
+                                        </svg>
+                                        <h3>No Data Yet</h3>
+                                        <p>Start crawling to visualize your site structure</p>
+                                    </div>
+                                </div>
+                                <div class="visualization-legend">
+                                    <div class="legend-item">
+                                        <span class="legend-color" style="background: #10b981;"></span>
+                                        <span>2xx Success</span>
+                                    </div>
+                                    <div class="legend-item">
+                                        <span class="legend-color" style="background: #3b82f6;"></span>
+                                        <span>3xx Redirect</span>
+                                    </div>
+                                    <div class="legend-item">
+                                        <span class="legend-color" style="background: #f59e0b;"></span>
+                                        <span>4xx Error</span>
+                                    </div>
+                                    <div class="legend-item">
+                                        <span class="legend-color" style="background: #ef4444;"></span>
+                                        <span>5xx Error</span>
+                                    </div>
+                                    <div class="legend-item">
+                                        <span class="legend-color" style="background: #6b7280;"></span>
+                                        <span>Other</span>
                                     </div>
                                 </div>
                             </div>
@@ -899,6 +966,7 @@
 
     <script src="/static/js/virtual-scroller.js"></script>
     <script src="/static/js/column-resize.js"></script>
+    <script src="/static/js/visualization.js"></script>
     <script src="/static/js/app.js"></script>
     <script src="/static/js/settings.js"></script>
 </body>
