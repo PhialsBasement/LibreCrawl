@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   librecrawl:
     build: .
@@ -9,9 +7,7 @@ services:
       # In production mode: all interfaces (0.0.0.0:5000) for LAN/WAN access
       - "${HOST_BINDING:-127.0.0.1}:5000:5000"
     volumes:
-      # Persist the user database
-      - ./users.db:/app/users.db
-      # Optional: Mount settings if you want to persist custom settings
+      # Persist the user database and settings
       - ./data:/app/data
     environment:
       - FLASK_APP=main.py
