@@ -13,8 +13,15 @@ if command -v docker &> /dev/null && command -v docker-compose &> /dev/null; the
 
     # Check if container is running
     if docker ps | grep -q librecrawl; then
+        echo ""
+        echo "================================================================================"
         echo "LibreCrawl is running!"
         echo "Opening browser to http://localhost:5000"
+        echo ""
+        echo "Press Ctrl+C to stop LibreCrawl and exit"
+        echo "DO NOT close this terminal or LibreCrawl will keep running in the background!"
+        echo "================================================================================"
+        echo ""
 
         # Detect OS and open browser
         if [[ "$OSTYPE" == "linux-gnu"* ]]; then
@@ -24,6 +31,14 @@ if command -v docker &> /dev/null && command -v docker-compose &> /dev/null; the
         else
             echo "Please open http://localhost:5000 in your browser"
         fi
+
+        # Trap Ctrl+C to gracefully shutdown
+        trap 'echo ""; echo "Stopping LibreCrawl..."; docker-compose down; exit 0' INT
+
+        # Keep terminal open and show logs
+        echo "Showing live logs (press Ctrl+C to stop):"
+        echo ""
+        docker-compose logs -f
     else
         echo "Error: LibreCrawl container failed to start"
         docker-compose logs
