@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  librecrawl:
+    build: .
+    container_name: librecrawl
+    ports:
+      # In local mode: only localhost (127.0.0.1:5000)
+      # In production mode: all interfaces (0.0.0.0:5000) for LAN/WAN access
+      - "${HOST_BINDING:-127.0.0.1}:5000:5000"
+    volumes:
+      # Persist the user database
+      - ./users.db:/app/users.db
+      # Optional: Mount settings if you want to persist custom settings
+      - ./data:/app/data
+    environment:
+      - FLASK_APP=main.py
+      - PYTHONUNBUFFERED=1
+      # Set to "true" for local mode (no authentication), "false" for production
+      - LOCAL_MODE=${LOCAL_MODE:-true}
+    restart: unless-stopped
+    command: >
+      sh -c "if [ \"$$LOCAL_MODE\" = \"true\" ]; then
+        python main.py --local;
+      else
+        python main.py;
+      fi"
+
+    # Increase shared memory size for Chrome to prevent crashes
+    shm_size: '2gb'
