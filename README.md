@@ -23,8 +23,70 @@ LibreCrawl crawls websites and gives you detailed information about pages, links
 - ⚡ **Real-time crawling progress** with live statistics
 
 ## Getting started
+### Quick Start (Automatic Installation)
 
-### Requirements
+**The easiest way to run LibreCrawl** - just run the startup script and it handles everything:
+
+**Windows:**
+```batch
+start-librecrawl.bat
+```
+
+**Linux/Mac:**
+```bash
+chmod +x start-librecrawl.sh
+./start-librecrawl.sh
+```
+
+**What it does automatically:**
+1. Checks for Docker - if found, runs LibreCrawl in a container (recommended)
+2. If no Docker, checks for Python - if not found, downloads and installs it (Windows only)
+3. Installs all dependencies automatically (`pip install -r requirements.txt`)
+4. Installs Playwright browsers for JavaScript rendering
+5. Starts LibreCrawl in local mode (no authentication)
+6. Opens your browser to `http://localhost:5000`
+
+### Manual Installation
+
+If you prefer to install manually or want more control:
+
+#### Option 1: Docker (Recommended)
+
+**Requirements:**
+- Docker and Docker Compose
+
+**Steps:**
+```bash
+# Clone the repository
+git clone https://github.com/PhialsBasement/LibreCrawl.git
+cd LibreCrawl
+
+# Copy environment file
+cp .env.example .env
+
+# Start LibreCrawl
+docker-compose up -d
+
+# Open browser to http://localhost:5000
+```
+By default, LibreCrawl runs in local mode for easy personal use. The `.env` file controls this:
+
+```bash
+# .env file
+LOCAL_MODE=true
+HOST_BINDING=127.0.0.1
+```
+
+For production deployment with user authentication, edit your `.env` file:
+
+```bash
+# .env file
+LOCAL_MODE=false
+HOST_BINDING=0.0.0.0
+```
+
+
+#### Option 2: Python
 
 - Python 3.8 or later
 - Modern web browser (Chrome, Firefox, Safari, Edge)
