@@ -116,6 +116,22 @@ LibreCrawl supports multiple concurrent users with isolated sessions:
 - `src/settings_manager.py` - Configuration management
 - `web/` - Frontend interface files
 
+## Docker
+
+Build the docker container
+
+```bash
+docker build -t libre-crawl:latest .
+```
+
+Run the container, ensuring you attach a volume for the database
+
+```bash
+docker run -v /path/to/data:/data -p 5000:5000 libre-crawl:latest
+```
+
+Access at the default location: http://localhost:5000
+
 ## License
 
 MIT License - see LICENSE file for details.

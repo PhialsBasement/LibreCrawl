@@ -9,7 +9,8 @@ from datetime import datetime
 from contextlib import contextmanager
 
 # Database file location
-DB_FILE = 'users.db'
+DATA_PATH = os.environ['LIBRE_CRAWL_DATA_PATH'] or os.getcwd()
+DB_FILE = os.path.join(DATA_PATH, 'users.db')
 
 @contextmanager
 def get_db():
