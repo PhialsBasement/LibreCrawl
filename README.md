@@ -40,7 +40,7 @@ chmod +x start-librecrawl.sh
 
 **What it does automatically:**
 1. Checks for Docker - if found, runs LibreCrawl in a container (recommended)
-2. If no Docker, checks for Python - if not found, downloads and installs it (Windows only)
+2. If no Docker, checks for Python - if not found, downloads and installs it (Windows only *temporairly disabled since it causes some bat issues*)
 3. Installs all dependencies automatically (`pip install -r requirements.txt`)
 4. Installs Playwright browsers for JavaScript rendering
 5. Starts LibreCrawl in local mode (no authentication)
