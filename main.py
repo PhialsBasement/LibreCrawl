@@ -6,13 +6,15 @@ import xml.etree.ElementTree as ET
 import uuid
 import webbrowser
 import argparse
+import secrets
+import string
 from io import StringIO
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from functools import wraps
 from src.crawler import WebCrawler
 from src.settings_manager import SettingsManager
-from src.auth_db import init_db, create_user, authenticate_user, get_user_by_id, log_guest_crawl, get_guest_crawls_last_24h
+from src.auth_db import init_db, create_user, authenticate_user, get_user_by_id, log_guest_crawl, get_guest_crawls_last_24h, verify_user, set_user_tier
 
 # Parse command line arguments
 parser = argparse.ArgumentParser(description='LibreCrawl - SEO Spider Tool')
@@ -28,11 +30,65 @@ app.secret_key = 'librecrawl-secret-key-change-in-production'  # TODO: Use envir
 # Initialize database on startup
 init_db()
 
+def generate_random_password(length=16):
+    """Generate a random password with letters, digits, and symbols"""
+    alphabet = string.ascii_letters + string.digits + string.punctuation
+    return ''.join(secrets.choice(alphabet) for _ in range(length))
+
+def auto_login_local_mode():
+    """Auto-login for local mode - creates or logs into 'local' admin account"""
+    import sqlite3
+    try:
+        conn = sqlite3.connect('users.db')
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        # Check if 'local' user exists
+        cursor.execute('SELECT id, username, tier FROM users WHERE username = ?', ('local',))
+        user = cursor.fetchone()
+
+        if user:
+            # User exists, just log them in
+            session['user_id'] = user['id']
+            session['username'] = user['username']
+            session['tier'] = 'admin'
+            session.permanent = True
+            print(f"Auto-logged in as existing 'local' user (ID: {user['id']})")
+        else:
+            # Create new local user with random password
+            random_password = generate_random_password()
+            from src.auth_db import hash_password
+            password_hash = hash_password(random_password)
+
+            cursor.execute('''
+                INSERT INTO users (username, email, password_hash, verified, tier)
+                VALUES (?, ?, ?, 1, 'admin')
+            ''', ('local', 'local@localhost', password_hash))
+            conn.commit()
+
+            user_id = cursor.lastrowid
+
+            # Log in the new user
+            session['user_id'] = user_id
+            session['username'] = 'local'
+            session['tier'] = 'admin'
+            session.permanent = True
+
+            print(f"Created and auto-logged in as new 'local' admin user (ID: {user_id})")
+            print(f"Generated password: {random_password}")
+
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Error in auto_login_local_mode: {e}")
+        return False
+
 if LOCAL_MODE:
     print("=" * 60)
     print("LOCAL MODE ENABLED")
     print("All users will have admin tier access")
     print("No rate limits or tier restrictions")
+    print("Auto-login enabled with 'local' admin account")
     print("=" * 60)
 
 def get_client_ip():
@@ -53,7 +109,11 @@ def login_required(f):
     """Decorator to require login for routes"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if 'user_id' not in session:
+        # In local mode, auto-login if not already logged in
+        if LOCAL_MODE and 'user_id' not in session:
+            auto_login_local_mode()
+        elif 'user_id' not in session:
+            # Not in local mode and not logged in
             if request.path.startswith('/api/'):
                 return jsonify({'success': False, 'error': 'Authentication required'}), 401
             return redirect(url_for('login_page'))
@@ -334,6 +394,10 @@ def generate_issues_json_export(issues):
 
 @app.route('/login')
 def login_page():
+    # In local mode, auto-login and redirect to index
+    if LOCAL_MODE:
+        auto_login_local_mode()
+        return redirect(url_for('index'))
     # Redirect to app if already logged in
     if 'user_id' in session:
         return redirect(url_for('index'))
@@ -445,8 +509,13 @@ def user_info():
     })
 
 @app.route('/')
-@login_required
 def index():
+    # In local mode, auto-login if not already logged in
+    if LOCAL_MODE and 'user_id' not in session:
+        auto_login_local_mode()
+    elif 'user_id' not in session:
+        # Not in local mode and not logged in, redirect to login
+        return redirect(url_for('login_page'))
     return render_template('index.html')
 
 @app.route('/debug/memory')
