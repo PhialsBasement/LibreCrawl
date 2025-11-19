@@ -36,11 +36,17 @@ let virtualScrollers = {
 };
 
 // Initialize application
-document.addEventListener('DOMContentLoaded', function() {
-    initializeApp();
+document.addEventListener('DOMContentLoaded', async function() {
+    await initializeApp();
 });
 
-function initializeApp() {
+async function initializeApp() {
+    // Load plugins first (before tabs are initialized)
+    if (window.LibreCrawlPlugin && window.LibreCrawlPlugin.loader) {
+        await window.LibreCrawlPlugin.loader.loadAllPlugins();
+        window.LibreCrawlPlugin.loader.initializePlugins();
+    }
+
     // Setup event listeners
     setupEventListeners();
 
@@ -194,6 +200,16 @@ function clearCrawlData() {
         window.clearVisualization();
     }
 
+    // Notify plugins of data clear (send empty data)
+    if (window.LibreCrawlPlugin && window.LibreCrawlPlugin.loader) {
+        window.LibreCrawlPlugin.loader.notifyDataUpdate({
+            urls: [],
+            links: [],
+            issues: [],
+            stats: { discovered: 0, crawled: 0, depth: 0, speed: 0 }
+        });
+    }
+
     // Clear filter states
     document.querySelectorAll('.filter-item').forEach(item => {
         item.classList.remove('active');
@@ -284,6 +300,15 @@ function pollCrawlProgress() {
                 if (typeof loadVisualizationData === 'function') {
                     loadVisualizationData();
                 }
+                // Notify plugins that crawl is complete
+                if (window.LibreCrawlPlugin && window.LibreCrawlPlugin.loader) {
+                    window.LibreCrawlPlugin.loader.notifyCrawlComplete({
+                        urls: crawlState.urls,
+                        links: crawlState.links,
+                        issues: crawlState.issues,
+                        stats: crawlState.stats
+                    });
+                }
             }
         })
         .catch(error => {
@@ -345,6 +370,16 @@ function updateCrawlData(data) {
     // Update PageSpeed results if available
     if (data.stats && data.stats.pagespeed_results) {
         displayPageSpeedResults(data.stats.pagespeed_results);
+    }
+
+    // Notify plugins of data update
+    if (window.LibreCrawlPlugin && window.LibreCrawlPlugin.loader) {
+        window.LibreCrawlPlugin.loader.notifyDataUpdate({
+            urls: crawlState.urls,
+            links: crawlState.links,
+            issues: crawlState.issues,
+            stats: crawlState.stats
+        });
     }
 }
 
@@ -866,6 +901,34 @@ function switchTab(tabName) {
             initVisualization();
         }, 100);
     }
+
+    // Handle plugin tabs
+    const pluginTab = document.getElementById(`${tabName}-tab`);
+    if (pluginTab && pluginTab.classList.contains('plugin-tab')) {
+        handlePluginTabSwitch(tabName);
+    }
+}
+
+// Handle plugin tab activation
+function handlePluginTabSwitch(tabName) {
+    if (!window.LibreCrawlPlugin || !window.LibreCrawlPlugin.loader) {
+        return;
+    }
+
+    const loader = window.LibreCrawlPlugin.loader;
+
+    // Deactivate previously active plugin
+    if (loader.activePluginId && loader.activePluginId !== tabName) {
+        loader.deactivatePlugin(loader.activePluginId);
+    }
+
+    // Activate the new plugin
+    loader.activatePlugin(tabName, {
+        urls: crawlState.urls,
+        links: crawlState.links,
+        issues: crawlState.issues,
+        stats: crawlState.stats
+    });
 }
 
 // Issue Filtering
@@ -1867,6 +1930,16 @@ function loadCrawl() {
             // Update visualization if it exists and has been initialized
             if (typeof window.updateVisualizationFromLoadedData === 'function') {
                 window.updateVisualizationFromLoadedData(saveData.urls, saveData.links);
+            }
+
+            // Notify plugins of loaded data
+            if (window.LibreCrawlPlugin && window.LibreCrawlPlugin.loader) {
+                window.LibreCrawlPlugin.loader.notifyDataUpdate({
+                    urls: crawlState.urls,
+                    links: crawlState.links,
+                    issues: crawlState.issues,
+                    stats: crawlState.stats
+                });
             }
 
             showNotification(`Crawl loaded: ${saveData.stats.crawled} URLs from ${new Date(saveData.timestamp).toLocaleDateString()}`, 'success');
