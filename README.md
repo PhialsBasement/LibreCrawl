@@ -123,7 +123,7 @@ python main.py -l
 
 ## LibreCrawl Plugins
 
-Drop your custom plugin files here! Each `.js` file will automatically create a new tab in LibreCrawl.
+Drop your custom plugin files in `/web/static/plugins/`! Each `.js` file will automatically create a new tab in LibreCrawl.
 
 ### 🔌 Quick Start
 
