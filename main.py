@@ -11,6 +11,7 @@ import string
 from io import StringIO
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from flask_compress import Compress
 from functools import wraps
 from src.crawler import WebCrawler
 from src.settings_manager import SettingsManager
@@ -26,6 +27,9 @@ LOCAL_MODE = args.local
 
 app = Flask(__name__, template_folder='web/templates', static_folder='web/static')
 app.secret_key = 'librecrawl-secret-key-change-in-production'  # TODO: Use environment variable in production
+
+# Enable compression for all responses
+Compress(app)
 
 # Initialize database on startup
 init_db()
@@ -584,7 +588,22 @@ def stop_crawl():
 def crawl_status():
     crawler = get_or_create_crawler()
     settings_manager = get_session_settings()
+
+    # Check for incremental update parameters
+    url_since = request.args.get('url_since', type=int)
+    link_since = request.args.get('link_since', type=int)
+    issue_since = request.args.get('issue_since', type=int)
+
+    # Get full status data
     status_data = crawler.get_status()
+
+    # If incremental parameters provided, slice the arrays
+    if url_since is not None:
+        status_data['urls'] = status_data.get('urls', [])[url_since:]
+    if link_since is not None:
+        status_data['links'] = status_data.get('links', [])[link_since:]
+    if issue_since is not None:
+        status_data['issues'] = status_data.get('issues', [])[issue_since:]
 
     # Apply current issue exclusion patterns to displayed issues
     issues = status_data.get('issues', [])
@@ -1022,8 +1041,11 @@ def main():
     browser_thread = threading.Thread(target=open_browser, daemon=True)
     browser_thread.start()
 
-    # Run Flask server
-    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
+    # Run Flask server with Waitress (production-grade WSGI server)
+    from waitress import serve
+    print("Starting LibreCrawl on http://localhost:5000")
+    print("Using Waitress WSGI server with multi-threading support")
+    serve(app, host='0.0.0.0', port=5000, threads=8)
 
 if __name__ == '__main__':
     main()
