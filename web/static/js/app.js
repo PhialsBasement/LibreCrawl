@@ -25,6 +25,9 @@ let crawlState = {
     }
 };
 
+// Incremental polling instance
+let incrementalPoller = null;
+
 // Virtual Scrollers
 let virtualScrollers = {
     overview: null,
@@ -112,6 +115,12 @@ function startCrawl() {
     crawlState.isPaused = false;
     crawlState.startTime = new Date();
     crawlState.baseUrl = url;
+
+    // Initialize incremental poller for new crawl
+    if (!incrementalPoller) {
+        incrementalPoller = new IncrementalPoller();
+    }
+    incrementalPoller.reset();
 
     // Update UI
     updateCrawlButtons();
@@ -273,8 +282,12 @@ function stopPythonCrawl() {
 function pollCrawlProgress() {
     if (!crawlState.isRunning) return;
 
-    fetch('/api/crawl_status')
-        .then(response => response.json())
+    // Use incremental poller if available, otherwise fall back to regular fetch
+    const fetchPromise = incrementalPoller
+        ? incrementalPoller.fetchUpdate()
+        : fetch('/api/crawl_status').then(response => response.json());
+
+    fetchPromise
         .then(data => {
             updateCrawlData(data);
 
@@ -313,6 +326,10 @@ function pollCrawlProgress() {
         })
         .catch(error => {
             console.error('Error polling crawl status:', error);
+            // Continue polling even if there's an error (common on large crawls)
+            if (crawlState.isRunning) {
+                setTimeout(pollCrawlProgress, 1000);
+            }
         });
 }
 
