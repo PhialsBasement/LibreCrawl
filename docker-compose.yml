@@ -14,13 +14,19 @@ services:
       - PYTHONUNBUFFERED=1
       # Set to "true" for local mode (no authentication), "false" for production
       - LOCAL_MODE=${LOCAL_MODE:-true}
+      # Set to "true" to disable new user registrations
+      - REGISTRATION_DISABLED=${REGISTRATION_DISABLED:-false}
     restart: unless-stopped
     command: >
-      sh -c "if [ \"$$LOCAL_MODE\" = \"true\" ]; then
-        python main.py --local;
-      else
-        python main.py;
-      fi"
+      sh -c "
+      FLAGS='';
+      if [ \"$$LOCAL_MODE\" = \"true\" ]; then
+        FLAGS=\"$$FLAGS --local\";
+      fi;
+      if [ \"$$REGISTRATION_DISABLED\" = \"true\" ]; then
+        FLAGS=\"$$FLAGS --disable-register\";
+      fi;
+      python main.py $$FLAGS"
 
     # Increase shared memory size for Chrome to prevent crashes
     shm_size: '2gb'
