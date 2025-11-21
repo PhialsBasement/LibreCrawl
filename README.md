@@ -80,6 +80,7 @@ By default, LibreCrawl runs in local mode for easy personal use. The `.env` file
 # .env file
 LOCAL_MODE=true
 HOST_BINDING=127.0.0.1
+REGISTRATION_DISABLED=false
 ```
 
 For production deployment with user authentication, edit your `.env` file:
@@ -88,6 +89,7 @@ For production deployment with user authentication, edit your `.env` file:
 # .env file
 LOCAL_MODE=false
 HOST_BINDING=0.0.0.0
+REGISTRATION_DISABLED=false
 ```
 
 
