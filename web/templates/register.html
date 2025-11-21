@@ -172,6 +172,12 @@
 
         <div id="alert" class="alert"></div>
 
+        {% if registration_disabled %}
+        <div class="alert alert-error show">
+            Registrations are currently disabled. Please contact the administrator.
+        </div>
+        {% endif %}
+
         <form id="registerForm">
             <div class="form-group">
                 <label for="username">Username</label>
@@ -207,6 +213,19 @@
         const form = document.getElementById('registerForm');
         const registerBtn = document.getElementById('registerBtn');
         const alert = document.getElementById('alert');
+
+        // Check if registration is disabled
+        const registrationDisabled = {{ 'true' if registration_disabled else 'false' }};
+
+        if (registrationDisabled) {
+            // Disable form submission
+            form.addEventListener('submit', (e) => {
+                e.preventDefault();
+                window.alert('Registrations are disabled');
+            });
+            registerBtn.disabled = true;
+            registerBtn.textContent = 'Registration Disabled';
+        }
 
         function showAlert(message, type) {
             alert.textContent = message;

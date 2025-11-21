@@ -191,7 +191,7 @@
         <button class="btn btn-guest" id="guestBtn">Continue as Guest (3 crawls/24h)</button>
 
         <div class="register-link">
-            Don't have an account? <a href="/register">Register here</a>
+            Don't have an account? <a href="/register" id="registerLink">Register here</a>
         </div>
     </div>
 
@@ -280,6 +280,17 @@
                 guestBtn.textContent = 'Continue as Guest (3 crawls/24h)';
             }
         });
+
+        // Check if registration is disabled
+        const registrationDisabled = {{ 'true' if registration_disabled else 'false' }};
+        const registerLink = document.getElementById('registerLink');
+
+        if (registrationDisabled) {
+            registerLink.addEventListener('click', (e) => {
+                e.preventDefault();
+                window.alert('Registrations are disabled');
+            });
+        }
     </script>
 </body>
 </html>

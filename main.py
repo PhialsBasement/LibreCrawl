@@ -21,9 +21,12 @@ from src.auth_db import init_db, create_user, authenticate_user, get_user_by_id,
 parser = argparse.ArgumentParser(description='LibreCrawl - SEO Spider Tool')
 parser.add_argument('--local', '-l', action='store_true',
                     help='Run in local mode (all users get admin tier, no rate limits)')
+parser.add_argument('--disable-register', '-dr', action='store_true',
+                    help='Disable new user registrations')
 args = parser.parse_args()
 
 LOCAL_MODE = args.local
+DISABLE_REGISTER = args.disable_register
 
 app = Flask(__name__, template_folder='web/templates', static_folder='web/static')
 app.secret_key = 'librecrawl-secret-key-change-in-production'  # TODO: Use environment variable in production
@@ -93,6 +96,12 @@ if LOCAL_MODE:
     print("All users will have admin tier access")
     print("No rate limits or tier restrictions")
     print("Auto-login enabled with 'local' admin account")
+    print("=" * 60)
+
+if DISABLE_REGISTER:
+    print("=" * 60)
+    print("REGISTRATION DISABLED")
+    print("New user registrations are not allowed")
     print("=" * 60)
 
 def get_client_ip():
@@ -405,17 +414,21 @@ def login_page():
     # Redirect to app if already logged in
     if 'user_id' in session:
         return redirect(url_for('index'))
-    return render_template('login.html')
+    return render_template('login.html', registration_disabled=DISABLE_REGISTER)
 
 @app.route('/register')
 def register_page():
     # Redirect to app if already logged in
     if 'user_id' in session:
         return redirect(url_for('index'))
-    return render_template('register.html')
+    return render_template('register.html', registration_disabled=DISABLE_REGISTER)
 
 @app.route('/api/register', methods=['POST'])
 def register():
+    # Check if registration is disabled
+    if DISABLE_REGISTER:
+        return jsonify({'success': False, 'message': 'Registration is currently disabled'})
+
     data = request.get_json()
     username = data.get('username')
     email = data.get('email')
