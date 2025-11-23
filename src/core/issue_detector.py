@@ -2,6 +2,7 @@
 import threading
 from fnmatch import fnmatch
 from urllib.parse import urlparse
+from difflib import SequenceMatcher
 
 
 class IssueDetector:
@@ -309,6 +310,124 @@ class IssueDetector:
                 'issue': 'Nofollow Tag Present',
                 'details': 'Links on this page are NOT followed by search engines - has nofollow directive'
             })
+
+    def detect_duplication_issues(self, all_results, similarity_threshold=0.85):
+        """
+        Detect content duplication across all crawled pages.
+
+        Args:
+            all_results: List of all crawled result dictionaries
+            similarity_threshold: Minimum similarity ratio to flag as duplicate (0.0-1.0)
+        """
+        issues = []
+        processed_pairs = set()
+
+        # Compare each result with all others
+        for i, result1 in enumerate(all_results):
+            url1 = result1.get('url', '')
+
+            # Skip if URL should be excluded
+            if self._should_exclude(url1):
+                continue
+
+            for j, result2 in enumerate(all_results):
+                # Skip same URL or already processed pairs
+                if i >= j:
+                    continue
+
+                url2 = result2.get('url', '')
+
+                # Skip if URL should be excluded
+                if self._should_exclude(url2):
+                    continue
+
+                # Create unique pair identifier
+                pair_key = tuple(sorted([url1, url2]))
+                if pair_key in processed_pairs:
+                    continue
+
+                processed_pairs.add(pair_key)
+
+                # Calculate similarity
+                similarity = self._calculate_content_similarity(result1, result2)
+
+                # Flag as duplicate if above threshold
+                if similarity >= similarity_threshold:
+                    # Add issue for both URLs
+                    issues.append({
+                        'url': url1,
+                        'type': 'warning',
+                        'category': 'Duplication',
+                        'issue': 'Duplicate Content Detected',
+                        'details': f'Content is {similarity*100:.1f}% similar to {url2}'
+                    })
+                    issues.append({
+                        'url': url2,
+                        'type': 'warning',
+                        'category': 'Duplication',
+                        'issue': 'Duplicate Content Detected',
+                        'details': f'Content is {similarity*100:.1f}% similar to {url1}'
+                    })
+
+        # Add all detected duplication issues
+        with self.issues_lock:
+            self.detected_issues.extend(issues)
+
+    def _calculate_content_similarity(self, result1, result2):
+        """
+        Calculate similarity between two page results.
+
+        Compares title, meta description, h1, and content length.
+        Returns a similarity ratio between 0.0 and 1.0.
+        """
+        # Extract content fields
+        title1 = result1.get('title', '').lower().strip()
+        title2 = result2.get('title', '').lower().strip()
+
+        desc1 = result1.get('meta_description', '').lower().strip()
+        desc2 = result2.get('meta_description', '').lower().strip()
+
+        h1_1 = result1.get('h1', '').lower().strip()
+        h1_2 = result2.get('h1', '').lower().strip()
+
+        word_count1 = result1.get('word_count', 0)
+        word_count2 = result2.get('word_count', 0)
+
+        # Calculate individual similarities
+        title_sim = self._text_similarity(title1, title2) if title1 and title2 else 0
+        desc_sim = self._text_similarity(desc1, desc2) if desc1 and desc2 else 0
+        h1_sim = self._text_similarity(h1_1, h1_2) if h1_1 and h1_2 else 0
+
+        # Word count similarity (1.0 if within 10% of each other)
+        if word_count1 and word_count2:
+            max_count = max(word_count1, word_count2)
+            min_count = min(word_count1, word_count2)
+            word_count_sim = min_count / max_count if max_count > 0 else 0
+        else:
+            word_count_sim = 0
+
+        # Weighted average (title and description are most important)
+        weights = {
+            'title': 0.35,
+            'desc': 0.35,
+            'h1': 0.20,
+            'word_count': 0.10
+        }
+
+        overall_similarity = (
+            title_sim * weights['title'] +
+            desc_sim * weights['desc'] +
+            h1_sim * weights['h1'] +
+            word_count_sim * weights['word_count']
+        )
+
+        return overall_similarity
+
+    def _text_similarity(self, text1, text2):
+        """Calculate similarity ratio between two text strings using SequenceMatcher"""
+        if not text1 or not text2:
+            return 0.0
+        return SequenceMatcher(None, text1, text2).ratio()
 
     def _should_exclude(self, url):
         """Check if URL should be excluded from issue detection"""

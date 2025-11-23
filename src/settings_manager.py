@@ -97,6 +97,10 @@ class SettingsManager:
             'excludePatterns': '',
             'maxFileSize': 50,
 
+            # Duplication detection settings
+            'enableDuplicationCheck': True,
+            'duplicationThreshold': 0.85,
+
             # Export settings
             'exportFormat': 'csv',
             'exportFields': ['url', 'status_code', 'title', 'meta_description', 'h1'],
@@ -431,7 +435,8 @@ class SettingsManager:
                 'jsTimeout': (5, 120),
                 'jsViewportWidth': (800, 4000),
                 'jsViewportHeight': (600, 3000),
-                'jsMaxConcurrentPages': (1, 10)
+                'jsMaxConcurrentPages': (1, 10),
+                'duplicationThreshold': (0.0, 1.0)
             }
 
             for key, (min_val, max_val) in numeric_validations.items():
@@ -504,7 +509,9 @@ class SettingsManager:
             'js_viewport_width': settings['jsViewportWidth'],
             'js_viewport_height': settings['jsViewportHeight'],
             'js_max_concurrent_pages': settings['jsMaxConcurrentPages'],
-            'issue_exclusion_patterns': [p.strip() for p in settings['issueExclusionPatterns'].split('\n') if p.strip()]
+            'issue_exclusion_patterns': [p.strip() for p in settings['issueExclusionPatterns'].split('\n') if p.strip()],
+            'enable_duplication_check': settings['enableDuplicationCheck'],
+            'duplication_threshold': settings['duplicationThreshold']
         }
 
     def _parse_custom_headers(self, headers_text):

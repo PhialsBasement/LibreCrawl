@@ -100,6 +100,10 @@ def init_db():
 
         print("Database initialized successfully")
 
+    # Initialize crawl persistence tables
+    from src.crawl_db import init_crawl_tables
+    init_crawl_tables()
+
 def hash_password(password):
     """Hash a password with bcrypt"""
     salt = bcrypt.gensalt()

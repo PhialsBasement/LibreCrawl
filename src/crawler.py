@@ -28,7 +28,7 @@ class WebCrawler:
     Uses modular architecture with separate components for different responsibilities.
     """
 
-    def __init__(self):
+    def __init__(self, crawl_id=None, resume_from_db=False):
         # HTTP session
         self.session = requests.Session()
         self.session.headers.update({
@@ -74,6 +74,18 @@ class WebCrawler:
 
         # Robots.txt cache
         self._robots_cache = {}
+
+        # Database persistence
+        self.crawl_id = crawl_id
+        self.resume_mode = resume_from_db
+        self.auto_save_interval = 30  # seconds
+        self.batch_save_size = 50  # URLs before triggering save
+        self.last_save_time = time.time()
+        self.unsaved_urls = []
+        self.unsaved_links = []
+        self.unsaved_issues = []
+        self.auto_save_thread = None
+        self.db_save_enabled = False  # Only enable when crawl_id is set
 
         # Enable nested asyncio for thread compatibility
         nest_asyncio.apply()
@@ -189,7 +201,7 @@ class WebCrawler:
             ]
         }
 
-    def start_crawl(self, url):
+    def start_crawl(self, url, user_id=None, session_id=None):
         """Start crawling from the given URL"""
         if self.is_running:
             return False, "Crawl already in progress"
@@ -209,6 +221,20 @@ class WebCrawler:
                 print(f"URL has path '{parsed.path}' - limiting crawl to single page only")
                 self.config['max_depth'] = 0
 
+            # Create database crawl record if session_id provided
+            if session_id:
+                from src.crawl_db import create_crawl
+                self.crawl_id = create_crawl(
+                    user_id=user_id,
+                    session_id=session_id,
+                    base_url=self.base_url,
+                    base_domain=self.base_domain,
+                    config_snapshot=self.config
+                )
+                if self.crawl_id:
+                    self.db_save_enabled = True
+                    print(f"Database persistence enabled for crawl {self.crawl_id}")
+
             # Initialize components
             self._initialize_components()
 
@@ -224,6 +250,10 @@ class WebCrawler:
                 print(f"Starting sitemap discovery for {url}")
                 self._discover_and_add_sitemap_urls(url)
                 print(f"Sitemap discovery completed. Total discovered URLs: {self.stats['discovered']}")
+
+            # Start auto-save thread if DB enabled
+            if self.db_save_enabled:
+                self._start_auto_save_thread()
 
             # Start crawling in separate thread
             self.is_running = True
@@ -298,6 +328,12 @@ class WebCrawler:
         if self.crawl_thread and self.crawl_thread.is_alive():
             self.crawl_thread.join(timeout=5)
 
+        # Save final data to database
+        if self.db_save_enabled and self.crawl_id:
+            self._save_batch_to_db(force=True)
+            from src.crawl_db import set_crawl_status
+            set_crawl_status(self.crawl_id, 'stopped')
+
         # Clean up JavaScript resources if enabled
         if self.js_renderer:
             asyncio.run(self.js_renderer.cleanup())
@@ -310,6 +346,14 @@ class WebCrawler:
         if not self.is_running:
             return False, "No crawl in progress"
         self.is_paused = True
+
+        # Save checkpoint when pausing
+        if self.db_save_enabled and self.crawl_id:
+            self._save_batch_to_db(force=True)
+            self._save_queue_checkpoint()
+            from src.crawl_db import set_crawl_status
+            set_crawl_status(self.crawl_id, 'paused')
+
         return True, "Crawl paused"
 
     def resume_crawl(self):
@@ -319,7 +363,136 @@ class WebCrawler:
         if not self.is_paused:
             return False, "Crawl is not paused"
         self.is_paused = False
+
+        # Update status in database
+        if self.db_save_enabled and self.crawl_id:
+            from src.crawl_db import set_crawl_status
+            set_crawl_status(self.crawl_id, 'running')
+
         return True, "Crawl resumed"
+
+    def resume_from_database(self, crawl_id, user_id=None, session_id=None):
+        """Resume a previously interrupted crawl from database"""
+        if self.is_running:
+            return False, "Crawl already in progress"
+
+        try:
+            from src.crawl_db import get_resume_data, load_crawled_urls, set_crawl_status
+            from collections import deque
+
+            # Load crawl data
+            crawl_data = get_resume_data(crawl_id)
+
+            if not crawl_data:
+                return False, "Cannot resume this crawl - not found"
+
+            if crawl_data['status'] not in ['paused', 'failed', 'running']:
+                return False, f"Cannot resume crawl with status: {crawl_data['status']}"
+
+            # Verify user owns this crawl (if not guest)
+            if user_id and crawl_data.get('user_id') != user_id:
+                return False, "Unauthorized - you don't own this crawl"
+
+            # Restore basic state
+            self.crawl_id = crawl_id
+            self.base_url = crawl_data['base_url']
+            self.base_domain = crawl_data['base_domain']
+            self.config = crawl_data.get('config_snapshot', self._get_default_config())
+            self.db_save_enabled = True
+
+            # Initialize components
+            self._initialize_components()
+
+            # Load already crawled URLs from database
+            from src.crawl_db import load_crawl_links, load_crawl_issues
+
+            print(f"Loading crawled data from database...")
+            self.crawl_results = load_crawled_urls(crawl_id)
+
+            # Mark all crawled URLs as discovered to prevent re-discovery
+            for url_data in self.crawl_results:
+                url = url_data.get('url')
+                if url:
+                    self.link_manager.all_discovered_urls.add(url)
+
+            # Load links and restore to link manager
+            loaded_links = load_crawl_links(crawl_id)
+            if loaded_links:
+                self.link_manager.all_links = loaded_links
+                # Rebuild links_set for duplicate detection
+                for link in loaded_links:
+                    link_key = f"{link['source_url']}|{link['target_url']}"
+                    self.link_manager.links_set.add(link_key)
+
+            # Load issues and restore to issue detector
+            loaded_issues = load_crawl_issues(crawl_id)
+            if loaded_issues:
+                self.issue_detector.detected_issues = loaded_issues
+
+            print(f"Loaded {len(self.crawl_results)} URLs, {len(loaded_links)} links, {len(loaded_issues)} issues from database")
+
+            # Restore statistics
+            self.stats['crawled'] = len(self.crawl_results)
+            self.stats['discovered'] = crawl_data.get('urls_discovered', 0)
+            self.stats['depth'] = crawl_data.get('max_depth_reached', 0)
+            self.stats['start_time'] = time.time()  # New start time for resume
+
+            # Restore queue state from checkpoint
+            checkpoint = crawl_data.get('resume_checkpoint', {})
+            if checkpoint:
+                # Restore discovered URLs queue
+                if 'discovered_urls' in checkpoint:
+                    discovered_list = checkpoint['discovered_urls']
+                    self.link_manager.discovered_urls = deque(discovered_list)
+
+                # Restore visited URLs set
+                if 'visited_urls' in checkpoint:
+                    self.link_manager.visited_urls = set(checkpoint['visited_urls'])
+
+                print(f"Restored queue: {len(self.link_manager.discovered_urls)} pending, "
+                      f"{len(self.link_manager.visited_urls)} visited")
+
+            # If queue is empty (no checkpoint or crawl crashed early), rebuild queue from links
+            if not self.link_manager.discovered_urls:
+                print("Queue is empty - rebuilding from discovered links")
+
+                # Get all URLs from loaded links that haven't been crawled yet
+                crawled_urls = set(url_data.get('url') for url_data in self.crawl_results)
+
+                # Add any linked URLs that haven't been crawled yet
+                added_count = 0
+                for link in loaded_links:
+                    target_url = link.get('target_url')
+                    if target_url and target_url not in crawled_urls and link.get('is_internal'):
+                        self.link_manager.add_url(target_url, link.get('depth', 1))
+                        added_count += 1
+
+                print(f"Added {added_count} pending URLs to queue from links")
+
+                # If still empty, crawl is complete
+                if not self.link_manager.discovered_urls:
+                    print("No pending URLs found - crawl was already complete")
+
+                self.stats['discovered'] = len(self.link_manager.all_discovered_urls)
+
+            # Update status to running
+            set_crawl_status(crawl_id, 'running')
+
+            # Start auto-save thread
+            self._start_auto_save_thread()
+
+            # Start crawling
+            self.is_running = True
+            self.crawl_thread = threading.Thread(target=self._crawl_worker)
+            self.crawl_thread.start()
+
+            return True, f"Resumed crawl from {self.stats['crawled']} URLs"
+
+        except Exception as e:
+            print(f"Error resuming crawl: {e}")
+            import traceback
+            traceback.print_exc()
+            return False, f"Error resuming crawl: {str(e)}"
 
     def get_status(self):
         """Get current crawl status and results"""
@@ -366,6 +539,91 @@ class WebCrawler:
             'memory': self.memory_monitor.get_stats(),
             'memory_data': data_sizes
         }
+
+    def _save_batch_to_db(self, force=False):
+        """Save batched data to database"""
+        if not self.db_save_enabled or not self.crawl_id:
+            return
+
+        from src.crawl_db import save_url_batch, save_links_batch, save_issues_batch, update_crawl_stats
+
+        try:
+            # Save URLs
+            if self.unsaved_urls:
+                save_url_batch(self.crawl_id, self.unsaved_urls)
+                self.unsaved_urls.clear()
+
+            # Save links
+            if self.unsaved_links:
+                save_links_batch(self.crawl_id, self.unsaved_links)
+                self.unsaved_links.clear()
+
+            # Save issues
+            if self.unsaved_issues:
+                save_issues_batch(self.crawl_id, self.unsaved_issues)
+                self.unsaved_issues.clear()
+
+            # Update statistics
+            memory_stats = self.memory_monitor.get_stats()
+            update_crawl_stats(
+                self.crawl_id,
+                discovered=self.stats['discovered'],
+                crawled=self.stats['crawled'],
+                max_depth=self.stats['depth'],
+                peak_memory_mb=memory_stats.get('peak_mb', 0),
+                estimated_size_mb=memory_stats.get('estimated_crawl_mb', 0)
+            )
+
+            self.last_save_time = time.time()
+            print(f"Saved batch to database for crawl {self.crawl_id}")
+
+        except Exception as e:
+            print(f"Error saving batch to database: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _save_queue_checkpoint(self):
+        """Save current queue state for crash recovery"""
+        if not self.db_save_enabled or not self.crawl_id or not self.link_manager:
+            return
+
+        from src.crawl_db import save_checkpoint
+
+        try:
+            # Get discovered URLs from link manager
+            discovered_urls = []
+            if hasattr(self.link_manager, 'discovered_urls'):
+                discovered_urls = list(self.link_manager.discovered_urls)[:1000]  # Limit to prevent huge checkpoints
+
+            # Get visited URLs
+            visited_urls = []
+            if hasattr(self.link_manager, 'visited_urls'):
+                visited_urls = list(self.link_manager.visited_urls)
+
+            checkpoint = {
+                'discovered_urls': discovered_urls,
+                'visited_urls': visited_urls,
+                'pending_count': self.link_manager.get_stats().get('pending', 0)
+            }
+
+            save_checkpoint(self.crawl_id, checkpoint)
+            print(f"Saved queue checkpoint for crawl {self.crawl_id}")
+
+        except Exception as e:
+            print(f"Error saving checkpoint: {e}")
+
+    def _start_auto_save_thread(self):
+        """Background thread for periodic saves"""
+        def auto_save_worker():
+            while self.is_running:
+                time.sleep(5)  # Check every 5 seconds
+                if time.time() - self.last_save_time >= self.auto_save_interval:
+                    self._save_batch_to_db()
+                    self._save_queue_checkpoint()
+
+        self.auto_save_thread = threading.Thread(target=auto_save_worker, daemon=True)
+        self.auto_save_thread.start()
+        print("Auto-save thread started")
 
     def update_config(self, new_config):
         """Update crawler configuration"""
@@ -452,7 +710,14 @@ class WebCrawler:
                                         print(f"Added URL to results: {result['url']} - Total in results: {len(self.crawl_results)}")
 
                                     # Detect issues
+                                    issues_before = len(self.issue_detector.detected_issues)
                                     self.issue_detector.detect_issues(result)
+                                    issues_after = len(self.issue_detector.detected_issues)
+
+                                    # Add newly detected issues to unsaved batch
+                                    if self.db_save_enabled and issues_after > issues_before:
+                                        new_issues = self.issue_detector.detected_issues[issues_before:issues_after]
+                                        self.unsaved_issues.extend(new_issues)
                             except Exception as e:
                                 print(f"Error in crawl task: {e}")
 
@@ -487,6 +752,19 @@ class WebCrawler:
 
         # Update all linked_from fields before completing
         self._update_all_linked_from()
+
+        # Run duplication detection on all crawled content
+        if self.issue_detector and self.config.get('enable_duplication_check', True):
+            print("Running duplication detection...")
+            duplication_threshold = self.config.get('duplication_threshold', 0.85)
+            self.issue_detector.detect_duplication_issues(self.crawl_results, duplication_threshold)
+            print(f"Duplication detection complete. Total issues: {len(self.issue_detector.get_issues())}")
+
+        # Save final data and mark as complete
+        if self.db_save_enabled and self.crawl_id:
+            self._save_batch_to_db(force=True)
+            from src.crawl_db import set_crawl_status
+            set_crawl_status(self.crawl_id, 'completed')
 
         # Mark crawl as complete
         self.is_running = False
@@ -605,7 +883,14 @@ class WebCrawler:
                 self.seo_extractor.extract_schema_org(soup, result)
 
                 # Collect all links
+                links_before = len(self.link_manager.all_links)
                 self.link_manager.collect_all_links(soup, url, self.crawl_results)
+                links_after = len(self.link_manager.all_links)
+
+                # Add newly discovered links to unsaved batch
+                if self.db_save_enabled and links_after > links_before:
+                    new_links = self.link_manager.all_links[links_before:links_after]
+                    self.unsaved_links.extend(new_links)
 
                 # Extract links for further crawling
                 should_extract = (
@@ -619,6 +904,14 @@ class WebCrawler:
             # Populate linked_from after all link collection is complete
             result['linked_from'] = self.link_manager.get_source_pages(url)
             result['response_time'] = round((time.time() - start_time) * 1000, 2)
+
+            # Add to unsaved batch if DB persistence enabled
+            if self.db_save_enabled:
+                self.unsaved_urls.append(result)
+                # Trigger batch save if threshold reached
+                if len(self.unsaved_urls) >= self.batch_save_size:
+                    self._save_batch_to_db()
+
             return result
 
         except Exception as e:
@@ -701,7 +994,14 @@ class WebCrawler:
             self.seo_extractor.extract_schema_org(soup, result)
 
             # Collect all links
+            links_before = len(self.link_manager.all_links)
             self.link_manager.collect_all_links(soup, url, self.crawl_results)
+            links_after = len(self.link_manager.all_links)
+
+            # Add newly discovered links to unsaved batch
+            if self.db_save_enabled and links_after > links_before:
+                new_links = self.link_manager.all_links[links_before:links_after]
+                self.unsaved_links.extend(new_links)
 
             # Extract links for further crawling
             should_extract = (
@@ -715,6 +1015,13 @@ class WebCrawler:
             # Populate linked_from after all link collection is complete
             result['linked_from'] = self.link_manager.get_source_pages(url)
             result['response_time'] = round((time.time() - start_time) * 1000, 2)
+
+            # Add to unsaved batch if DB persistence enabled
+            if self.db_save_enabled:
+                self.unsaved_urls.append(result)
+                # Trigger batch save if threshold reached
+                if len(self.unsaved_urls) >= self.batch_save_size:
+                    self._save_batch_to_db()
 
             return result
 
@@ -768,7 +1075,14 @@ class WebCrawler:
                                     print(f"Added URL to results (JS): {result['url']} - Total in results: {len(self.crawl_results)}")
 
                                 # Detect issues
+                                issues_before = len(self.issue_detector.detected_issues)
                                 self.issue_detector.detect_issues(result)
+                                issues_after = len(self.issue_detector.detected_issues)
+
+                                # Add newly detected issues to unsaved batch
+                                if self.db_save_enabled and issues_after > issues_before:
+                                    new_issues = self.issue_detector.detected_issues[issues_before:issues_after]
+                                    self.unsaved_issues.extend(new_issues)
                         except Exception as e:
                             print(f"Error in async crawl task: {e}")
 
@@ -789,6 +1103,19 @@ class WebCrawler:
         finally:
             # Update all linked_from fields before completing
             self._update_all_linked_from()
+
+            # Run duplication detection on all crawled content
+            if self.issue_detector and self.config.get('enable_duplication_check', True):
+                print("Running duplication detection...")
+                duplication_threshold = self.config.get('duplication_threshold', 0.85)
+                self.issue_detector.detect_duplication_issues(self.crawl_results, duplication_threshold)
+                print(f"Duplication detection complete. Total issues: {len(self.issue_detector.get_issues())}")
+
+            # Save final data and mark as complete
+            if self.db_save_enabled and self.crawl_id:
+                self._save_batch_to_db(force=True)
+                from src.crawl_db import set_crawl_status
+                set_crawl_status(self.crawl_id, 'completed')
 
             # Clean up
             await self.js_renderer.cleanup()

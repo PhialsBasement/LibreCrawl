@@ -15,6 +15,7 @@
                 <h1 class="app-title">LibreCrawl</h1>
                 <div class="header-actions">
                     <span id="userInfo" style="margin-right: 15px; color: #6b7280; font-size: 14px;"></span>
+                    <button class="btn btn-secondary" onclick="openDashboard()">Dashboard</button>
                     <button class="btn btn-secondary" onclick="openSettings()">Settings</button>
                     <button class="btn btn-secondary" onclick="exportData()">Export</button>
                     <button class="btn btn-success" id="saveCrawlBtn" onclick="saveCrawl()" disabled>Save Crawl</button>
@@ -482,6 +483,21 @@
     </div>
 
     <!-- Settings Modal -->
+    <!-- Dashboard Modal -->
+    <div id="dashboardModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 1200px;">
+            <div class="modal-header">
+                <h2>Crawl History</h2>
+                <button class="modal-close" onclick="closeDashboard()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="dashboardContent" style="padding: 20px;">
+                    <p style="text-align: center; color: #9ca3af;">Loading crawls...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div id="settingsModal" class="modal" style="display: none;">
         <div class="modal-content">
             <div class="modal-header">
@@ -641,6 +657,22 @@
                         <label for="maxFileSize">Maximum File Size (MB)</label>
                         <input type="number" id="maxFileSize" value="50" min="1" max="1000">
                         <span class="setting-help">Skip files larger than this size</span>
+                    </div>
+
+                    <h3 style="margin-top: 30px;">Duplication Detection</h3>
+
+                    <div class="setting-group">
+                        <label>
+                            <input type="checkbox" id="enableDuplicationCheck" checked>
+                            Enable Duplication Check
+                        </label>
+                        <span class="setting-help">Detect duplicate content across all crawled pages</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label for="duplicationThreshold">Duplication Similarity Threshold</label>
+                        <input type="number" id="duplicationThreshold" value="0.85" min="0" max="1" step="0.05">
+                        <span class="setting-help">Content similarity threshold (0.0-1.0). Higher values = stricter matching. Default: 0.85 (85% similar)</span>
                     </div>
                 </div>
 
@@ -970,6 +1002,7 @@
     <script src="/static/js/visualization.js"></script>
     <script src="/static/js/plugin-loader.js"></script>
     <script src="/static/js/app.js"></script>
+    <script src="/static/js/dashboard.js"></script>
     <script src="/static/js/settings.js"></script>
 </body>
 </html>

@@ -59,6 +59,113 @@ async function initializeApp() {
     // Load user info
     loadUserInfo();
 
+    // DEBUG: Check sessionStorage
+    console.log('DEBUG: Checking sessionStorage force_ui_refresh:', sessionStorage.getItem('force_ui_refresh'));
+
+    // Check if we just loaded a crawl from dashboard
+    if (sessionStorage.getItem('force_ui_refresh') === 'true') {
+        console.log('DEBUG: Found force_ui_refresh flag, loading crawl data...');
+        sessionStorage.removeItem('force_ui_refresh');
+
+        try {
+            // Fetch the loaded data immediately with FULL refresh (no incremental)
+            const response = await fetch('/api/crawl_status');
+            const data = await response.json();
+
+            // DEBUG: Log the full response
+            console.log('DEBUG: Full /api/crawl_status response:', JSON.stringify(data, null, 2));
+
+            // Clear existing data first
+            clearAllTables();
+            resetStats();
+
+            // Force populate all data
+            crawlState.urls = [];
+            crawlState.links = data.links || [];
+            crawlState.issues = data.issues || [];
+            crawlState.stats = data.stats || {};
+            crawlState.baseUrl = data.stats?.baseUrl || '';
+
+            // Set URL input
+            if (crawlState.baseUrl) {
+                document.getElementById('urlInput').value = crawlState.baseUrl;
+            }
+
+            // Add each URL to tables
+            if (data.urls && data.urls.length > 0) {
+                data.urls.forEach(url => addUrlToTable(url));
+            }
+
+            // Load links if present
+            if (data.links && data.links.length > 0) {
+                crawlState.pendingLinks = data.links;
+                // If links tab is active, load them immediately
+                if (isLinksTabActive()) {
+                    updateLinksTable(data.links);
+                }
+            }
+
+            // Load issues if present
+            if (data.issues && data.issues.length > 0) {
+                crawlState.pendingIssues = data.issues;
+                // If issues tab is active, load them immediately
+                if (isIssuesTabActive()) {
+                    updateIssuesTable(data.issues);
+                } else {
+                    // Update badge count even if tab not active
+                    const issuesTabButton = Array.from(document.querySelectorAll('.tab-btn')).find(btn => btn.textContent.includes('Issues'));
+                    if (issuesTabButton && data.issues.length > 0) {
+                        const errorCount = data.issues.filter(i => i.type === 'error').length;
+                        const warningCount = data.issues.filter(i => i.type === 'warning').length;
+                        let badgeColor = '#3b82f6';
+                        if (errorCount > 0) badgeColor = '#ef4444';
+                        else if (warningCount > 0) badgeColor = '#f59e0b';
+                        issuesTabButton.innerHTML = `Issues <span style="background: ${badgeColor}; color: white; padding: 2px 6px; border-radius: 12px; font-size: 12px;">${data.issues.length}</span>`;
+                    }
+                }
+            }
+
+            // Update all displays
+            updateStatsDisplay();
+            updateFilterCounts();
+            updateStatusCodesTable();
+            updateCrawlButtons();
+
+            // Check if the crawl is currently running (resumed from dashboard)
+            if (data.status === 'running') {
+                // Set crawl state to running
+                crawlState.isRunning = true;
+                crawlState.isPaused = false;
+                crawlState.startTime = new Date(); // Set start time to now for timer
+
+                // Show progress UI
+                showProgress();
+
+                // Update buttons for running state
+                updateCrawlButtons();
+
+                // Start polling for updates
+                updateStatus('Crawl resumed - updating...');
+                pollCrawlProgress();
+            } else {
+                // Crawl is not running, just loaded data
+                updateStatus(`Loaded crawl: ${data.stats.crawled} URLs, ${data.links?.length || 0} links, ${data.issues?.length || 0} issues`);
+            }
+
+            console.log('Loaded crawl from database:', {
+                urls: data.urls?.length || 0,
+                links: data.links?.length || 0,
+                issues: data.issues?.length || 0,
+                stats: data.stats,
+                status: data.status,
+                isRunning: crawlState.isRunning
+            });
+        } catch (error) {
+            console.error('Error loading crawl data:', error);
+            updateStatus('Error loading crawl data');
+        }
+    }
+
     // Set initial focus
     document.getElementById('urlInput').focus();
 

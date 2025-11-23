@@ -26,6 +26,10 @@ let defaultSettings = {
     excludePatterns: '',
     maxFileSize: 50,
 
+    // Duplication detection settings
+    enableDuplicationCheck: true,
+    duplicationThreshold: 0.85,
+
     // Export settings
     exportFormat: 'csv',
     exportFields: ['url', 'status_code', 'title', 'meta_description', 'h1', 'word_count', 'response_time', 'analytics', 'og_tags', 'json_ld', 'internal_links', 'external_links', 'images'],
@@ -456,6 +460,7 @@ function collectSettingsFromForm() {
         'maxDepth', 'maxUrls', 'crawlDelay', 'followRedirects', 'crawlExternalLinks',
         'userAgent', 'timeout', 'retries', 'acceptLanguage', 'respectRobotsTxt', 'allowCookies', 'discoverSitemaps', 'enablePageSpeed', 'googleApiKey',
         'includeExtensions', 'excludeExtensions', 'includePatterns', 'excludePatterns', 'maxFileSize',
+        'enableDuplicationCheck', 'duplicationThreshold',
         'exportFormat', 'concurrency', 'memoryLimit', 'logLevel', 'saveSession',
         'enableProxy', 'proxyUrl', 'customHeaders',
         'enableJavaScript', 'jsWaitTime', 'jsTimeout', 'jsBrowser', 'jsHeadless', 'jsUserAgent', 'jsViewportWidth', 'jsViewportHeight', 'jsMaxConcurrentPages',
@@ -591,6 +596,11 @@ function validateSettings(settings) {
 
     if (settings.memoryLimit < 64 || settings.memoryLimit > 4096) {
         errors.push('Memory limit must be between 64 and 4096 MB');
+    }
+
+    // Validate duplication detection settings
+    if (settings.duplicationThreshold < 0 || settings.duplicationThreshold > 1) {
+        errors.push('Duplication threshold must be between 0.0 and 1.0');
     }
 
     // Validate JavaScript settings if enabled
