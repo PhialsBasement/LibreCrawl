@@ -8,6 +8,7 @@ import webbrowser
 import argparse
 import secrets
 import string
+import os
 from io import StringIO
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
@@ -15,7 +16,12 @@ from flask_compress import Compress
 from functools import wraps
 from src.crawler import WebCrawler
 from src.settings_manager import SettingsManager
-from src.auth_db import init_db, create_user, authenticate_user, get_user_by_id, log_guest_crawl, get_guest_crawls_last_24h, verify_user, set_user_tier
+from src.auth_db import init_db, create_user, authenticate_user, get_user_by_id, log_guest_crawl, get_guest_crawls_last_24h, verify_user, set_user_tier, create_verification_token, verify_token, get_user_by_email
+from src.email_service import send_verification_email, send_welcome_email
+
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv()
 
 # Parse command line arguments
 parser = argparse.ArgumentParser(description='LibreCrawl - SEO Spider Tool')
@@ -423,6 +429,43 @@ def register_page():
         return redirect(url_for('index'))
     return render_template('register.html', registration_disabled=DISABLE_REGISTER)
 
+@app.route('/verify')
+def verify_email():
+    """Email verification endpoint"""
+    token = request.args.get('token')
+
+    if not token:
+        return render_template('verification_result.html',
+                             success=False,
+                             message='Invalid verification link',
+                             app_source='main')
+
+    # Verify the token
+    success, message, app_source, user_email = verify_token(token)
+
+    # Send welcome email if successful
+    if success and user_email:
+        try:
+            user = get_user_by_email(user_email)
+            if user:
+                send_welcome_email(user_email, user['username'], app_source or 'main')
+        except Exception as e:
+            print(f"Error sending welcome email: {e}")
+
+    # Determine redirect URL based on app_source
+    redirect_url = None
+    if success:
+        if app_source == 'workshop':
+            redirect_url = os.getenv('WORKSHOP_APP_URL', 'https://workshop.librecrawl.com')
+        else:
+            redirect_url = url_for('login_page')
+
+    return render_template('verification_result.html',
+                         success=success,
+                         message=message,
+                         app_source=app_source or 'main',
+                         redirect_url=redirect_url)
+
 @app.route('/api/register', methods=['POST'])
 def register():
     # Check if registration is disabled
@@ -434,7 +477,7 @@ def register():
     email = data.get('email')
     password = data.get('password')
 
-    success, message = create_user(username, email, password)
+    success, message, user_id = create_user(username, email, password)
 
     # In local mode, auto-verify and set to admin tier
     if success and LOCAL_MODE:
@@ -457,6 +500,30 @@ def register():
             print(f"Error during local mode auto-verification: {e}")
             # Don't fail the registration, just log the error
             # The account is still created successfully
+    elif success:
+        # Not in local mode - send verification email
+        is_resend = (message == 'resend')
+        try:
+            # Create verification token
+            token = create_verification_token(user_id, app_source='main')
+            if token:
+                # Send verification email
+                email_success, email_message = send_verification_email(
+                    email, username, token, app_source='main', is_resend=is_resend
+                )
+                if email_success:
+                    if is_resend:
+                        message = 'A verification email was already sent to this address. We\'ve updated your account details and sent a new verification link.'
+                    else:
+                        message = 'Registration successful! Please check your email to verify your account.'
+                else:
+                    message = 'Account created, but we could not send the verification email. Please contact support.'
+                    print(f"Email error: {email_message}")
+            else:
+                message = 'Account created, but verification token generation failed. Please contact support.'
+        except Exception as e:
+            print(f"Error sending verification email: {e}")
+            message = 'Account created, but we could not send the verification email. Please contact support.'
 
     return jsonify({'success': success, 'message': message})
 

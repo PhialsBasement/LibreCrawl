@@ -5,7 +5,8 @@ Handles user registration, login, and verification
 import sqlite3
 import bcrypt
 import os
-from datetime import datetime
+import secrets
+from datetime import datetime, timedelta
 from contextlib import contextmanager
 
 # Database file location
@@ -73,6 +74,24 @@ def init_db():
             ON guest_crawls(ip_address, crawl_time)
         ''')
 
+        # Email verification tokens table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS verification_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                token TEXT UNIQUE NOT NULL,
+                app_source TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL,
+                used INTEGER DEFAULT 0,
+                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+            )
+        ''')
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_token
+            ON verification_tokens(token)
+        ''')
+
         # Add tier column to existing users table if it doesn't exist
         try:
             cursor.execute("ALTER TABLE users ADD COLUMN tier TEXT DEFAULT 'guest'")
@@ -94,21 +113,22 @@ def verify_password(password, password_hash):
 def create_user(username, email, password):
     """
     Create a new user account (unverified by default)
-    Returns (success, message)
+    If email exists but unverified, update username/password and return (True, 'resend')
+    Returns (success, message, user_id)
     """
     try:
         # Validate inputs
         if not username or not email or not password:
-            return False, "All fields are required"
+            return False, "All fields are required", None
 
         if len(username) < 3:
-            return False, "Username must be at least 3 characters"
+            return False, "Username must be at least 3 characters", None
 
         if len(password) < 8:
-            return False, "Password must be at least 8 characters"
+            return False, "Password must be at least 8 characters", None
 
         if '@' not in email:
-            return False, "Invalid email address"
+            return False, "Invalid email address", None
 
         # Hash the password
         password_hash = hash_password(password)
@@ -116,23 +136,41 @@ def create_user(username, email, password):
         # Insert into database
         with get_db() as conn:
             cursor = conn.cursor()
+
+            # Check if email exists but unverified
+            cursor.execute('''
+                SELECT id, verified FROM users WHERE email = ?
+            ''', (email,))
+            existing = cursor.fetchone()
+
+            if existing:
+                if existing['verified'] == 1:
+                    return False, "Email already registered and verified", None
+                else:
+                    # Update unverified account with new username and password
+                    cursor.execute('''
+                        UPDATE users
+                        SET username = ?, password_hash = ?
+                        WHERE id = ?
+                    ''', (username, password_hash, existing['id']))
+                    return True, "resend", existing['id']
+
+            # Create new user
             cursor.execute('''
                 INSERT INTO users (username, email, password_hash, verified)
                 VALUES (?, ?, ?, 0)
             ''', (username, email, password_hash))
 
-        return True, "Registration successful! Please wait for admin verification."
+            return True, "Registration successful! Please wait for admin verification.", cursor.lastrowid
 
     except sqlite3.IntegrityError as e:
         if 'username' in str(e):
-            return False, "Username already exists"
-        elif 'email' in str(e):
-            return False, "Email already exists"
+            return False, "Username already exists", None
         else:
-            return False, "Registration failed"
+            return False, "Registration failed", None
     except Exception as e:
         print(f"Registration error: {e}")
-        return False, "An error occurred during registration"
+        return False, "An error occurred during registration", None
 
 def authenticate_user(username, password):
     """
@@ -410,3 +448,102 @@ def get_user_crawl_history(user_id, limit=50):
     except Exception as e:
         print(f"Error getting crawl history: {e}")
         return []
+
+def create_verification_token(user_id, app_source='main'):
+    """
+    Create a verification token for a user
+    app_source: 'main' or 'workshop' - determines which app they registered from
+    Returns the token string
+    """
+    try:
+        # Generate a secure random token
+        token = secrets.token_urlsafe(32)
+
+        # Token expires in 24 hours
+        expires_at = datetime.now() + timedelta(hours=24)
+
+        with get_db() as conn:
+            cursor = conn.cursor()
+            # Delete any existing unused tokens for this user
+            cursor.execute('''
+                DELETE FROM verification_tokens
+                WHERE user_id = ? AND used = 0
+            ''', (user_id,))
+
+            # Create new token
+            cursor.execute('''
+                INSERT INTO verification_tokens (user_id, token, app_source, expires_at)
+                VALUES (?, ?, ?, ?)
+            ''', (user_id, token, app_source, expires_at))
+
+        return token
+    except Exception as e:
+        print(f"Error creating verification token: {e}")
+        return None
+
+def verify_token(token):
+    """
+    Verify a token and mark the user as verified
+    Returns (success, message, app_source, user_email)
+    """
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+
+            # Find the token
+            cursor.execute('''
+                SELECT vt.id, vt.user_id, vt.app_source, vt.expires_at, vt.used, u.email
+                FROM verification_tokens vt
+                JOIN users u ON vt.user_id = u.id
+                WHERE vt.token = ?
+            ''', (token,))
+
+            result = cursor.fetchone()
+
+            if not result:
+                return False, "Invalid verification link", None, None
+
+            if result['used']:
+                return False, "This verification link has already been used", None, None
+
+            # Check if expired
+            expires_at = datetime.fromisoformat(result['expires_at'])
+            if datetime.now() > expires_at:
+                return False, "This verification link has expired", None, None
+
+            # Mark user as verified
+            cursor.execute('''
+                UPDATE users SET verified = 1 WHERE id = ?
+            ''', (result['user_id'],))
+
+            # Mark token as used
+            cursor.execute('''
+                UPDATE verification_tokens SET used = 1 WHERE id = ?
+            ''', (result['id'],))
+
+            conn.commit()
+
+            return True, "Email verified successfully!", result['app_source'], result['email']
+
+    except Exception as e:
+        print(f"Error verifying token: {e}")
+        return False, "An error occurred during verification", None, None
+
+def get_user_by_email(email):
+    """Get user information by email"""
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, username, email, verified, tier
+                FROM users
+                WHERE email = ?
+            ''', (email,))
+
+            user = cursor.fetchone()
+            if user:
+                return dict(user)
+            return None
+    except Exception as e:
+        print(f"Error fetching user by email: {e}")
+        return None

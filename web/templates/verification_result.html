@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email Verification - LibreCrawl</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 500px;
+            width: 100%;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+
+        .icon.success {
+            color: #10b981;
+        }
+
+        .icon.error {
+            color: #ef4444;
+        }
+
+        h1 {
+            font-size: 28px;
+            margin-bottom: 15px;
+            color: #1f2937;
+        }
+
+        .message {
+            font-size: 16px;
+            color: #6b7280;
+            margin-bottom: 30px;
+            line-height: 1.6;
+        }
+
+        .button {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 40px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: transform 0.2s, box-shadow 0.2s;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .auto-redirect {
+            margin-top: 20px;
+            font-size: 14px;
+            color: #9ca3af;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #d1d5db;
+            border-top-color: #667eea;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            vertical-align: middle;
+            margin-left: 8px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        {% if success %}
+        <div class="icon success">✓</div>
+        <h1>Email Verified!</h1>
+        <p class="message">{{ message }}</p>
+        {% if redirect_url %}
+        <a href="{{ redirect_url }}" class="button">Go to {{ 'Workshop' if app_source == 'workshop' else 'LibreCrawl' }}</a>
+        <p class="auto-redirect">Redirecting automatically in <span id="countdown">5</span> seconds<span class="spinner"></span></p>
+        {% else %}
+        <a href="{{ url_for('login_page') }}" class="button">Go to Login</a>
+        {% endif %}
+        {% else %}
+        <div class="icon error">✗</div>
+        <h1>Verification Failed</h1>
+        <p class="message">{{ message }}</p>
+        <a href="{{ url_for('login_page') }}" class="button">Go to Login</a>
+        {% endif %}
+    </div>
+
+    {% if success and redirect_url %}
+    <script>
+        let seconds = 5;
+        const countdownEl = document.getElementById('countdown');
+        const redirectUrl = "{{ redirect_url }}";
+
+        const interval = setInterval(() => {
+            seconds--;
+            countdownEl.textContent = seconds;
+
+            if (seconds <= 0) {
+                clearInterval(interval);
+                window.location.href = redirectUrl;
+            }
+        }, 1000);
+    </script>
+    {% endif %}
+</body>
+</html>
