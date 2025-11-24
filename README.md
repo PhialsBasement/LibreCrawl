@@ -4,11 +4,11 @@ A web-based multi-tenant crawler for SEO analysis and website auditing.
 
 🌐 **Website**: [librecrawl.com](https://librecrawl.com)
 
-**Try the Live Demo:** [crawl.librecrawl.com](https://crawl.librecrawl.com/)
+**Try the Live Demo:** [https://librecrawl.com/app/](https://librecrawl.com/app/)
 
 **API Documentation:** [https://librecrawl.com/api/docs/](https://librecrawl.com/api/docs/)
 
-**Plugin Workshop** [https://workshop.librecrawl.com/](https://workshop.librecrawl.com/)
+**Plugin Workshop** [https://librecrawl.com/workshop/](https://librecrawl.com/workshop/)
 
 LibreCrawl will ***always*** be free and open source. If it's replacing your $259/year Screaming Frog license, deepcrawl license or sitebulb license, [buy me a coffee](https://www.paypal.com/donate/?business=7H9HFA3385JS8&no_recurring=0&item_name=Continue+the+development+of+LibreCrawl&currency_code=AUD).
 
