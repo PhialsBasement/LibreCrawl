@@ -36,12 +36,12 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright browsers (Chromium)
-RUN playwright install chromium
-RUN playwright install-deps chromium
+# Install Playwright system dependencies for all browsers (requires root)
+RUN playwright install-deps
 
 # Create a non-root user to run the application
-RUN groupadd -r librecrawl && useradd -r -g librecrawl -u 1000 librecrawl
+RUN groupadd -r librecrawl && useradd -r -g librecrawl -u 1000 librecrawl \
+    && mkdir -p /home/librecrawl && chown -R librecrawl:librecrawl /home/librecrawl
 
 # Copy application code
 COPY --chown=librecrawl:librecrawl . .
@@ -54,6 +54,9 @@ RUN chown -R librecrawl:librecrawl /app
 
 # Switch to non-root user
 USER librecrawl
+
+# Install all Playwright browsers as non-root user (installs to /home/librecrawl/.cache/ms-playwright)
+RUN playwright install
 
 # Expose Flask port
 EXPOSE 5000
