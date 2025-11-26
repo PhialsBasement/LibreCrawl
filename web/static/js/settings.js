@@ -7,6 +7,7 @@ let defaultSettings = {
     crawlDelay: 1,
     followRedirects: true,
     crawlExternalLinks: false,
+    maxExternalDepth: 1,
 
     // Request settings
     userAgent: 'LibreCrawl/1.0 (Web Crawler)',
@@ -301,6 +302,16 @@ function setupSettingsEventHandlers() {
             });
         });
     }
+
+    const crawlExternalCheckbox = document.getElementById('crawlExternalLinks');
+    if (crawlExternalCheckbox) {
+        crawlExternalCheckbox.addEventListener('change', function() {
+            const externalDepthGroup = document.getElementById('externalDepthGroup');
+            if (externalDepthGroup) {
+                externalDepthGroup.style.display = this.checked ? 'block' : 'none';
+            }
+        });
+    }
 }
 
 function resetIssueExclusions() {
@@ -450,6 +461,11 @@ function populateSettingsForm() {
             group.style.display = enableJavaScript ? 'block' : 'none';
         }
     });
+
+    const externalDepthGroup = document.getElementById('externalDepthGroup');
+    if (externalDepthGroup) {
+        externalDepthGroup.style.display = currentSettings.crawlExternalLinks ? 'block' : 'none';
+    }
 }
 
 function collectSettingsFromForm() {
@@ -457,7 +473,7 @@ function collectSettingsFromForm() {
 
     // Collect regular form fields
     const formFields = [
-        'maxDepth', 'maxUrls', 'crawlDelay', 'followRedirects', 'crawlExternalLinks',
+        'maxDepth', 'maxUrls', 'crawlDelay', 'followRedirects', 'crawlExternalLinks', 'maxExternalDepth',
         'userAgent', 'timeout', 'retries', 'acceptLanguage', 'respectRobotsTxt', 'allowCookies', 'discoverSitemaps', 'enablePageSpeed', 'googleApiKey',
         'includeExtensions', 'excludeExtensions', 'includePatterns', 'excludePatterns', 'maxFileSize',
         'enableDuplicationCheck', 'duplicationThreshold',
@@ -568,6 +584,10 @@ function validateSettings(settings) {
     // Validate numeric ranges
     if (settings.maxDepth < 1 || settings.maxDepth > 10) {
         errors.push('Max depth must be between 1 and 10');
+    }
+
+    if (settings.maxExternalDepth < 0 || settings.maxExternalDepth > 5) {
+        errors.push('External depth must be between 0 and 5');
     }
 
     if (settings.maxUrls < 1 || settings.maxUrls > 5000000) {

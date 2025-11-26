@@ -50,7 +50,7 @@ class LinkManager:
                     clean_url != current_url):
 
                     # Check if this URL should be crawled
-                    if should_crawl_callback(clean_url):
+                    if should_crawl_callback(clean_url, depth):
                         self.all_discovered_urls.add(clean_url)
                         self.discovered_urls.append((clean_url, depth))
 
