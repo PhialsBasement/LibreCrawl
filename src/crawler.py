@@ -94,6 +94,7 @@ class WebCrawler:
         """Get default configuration"""
         return {
             'max_depth': 3,
+            'max_external_depth': 1,
             'max_urls': 1000,
             'delay': 1.0,
             'follow_redirects': True,
@@ -310,7 +311,7 @@ class WebCrawler:
         filtered_count = 0
 
         for url in sitemap_urls:
-            if self._should_crawl_url(url):
+            if self._should_crawl_url(url, depth=0):
                 self.link_manager.add_url(url, 0)
                 added_count += 1
             else:
@@ -895,7 +896,8 @@ class WebCrawler:
                 # Extract links for further crawling
                 should_extract = (
                     (is_internal and depth < self.config['max_depth']) or
-                    (self.config['crawl_external'] and depth < self.config['max_depth'])
+                    (not is_internal and self.config['crawl_external'] and
+                     depth < self.config.get('max_external_depth', 1))
                 )
 
                 if should_extract:
@@ -1006,7 +1008,8 @@ class WebCrawler:
             # Extract links for further crawling
             should_extract = (
                 (is_internal and depth < self.config['max_depth']) or
-                (self.config['crawl_external'] and depth < self.config['max_depth'])
+                (not is_internal and self.config['crawl_external'] and
+                 depth < self.config.get('max_external_depth', 1))
             )
 
             if should_extract:
@@ -1136,13 +1139,22 @@ class WebCrawler:
 
         print(f"Updated linked_from data for {updated_count} URLs")
 
-    def _should_crawl_url(self, url):
+    def _should_crawl_url(self, url, depth=None):
         """Check if URL should be crawled based on settings"""
         parsed = urlparse(url)
 
+        # Determine whether URL is internal
+        is_internal = True
+        if self.link_manager:
+            is_internal = self.link_manager.is_internal(url)
+
         # Check external domain policy
-        if not self.config['crawl_external']:
-            if not self.link_manager.is_internal(url):
+        if not is_internal:
+            if not self.config['crawl_external']:
+                return False
+
+            max_external_depth = self.config.get('max_external_depth', 1)
+            if depth is not None and depth > max_external_depth:
                 return False
 
         # Check robots.txt

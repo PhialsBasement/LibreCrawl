@@ -69,7 +69,7 @@ git clone https://github.com/PhialsBasement/LibreCrawl.git
 cd LibreCrawl
 
 # Copy environment file
-cp .env.example .env
+cp .env.example .env # copy .env.example .env
 
 # Start LibreCrawl
 docker-compose up -d

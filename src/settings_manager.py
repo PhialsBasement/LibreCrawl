@@ -27,6 +27,7 @@ class SettingsManager:
         user_settings = [
             # Crawler tab
             'maxDepth', 'maxUrls', 'crawlDelay', 'followRedirects', 'crawlExternalLinks',
+            'maxExternalDepth',
             # Export tab
             'exportFormat', 'exportFields',
             # Issues tab
@@ -78,6 +79,7 @@ class SettingsManager:
             'crawlDelay': 1,
             'followRedirects': True,
             'crawlExternalLinks': False,
+            'maxExternalDepth': 1,
 
             # Request settings
             'userAgent': 'LibreCrawl/1.0 (Web Crawler)',
@@ -424,6 +426,7 @@ class SettingsManager:
             # Validate numeric ranges
             numeric_validations = {
                 'maxDepth': (1, 10),
+            'maxExternalDepth': (0, 5),
                 'maxUrls': (1, 5000000),
                 'crawlDelay': (0, 60),
                 'timeout': (1, 120),
@@ -476,6 +479,7 @@ class SettingsManager:
 
         return {
             'max_depth': settings['maxDepth'],
+            'max_external_depth': settings['maxExternalDepth'],
             'max_urls': settings['maxUrls'],
             'delay': settings['crawlDelay'],
             'follow_redirects': settings['followRedirects'],
