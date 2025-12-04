@@ -35,6 +35,7 @@ LOCAL_MODE = args.local
 DISABLE_REGISTER = args.disable_register
 
 app = Flask(__name__, template_folder='web/templates', static_folder='web/static')
+app.config['TEMPLATES_AUTO_RELOAD'] = True
 app.secret_key = 'librecrawl-secret-key-change-in-production'  # TODO: Use environment variable in production
 
 # Enable compression for all responses
@@ -313,7 +314,7 @@ def generate_xml_export(urls, fields):
 def generate_links_csv_export(links):
     """Generate CSV export for links data"""
     output = StringIO()
-    fieldnames = ['source_url', 'target_url', 'anchor_text', 'is_internal', 'target_domain', 'target_status', 'placement']
+    fieldnames = ['source_url', 'target_url', 'anchor_text', 'is_internal', 'target_domain', 'target_status', 'placement', 'link_path']
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
 
@@ -325,7 +326,8 @@ def generate_links_csv_export(links):
             'is_internal': 'Yes' if link.get('is_internal') else 'No',
             'target_domain': link.get('target_domain', ''),
             'target_status': link.get('target_status', 'Not crawled'),
-            'placement': link.get('placement', 'body')
+            'placement': link.get('placement', 'body'),
+            'link_path': link.get('link_path', '')
         }
         writer.writerow(row)
 

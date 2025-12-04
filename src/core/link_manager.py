@@ -57,6 +57,10 @@ class LinkManager:
     def collect_all_links(self, soup, source_url, crawl_results):
         """Collect all links for the Links tab display"""
         links = soup.find_all('a', href=True)
+        
+        # Debug: confirm method is being called
+        if len(self.all_links) == 0:
+            print(f"DEBUG: collect_all_links called for {source_url}, found {len(links)} links")
 
         for link in links:
             href = link['href'].strip()
@@ -94,6 +98,16 @@ class LinkManager:
 
                 # Determine placement (navigation, footer, body)
                 placement = self._detect_link_placement(link)
+                
+                # Generate DOM path (XPath-like)
+                link_path = self._get_dom_path(link)
+                # Debug: print first few paths to verify generation
+                links_count_before = len(self.all_links)
+                if links_count_before < 10:
+                    if link_path:
+                        print(f"DEBUG: Generated link_path: '{link_path}' for {clean_url[:60]}... (total links so far: {links_count_before})")
+                    else:
+                        print(f"DEBUG: WARNING - link_path is EMPTY for {clean_url[:60]}... (element: {link.name if link else 'None'})")
 
                 link_data = {
                     'source_url': source_url,
@@ -102,7 +116,8 @@ class LinkManager:
                     'is_internal': is_internal,
                     'target_domain': parsed_target.netloc,
                     'target_status': target_status,
-                    'placement': placement
+                    'placement': placement,
+                    'link_path': link_path
                 }
 
                 # Track source page for this URL (for "Linked From" feature)
@@ -154,6 +169,56 @@ class LinkManager:
 
         # Default to body if not in nav or footer
         return 'body'
+
+    def _get_dom_path(self, element):
+        """Generate XPath-like DOM path for an element (similar to Screaming Frog format)"""
+        if not element or not element.name:
+            return ''
+        
+        path_parts = []
+        current = element
+        
+        # Walk up the tree to build path
+        while current and current.name:
+            tag_name = current.name.lower()
+            
+            # Skip html tag, start from body
+            if tag_name == 'html':
+                break
+            
+            # Build path segment
+            segment = tag_name
+            
+            # Add id if available (most specific)
+            element_id = current.get('id')
+            if element_id:
+                segment += f"[@id='{element_id}']"
+            else:
+                # Count siblings with same tag name for index
+                parent = current.parent
+                if parent:
+                    # Filter to only element siblings (not text nodes)
+                    siblings = [sib for sib in parent.children 
+                               if hasattr(sib, 'name') and sib.name and sib.name == tag_name]
+                    if len(siblings) > 1:
+                        try:
+                            index = siblings.index(current) + 1
+                            segment += f"[{index}]"
+                        except ValueError:
+                            # Current not in siblings list (shouldn't happen, but handle gracefully)
+                            pass
+            
+            path_parts.insert(0, segment)
+            current = current.parent
+            
+            # Stop at body (Screaming Frog style starts from body)
+            if tag_name == 'body':
+                break
+        
+        # Join with / separator, starting with //body
+        if path_parts:
+            return '//' + '/'.join(path_parts)
+        return ''
 
     def is_internal(self, url):
         """Check if URL is internal to the base domain"""

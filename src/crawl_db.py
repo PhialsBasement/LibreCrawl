@@ -124,12 +124,20 @@ def init_crawl_tables():
                 target_domain TEXT,
                 target_status INTEGER,
                 placement TEXT,
+                link_path TEXT,
 
                 discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
                 FOREIGN KEY (crawl_id) REFERENCES crawls(id) ON DELETE CASCADE
             )
         ''')
+        
+        # Add link_path column to existing tables (if it doesn't exist)
+        try:
+            cursor.execute('ALTER TABLE crawl_links ADD COLUMN link_path TEXT')
+        except Exception:
+            # Column already exists, ignore
+            pass
 
         # Issues table
         cursor.execute('''
@@ -328,15 +336,16 @@ def save_links_batch(crawl_id, links):
                     link.get('is_internal'),
                     link.get('target_domain'),
                     link.get('target_status'),
-                    link.get('placement', 'body')
+                    link.get('placement', 'body'),
+                    link.get('link_path', '')
                 )
                 rows.append(row)
 
             cursor.executemany('''
                 INSERT INTO crawl_links (
                     crawl_id, source_url, target_url, anchor_text,
-                    is_internal, target_domain, target_status, placement
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    is_internal, target_domain, target_status, placement, link_path
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', rows)
 
             print(f"Saved {len(links)} links to database for crawl {crawl_id}")

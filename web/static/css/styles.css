@@ -982,12 +982,13 @@ body {
 
 .links-section .table-container {
     flex: 1;
-    overflow-y: auto;
+    overflow: auto;
     min-height: 0;
 }
 
 .links-section .data-table {
-    table-layout: fixed;
+    table-layout: auto;
+    width: auto;
 }
 
 .links-section .data-table th:nth-child(1),
