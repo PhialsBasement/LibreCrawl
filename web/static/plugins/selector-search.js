@@ -19,16 +19,39 @@ LibreCrawlPlugin.register({
     description: 'Search for CSS selectors across crawled pages',
     
     onLoad() {
+        // Always reset search state when plugin loads (including on page refresh)
+        // This ensures a clean slate every time the page loads
+        this.resetSearchState();
+    },
+    
+    resetSearchState() {
+        // Completely reset all search state
         this.searchState = {
             selector: '',
             isSearching: false,
             results: [],
             error: null
         };
+        
+        // Also clear any stored reference to previous results
+        if (this.container) {
+            // Clear any rendered results from the container
+            const resultsContainer = this.container.querySelector('.plugin-content');
+            if (resultsContainer) {
+                // Results will be cleared on next render, but we ensure state is clean
+            }
+        }
     },
     
     async onTabActivate(container, data) {
         this.container = container;
+        
+        // Always reset search state when tab is activated (ensures clean state on refresh)
+        // This ensures that each time you open the tab, you start fresh
+        // Note: We check if searchState exists first (in case onLoad hasn't run yet)
+        if (!this.searchState || !this.searchState.isSearching) {
+            this.resetSearchState();
+        }
         
         // If no URLs in data, fetch from API
         if (!data.urls || data.urls.length === 0) {
@@ -111,7 +134,7 @@ LibreCrawlPlugin.register({
                                 ${isCrawlRunning ? '<span style="color: #fbbf24;">⚠️ Please wait until the crawl is complete before searching.</span>' : 'Enter a CSS selector to search for (e.g., <code style="background: #111827; padding: 2px 6px; border-radius: 4px;">div > h1</code>, <code style="background: #111827; padding: 2px 6px; border-radius: 4px;">.class-name</code>, <code style="background: #111827; padding: 2px 6px; border-radius: 4px;">#id-name</code>)'}
                             </p>
                         </div>
-                        <div style="margin-top: 28px;">
+                        <div style="margin-top: 28px; display: flex; gap: 12px;">
                             <button 
                                 id="search-btn"
                                 onclick="window.selectorSearchPlugin?.performSearch()"
@@ -120,6 +143,18 @@ LibreCrawlPlugin.register({
                             >
                                 ${this.searchState.isSearching ? 'Searching...' : (isCrawlRunning ? 'Wait for crawl...' : 'Search')}
                             </button>
+                            ${this.searchState.results.length > 0 || this.searchState.selector ? `
+                                <button 
+                                    id="clear-btn"
+                                    onclick="window.selectorSearchPlugin?.clearSearch()"
+                                    style="padding: 10px 24px; background: #374151; color: #e5e7eb; border: 1px solid #4b5563; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 14px; white-space: nowrap; transition: all 0.2s ease;"
+                                    ${this.searchState.isSearching ? 'disabled' : ''}
+                                    onmouseover="this.style.background='#4b5563'" 
+                                    onmouseout="this.style.background='#374151'"
+                                >
+                                    Clear
+                                </button>
+                            ` : ''}
                         </div>
                     </div>
                     
@@ -149,6 +184,49 @@ LibreCrawlPlugin.register({
                 }
             });
         }
+    },
+    
+    clearSearch() {
+        // Reset search state
+        this.resetSearchState();
+        
+        // Clear input field
+        const input = document.getElementById('selector-input');
+        if (input) {
+            input.value = '';
+        }
+        
+        // Re-render to update UI
+        if (this.container) {
+            // Fetch current crawl data
+            fetch('/api/crawl_status')
+                .then(response => response.json())
+                .then(data => {
+                    this.render(this.container, {
+                        urls: data.urls || [],
+                        links: data.links || [],
+                        issues: data.issues || [],
+                        stats: data.stats || {},
+                        status: data.status || 'idle'
+                    });
+                })
+                .catch(error => {
+                    console.error('Failed to fetch crawl data:', error);
+                    // Still render with empty state
+                    if (this.container) {
+                        const currentData = {
+                            urls: window.crawlState?.urls || [],
+                            links: window.crawlState?.links || [],
+                            issues: window.crawlState?.issues || [],
+                            stats: window.crawlState?.stats || {},
+                            status: 'idle'
+                        };
+                        this.render(this.container, currentData);
+                    }
+                });
+        }
+        
+        this.utils.showNotification('Search cleared', 'info');
     },
     
     async performSearch() {
