@@ -19,14 +19,12 @@ class PluginLoader {
             // In the future, this could come from a backend API or auto-discovery
             const pluginFiles = await this.discoverPlugins();
 
-            console.log(`📦 Discovered ${pluginFiles.length} plugin(s)`);
 
             // Load each plugin script
             for (const pluginFile of pluginFiles) {
                 await this.loadPluginScript(pluginFile);
             }
 
-            console.log(`✅ Loaded ${this.plugins.length} plugin(s)`);
 
         } catch (error) {
             console.error('❌ Failed to load plugins:', error);
@@ -64,7 +62,6 @@ class PluginLoader {
             script.async = false; // Load in order
 
             script.onload = () => {
-                console.log(`✓ Loaded: ${pluginFile}`);
                 resolve();
             };
 
@@ -101,7 +98,6 @@ class PluginLoader {
         this.plugins.push(plugin);
         this.loadedPluginIds.add(pluginConfig.id);
 
-        console.log(`✅ Registered plugin: ${plugin.name} (${plugin.id})`);
 
         // Call onLoad hook if present
         if (typeof plugin.onLoad === 'function') {
@@ -212,7 +208,6 @@ class PluginLoader {
      * Initialize all loaded plugins (create tabs)
      */
     initializePlugins() {
-        console.log(`🎨 Initializing ${this.plugins.length} plugin tab(s)...`);
 
         this.plugins.forEach(plugin => {
             this.createPluginTab(plugin);
@@ -266,7 +261,6 @@ class PluginLoader {
 
         tabContent.appendChild(tabPane);
 
-        console.log(`  ✓ Created tab: ${plugin.tab.label}`);
     }
 
     /**
@@ -388,4 +382,3 @@ window.LibreCrawlPlugin = {
     }
 };
 
-console.log('🔌 LibreCrawl Plugin System loaded');

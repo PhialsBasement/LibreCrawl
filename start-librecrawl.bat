@@ -4,14 +4,33 @@ echo Checking for Docker...
 docker --version 2>nul
 if errorlevel 1 goto nodocker
 
+REM Check for rebuild flag
+if "%1"=="--rebuild" goto rebuild
+if "%1"=="-r" goto rebuild
+
 echo Docker found! Starting LibreCrawl...
 docker-compose up -d
 timeout /t 3 /nobreak >nul
+goto continue
+
+:rebuild
+echo Docker found! Rebuilding LibreCrawl (clearing cache)...
+docker-compose down
+docker-compose build --no-cache
+docker-compose up -d
+timeout /t 3 /nobreak >nul
+goto continue
+
+:continue
 
 echo.
 echo ================================================================================
 echo LibreCrawl is running!
 echo Opening browser to http://localhost:5000
+echo.
+echo TIP: If you see old versions of the site:
+echo   1. Hard refresh browser: Ctrl+Shift+R (or Ctrl+F5)
+echo   2. Or rebuild Docker: start-librecrawl.bat --rebuild
 echo.
 echo Press Ctrl+C to stop LibreCrawl
 echo DO NOT close this window or LibreCrawl will keep running!

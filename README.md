@@ -314,3 +314,6 @@ LibreCrawl supports multiple concurrent users with isolated sessions:
 ## License
 
 MIT License - see LICENSE file for details.
+
+
+I killed the server but when I enter localhost I go to an actual page

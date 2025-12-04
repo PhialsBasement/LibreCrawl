@@ -62,21 +62,14 @@ async function initializeApp() {
     // Load user info
     loadUserInfo();
 
-    // DEBUG: Check sessionStorage
-    console.log('DEBUG: Checking sessionStorage force_ui_refresh:', sessionStorage.getItem('force_ui_refresh'));
-
     // Check if we just loaded a crawl from dashboard
     if (sessionStorage.getItem('force_ui_refresh') === 'true') {
-        console.log('DEBUG: Found force_ui_refresh flag, loading crawl data...');
         sessionStorage.removeItem('force_ui_refresh');
 
         try {
             // Fetch the loaded data immediately with FULL refresh (no incremental)
             const response = await fetch('/api/crawl_status');
             const data = await response.json();
-
-            // DEBUG: Log the full response
-            console.log('DEBUG: Full /api/crawl_status response:', JSON.stringify(data, null, 2));
 
             // Clear existing data first
             clearAllTables();
@@ -155,14 +148,6 @@ async function initializeApp() {
                 updateStatus(`Loaded crawl: ${data.stats.crawled} URLs, ${data.links?.length || 0} links, ${data.issues?.length || 0} issues`);
             }
 
-            console.log('Loaded crawl from database:', {
-                urls: data.urls?.length || 0,
-                links: data.links?.length || 0,
-                issues: data.issues?.length || 0,
-                stats: data.stats,
-                status: data.status,
-                isRunning: crawlState.isRunning
-            });
         } catch (error) {
             console.error('Error loading crawl data:', error);
             updateStatus('Error loading crawl data');
@@ -171,8 +156,6 @@ async function initializeApp() {
 
     // Set initial focus
     document.getElementById('urlInput').focus();
-
-    console.log('LibreCrawl initialized');
 }
 
 function setupEventListeners() {
@@ -382,7 +365,6 @@ function stopPythonCrawl() {
     })
     .then(response => response.json())
     .then(data => {
-        console.log('Crawl stopped:', data);
     })
     .catch(error => {
         console.error('Error stopping crawl:', error);
@@ -708,7 +690,6 @@ function initializeVirtualScrollers() {
                 buffer: 25,
                 renderRow: renderOverviewRow
             });
-            console.log('Overview virtual scroller initialized');
         }
 
         // Internal URLs table
@@ -719,7 +700,6 @@ function initializeVirtualScrollers() {
                 buffer: 25,
                 renderRow: renderInternalRow
             });
-            console.log('Internal virtual scroller initialized');
         }
 
         // External URLs table
@@ -730,7 +710,6 @@ function initializeVirtualScrollers() {
                 buffer: 25,
                 renderRow: renderExternalRow
             });
-            console.log('External virtual scroller initialized');
         }
 
         // Internal Links table
@@ -741,7 +720,6 @@ function initializeVirtualScrollers() {
                 buffer: 25,
                 renderRow: renderInternalLinkRow
             });
-            console.log('Internal links virtual scroller initialized');
         }
 
         // External Links table
@@ -752,7 +730,6 @@ function initializeVirtualScrollers() {
                 buffer: 25,
                 renderRow: renderExternalLinkRow
             });
-            console.log('External links virtual scroller initialized');
         }
 
         // Issues table
@@ -763,7 +740,6 @@ function initializeVirtualScrollers() {
                 buffer: 25,
                 renderRow: renderIssueRow
             });
-            console.log('Issues virtual scroller initialized');
         }
     } catch (error) {
         console.error('Error initializing virtual scrollers:', error);
@@ -813,7 +789,6 @@ function updateLinksTable(links) {
     // Apply filters and update virtual scrollers
     applyLinksFilter();
 
-    console.log(`Links loaded: ${crawlState.links.filter(l => l.is_internal).length} internal, ${crawlState.links.filter(l => !l.is_internal).length} external`);
 }
 
 function applyLinksFilter() {
@@ -990,7 +965,6 @@ function clearAllTables() {
 
     crawlState.urls = [];
 
-    console.log('All tables cleared');
 }
 
 function formatAnalyticsInfo(analytics) {
@@ -1213,7 +1187,6 @@ function applyFilter(filterType) {
     // Update Status Codes table with filtered data
     updateStatusCodesTable(filterType);
 
-    console.log('Applied filter:', filterType);
 }
 
 function clearActiveFilters() {
@@ -1947,7 +1920,6 @@ async function saveCrawl() {
                 }
             }
         } catch (e) {
-            console.log('Using local state for save:', e);
         }
 
         // Add metadata
@@ -2024,7 +1996,6 @@ function loadCrawl() {
 
             // Populate tables with loaded data
             if (saveData.urls && saveData.urls.length > 0) {
-                console.log(`Loading ${saveData.urls.length} URLs...`);
 
                 // Clear crawlState.urls first to avoid duplicate check issues
                 crawlState.urls = [];
@@ -2048,13 +2019,10 @@ function loadCrawl() {
                     addUrlToTable(url);
                 });
 
-                console.log(`Added ${crawlState.urls.length} URLs to state`);
-                console.log('Sample URL data:', crawlState.urls[0]);
             }
 
             // Load links data
             if (saveData.links && saveData.links.length > 0) {
-                console.log(`Loading ${saveData.links.length} links...`);
                 crawlState.pendingLinks = saveData.links;
                 // If Links tab is currently active, load them immediately
                 if (isLinksTabActive()) {
@@ -2064,7 +2032,6 @@ function loadCrawl() {
 
             // Load issues data if present - filter them based on current exclusion settings
             if (saveData.issues && saveData.issues.length > 0) {
-                console.log(`Loading ${saveData.issues.length} issues...`);
 
                 // Filter issues using current exclusion patterns
                 try {
@@ -2076,7 +2043,6 @@ function loadCrawl() {
                     const filterData = await filterResponse.json();
 
                     const filteredIssues = filterData.success ? filterData.issues : saveData.issues;
-                    console.log(`Filtered to ${filteredIssues.length} issues after exclusions`);
 
                     crawlState.issues = filteredIssues;
                     crawlState.pendingIssues = filteredIssues;
@@ -2114,17 +2080,11 @@ function loadCrawl() {
 
             // Display PageSpeed results if available
             if (saveData.stats && saveData.stats.pagespeed_results) {
-                console.log(`Loading ${saveData.stats.pagespeed_results.length} PageSpeed results...`);
                 displayPageSpeedResults(saveData.stats.pagespeed_results);
             }
 
             // Force refresh of all tables
             setTimeout(() => {
-                console.log('Force refreshing tables...');
-                const overviewCount = document.getElementById('overviewTableBody').children.length;
-                const internalCount = document.getElementById('internalTableBody').children.length;
-                const externalCount = document.getElementById('externalTableBody').children.length;
-                console.log(`Table counts - Overview: ${overviewCount}, Internal: ${internalCount}, External: ${externalCount}`);
             }, 100);
 
             // Update visualization if it exists and has been initialized
@@ -2232,10 +2192,6 @@ function renderInternalLinkRow(row, link, index) {
     const statusBadge = link.target_status ? `<span class="status-badge status-${Math.floor(link.target_status / 100)}xx">${link.target_status}</span>` : '';
     const placement = link.placement ? link.placement.charAt(0).toUpperCase() + link.placement.slice(1) : 'Unknown';
     const linkPath = link.link_path || '';
-    // Debug: log first few to verify
-    if (index < 3) {
-        console.log(`DEBUG renderInternalLinkRow[${index}]: link_path =`, linkPath);
-    }
     // Truncate long paths and add tooltip
     const linkPathDisplay = linkPath.length > 60 ? 
         `<span title="${linkPath.replace(/"/g, '&quot;')}">${linkPath.substring(0, 60)}...</span>` : 
@@ -2255,10 +2211,6 @@ function renderExternalLinkRow(row, link, index) {
     const statusBadge = link.target_status ? `<span class="status-badge status-${Math.floor(link.target_status / 100)}xx">${link.target_status}</span>` : '';
     const placement = link.placement ? link.placement.charAt(0).toUpperCase() + link.placement.slice(1) : 'Unknown';
     const linkPath = link.link_path || '';
-    // Debug: log first few to verify
-    if (index < 3) {
-        console.log(`DEBUG renderExternalLinkRow[${index}]: link_path =`, linkPath);
-    }
     // Truncate long paths and add tooltip
     const linkPathDisplay = linkPath.length > 60 ? 
         `<span title="${linkPath.replace(/"/g, '&quot;')}">${linkPath.substring(0, 60)}...</span>` : 

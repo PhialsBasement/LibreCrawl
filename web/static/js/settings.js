@@ -517,7 +517,6 @@ function saveSettings() {
     // Save to localStorage first (primary storage for persistence)
     try {
         localStorage.setItem('librecrawl_settings', JSON.stringify(newSettings));
-        console.log('Settings saved to localStorage');
     } catch (error) {
         console.error('Failed to save to localStorage:', error);
         showNotification('Warning: Settings may not persist', 'warning');
@@ -564,7 +563,6 @@ function resetSettings() {
         // Clear localStorage
         try {
             localStorage.removeItem('librecrawl_settings');
-            console.log('Settings cleared from localStorage');
         } catch (error) {
             console.error('Failed to clear localStorage:', error);
         }
@@ -682,7 +680,6 @@ function loadSettings() {
         if (savedSettings) {
             const parsed = JSON.parse(savedSettings);
             currentSettings = { ...defaultSettings, ...parsed };
-            console.log('Settings loaded from localStorage');
 
             // Apply custom CSS after loading settings
             applyCustomCSS();
@@ -742,7 +739,6 @@ function updateCrawlerSettings() {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            console.log('Crawler settings updated');
         } else {
             console.warn('Failed to update crawler settings:', data.error);
         }
@@ -887,6 +883,5 @@ function applyCustomCSS() {
         styleElement.id = 'custom-user-styles';
         styleElement.textContent = customCSS;
         document.head.appendChild(styleElement);
-        console.log('Custom CSS applied');
     }
 }

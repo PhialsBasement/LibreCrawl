@@ -16,7 +16,6 @@ class ColumnResizer {
 
     initializeResizers() {
         const headerCells = this.table.querySelectorAll('thead th');
-        console.log('Initializing resizers for table with', headerCells.length, 'columns');
 
         headerCells.forEach((th, index) => {
             // Don't add resizer to last column
@@ -40,7 +39,6 @@ class ColumnResizer {
                 background: transparent;
             `;
 
-            console.log('Added resize grip to column', index, th.textContent);
 
             // Add hover indicator
             grip.addEventListener('mouseenter', () => {
@@ -107,7 +105,6 @@ function initializeColumnResizers() {
     tables.forEach(table => {
         new ColumnResizer(table);
     });
-    console.log('Column resizers initialized for', tables.length, 'tables');
 }
 
 // Export for use in app.js

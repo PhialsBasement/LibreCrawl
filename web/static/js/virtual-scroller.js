@@ -67,7 +67,6 @@ class VirtualScroller {
         this.container.style.overflowX = 'auto';
         this.container.style.position = 'relative';
 
-        console.log('VirtualScroller initialized with', columnCount, 'columns');
     }
 
     setData(data) {
@@ -218,7 +217,6 @@ class VirtualScroller {
             this.bottomSpacer.firstChild.style.height = '0px';
         }
 
-        console.log('Virtual scroller cleared');
     }
 
     destroy() {

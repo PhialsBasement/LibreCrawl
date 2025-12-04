@@ -36,10 +36,25 @@ DISABLE_REGISTER = args.disable_register
 
 app = Flask(__name__, template_folder='web/templates', static_folder='web/static')
 app.config['TEMPLATES_AUTO_RELOAD'] = True
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # Disable file caching
 app.secret_key = 'librecrawl-secret-key-change-in-production'  # TODO: Use environment variable in production
 
 # Enable compression for all responses
 Compress(app)
+
+# Disable caching for static files and HTML in development to prevent stale cache issues
+@app.after_request
+def add_cache_headers(response):
+    # Disable caching for static files (CSS, JS, etc.) and HTML pages
+    if request.path.startswith('/static/') or request.path == '/':
+        response.cache_control.no_cache = True
+        response.cache_control.no_store = True
+        response.cache_control.must_revalidate = True
+        response.cache_control.max_age = 0
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    return response
 
 # Initialize database on startup
 init_db()
@@ -602,7 +617,9 @@ def index():
     elif 'user_id' not in session:
         # Not in local mode and not logged in, redirect to login
         return redirect(url_for('login_page'))
-    return render_template('index.html')
+    # Add cache-busting version to template
+    cache_version = int(time.time())  # Use timestamp as version
+    return render_template('index.html', cache_version=cache_version)
 
 @app.route('/dashboard')
 @login_required
@@ -1284,7 +1301,6 @@ def export_data():
             exclusion_patterns_text = current_settings.get('issueExclusionPatterns', '')
             exclusion_patterns = [p.strip() for p in exclusion_patterns_text.split('\n') if p.strip()]
             issues = filter_issues_by_exclusion_patterns(issues, exclusion_patterns)
-            print(f"DEBUG: After exclusion filter, {len(issues)} issues remain")
 
         # Collect files to export based on special field selections
         files_to_export = []
@@ -1296,14 +1312,6 @@ def export_data():
         # Remove special fields from regular export fields
         regular_fields = [f for f in export_fields if f not in ['issues_detected', 'links_detailed']]
 
-        # Debug logging
-        print(f"DEBUG: export_fields = {export_fields}")
-        print(f"DEBUG: has_issues_export = {has_issues_export}")
-        print(f"DEBUG: has_links_export = {has_links_export}")
-        print(f"DEBUG: regular_fields = {regular_fields}")
-        print(f"DEBUG: len(urls) = {len(urls)}")
-        print(f"DEBUG: len(links) = {len(links)}")
-        print(f"DEBUG: len(issues) = {len(issues)}")
 
         # Generate issues export if requested
         if has_issues_export:

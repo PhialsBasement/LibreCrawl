@@ -399,7 +399,6 @@ function clearVisualization() {
         }
     }
 
-    console.log('Visualization cleared');
 }
 
 /**
@@ -407,11 +406,9 @@ function clearVisualization() {
  */
 function updateVisualizationFromLoadedData(urls, links) {
     if (!urls || urls.length === 0) {
-        console.log('No URL data to visualize');
         return;
     }
 
-    console.log(`Building visualization from ${urls.length} URLs and ${links ? links.length : 0} links`);
 
     // Build nodes from URLs
     const nodes = [];
@@ -476,7 +473,6 @@ function updateVisualizationFromLoadedData(urls, links) {
         }
     }
 
-    console.log(`Built ${nodes.length} nodes and ${edges.length} edges from loaded data`);
 
     // Update global graph data
     graphData = { nodes, edges };
