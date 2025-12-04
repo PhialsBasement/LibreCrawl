@@ -2169,9 +2169,9 @@ function renderInternalLinkRow(row, link, index) {
         <td style="word-break: break-all;">${link.source_url}</td>
         <td style="word-break: break-all;">${link.target_url}</td>
         <td>${statusBadge}</td>
+        <td title="${linkPath.replace(/"/g, '&quot;')}">${linkPathDisplay}</td>
         <td>${link.anchor_text || ''}</td>
         <td>${placement}</td>
-        <td title="${linkPath.replace(/"/g, '&quot;')}">${linkPathDisplay}</td>
     `;
 }
 
@@ -2192,9 +2192,9 @@ function renderExternalLinkRow(row, link, index) {
         <td style="word-break: break-all;">${link.source_url}</td>
         <td style="word-break: break-all;">${link.target_url}</td>
         <td>${statusBadge}</td>
+        <td title="${linkPath.replace(/"/g, '&quot;')}">${linkPathDisplay}</td>
         <td>${link.target_domain || ''}</td>
         <td>${placement}</td>
-        <td title="${linkPath.replace(/"/g, '&quot;')}">${linkPathDisplay}</td>
     `;
 }
 

@@ -35,6 +35,7 @@ LOCAL_MODE = args.local
 DISABLE_REGISTER = args.disable_register
 
 app = Flask(__name__, template_folder='web/templates', static_folder='web/static')
+app.config['TEMPLATES_AUTO_RELOAD'] = True
 app.secret_key = 'librecrawl-secret-key-change-in-production'  # TODO: Use environment variable in production
 
 # Enable compression for all responses
