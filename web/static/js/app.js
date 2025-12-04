@@ -1634,6 +1634,12 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// Helper function to escape text for HTML attributes (only quotes)
+function escapeHtmlAttr(text) {
+    if (!text) return text;
+    return String(text).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 function showUrlDetails(url) {
     // Find the URL data
     const urlData = crawlState.urls.find(u => u.url === url);
@@ -1781,6 +1787,62 @@ function showUrlDetails(url) {
 }
 
 function closeUrlDetails() {
+    const modal = document.querySelector('.details-modal-overlay');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+function showLinkedFromModal(url) {
+    // Find the URL data
+    const urlData = crawlState.urls.find(u => u.url === url);
+    if (!urlData) {
+        showNotification('URL data not found', 'error');
+        return;
+    }
+
+    const linkedFrom = urlData.linked_from || [];
+    if (linkedFrom.length === 0) {
+        showNotification('This URL is not linked from any pages', 'info');
+        return;
+    }
+
+    // Escape all user-controlled text fields
+    const safeUrl = escapeHtml(url);
+    const count = linkedFrom.length;
+
+    // Create modal content similar to the Linked From section in details modal
+    const modalContent = `
+        <div class="details-modal-overlay" onclick="closeLinkedFromModal()">
+            <div class="details-modal" onclick="event.stopPropagation()">
+                <div class="details-header">
+                    <h3>🔗 Linked From</h3>
+                    <button class="close-btn" onclick="closeLinkedFromModal()">×</button>
+                </div>
+                <div class="details-content">
+                    <div class="details-url">${safeUrl}</div>
+                    <div class="details-section">
+                        <h4>Found on ${count} page${count !== 1 ? 's' : ''}</h4>
+                        <div class="details-subsection">
+                            <ul style="list-style: none; padding: 0; margin: 10px 0;">
+                                ${linkedFrom.slice(0, 100).map(sourceUrl => {
+                                    const escapedUrl = escapeHtml(sourceUrl);
+                                    return `<li style="padding: 5px 0; word-break: break-all;"><a href="${escapedUrl}" target="_blank" style="color: #8b5cf6; text-decoration: none;">${escapedUrl}</a></li>`;
+                                }).join('')}
+                                ${linkedFrom.length > 100 ? `<li style="padding: 5px 0; font-style: italic; color: #9ca3af;">... and ${linkedFrom.length - 100} more</li>` : ''}
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Add modal to page
+    document.body.insertAdjacentHTML('beforeend', modalContent);
+}
+
+function closeLinkedFromModal() {
     const modal = document.querySelector('.details-modal-overlay');
     if (modal) {
         modal.remove();
@@ -2157,33 +2219,87 @@ function renderOverviewRow(row, urlData, index) {
 }
 
 function renderInternalRow(row, urlData, index) {
+    // Format linked_from count with clickable text
+    const linkedFromCount = (urlData.linked_from && Array.isArray(urlData.linked_from)) 
+        ? urlData.linked_from.length 
+        : 0;
+    let linkedFromDisplay = '—';
+    if (linkedFromCount > 0) {
+        const escapedUrlAttr = escapeHtmlAttr(urlData.url);
+        const countText = `${linkedFromCount} page${linkedFromCount !== 1 ? 's' : ''}`;
+        linkedFromDisplay = `<span class="linked-from-link" data-url="${escapedUrlAttr}" style="cursor: pointer; color: #8b5cf6; text-decoration: underline; text-decoration-color: rgba(139, 92, 246, 0.5);" title="Show pages that link to this URL">${countText}</span>`;
+    }
+
     const cells = [
         urlData.url,
         urlData.status_code,
         urlData.content_type || '',
         urlData.size || 0,
-        urlData.title || ''
+        urlData.title || '',
+        linkedFromDisplay
     ];
 
-    cells.forEach(cellData => {
+    cells.forEach((cellData, cellIndex) => {
         const cell = document.createElement('td');
-        cell.textContent = cellData;
+        if (cellIndex === 5 && typeof cellData === 'string' && cellData.includes('<span')) {
+            // Last cell with HTML content
+            cell.innerHTML = cellData;
+            // Add click handler to the entire link span
+            const linkSpan = cell.querySelector('.linked-from-link');
+            if (linkSpan) {
+                linkSpan.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    // Get URL from data attribute (browser automatically decodes HTML entities)
+                    const url = this.getAttribute('data-url') || '';
+                    showLinkedFromModal(url);
+                });
+            }
+        } else {
+            cell.textContent = cellData;
+        }
         row.appendChild(cell);
     });
 }
 
 function renderExternalRow(row, urlData, index) {
+    // Format linked_from count with clickable text
+    const linkedFromCount = (urlData.linked_from && Array.isArray(urlData.linked_from)) 
+        ? urlData.linked_from.length 
+        : 0;
+    let linkedFromDisplay = '—';
+    if (linkedFromCount > 0) {
+        const escapedUrlAttr = escapeHtmlAttr(urlData.url);
+        const countText = `${linkedFromCount} page${linkedFromCount !== 1 ? 's' : ''}`;
+        linkedFromDisplay = `<span class="linked-from-link" data-url="${escapedUrlAttr}" style="cursor: pointer; color: #8b5cf6; text-decoration: underline; text-decoration-color: rgba(139, 92, 246, 0.5);" title="Show pages that link to this URL">${countText}</span>`;
+    }
+
     const cells = [
         urlData.url,
         urlData.status_code,
         urlData.content_type || '',
         urlData.size || 0,
-        urlData.title || ''
+        urlData.title || '',
+        linkedFromDisplay
     ];
 
-    cells.forEach(cellData => {
+    cells.forEach((cellData, cellIndex) => {
         const cell = document.createElement('td');
-        cell.textContent = cellData;
+        if (cellIndex === 5 && typeof cellData === 'string' && cellData.includes('<span')) {
+            // Last cell with HTML content
+            cell.innerHTML = cellData;
+            // Add click handler to the entire link span
+            const linkSpan = cell.querySelector('.linked-from-link');
+            if (linkSpan) {
+                linkSpan.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    // Get URL from data attribute (browser automatically decodes HTML entities)
+                    const url = this.getAttribute('data-url') || '';
+                    showLinkedFromModal(url);
+                });
+            }
+        } else {
+            cell.textContent = cellData;
+        }
         row.appendChild(cell);
     });
 }

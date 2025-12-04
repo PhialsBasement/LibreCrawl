@@ -57,10 +57,6 @@ class LinkManager:
     def collect_all_links(self, soup, source_url, crawl_results):
         """Collect all links for the Links tab display"""
         links = soup.find_all('a', href=True)
-        
-        # Debug: confirm method is being called
-        if len(self.all_links) == 0:
-            print(f"DEBUG: collect_all_links called for {source_url}, found {len(links)} links")
 
         for link in links:
             href = link['href'].strip()
@@ -101,13 +97,6 @@ class LinkManager:
                 
                 # Generate DOM path (XPath-like)
                 link_path = self._get_dom_path(link)
-                # Debug: print first few paths to verify generation
-                links_count_before = len(self.all_links)
-                if links_count_before < 10:
-                    if link_path:
-                        print(f"DEBUG: Generated link_path: '{link_path}' for {clean_url[:60]}... (total links so far: {links_count_before})")
-                    else:
-                        print(f"DEBUG: WARNING - link_path is EMPTY for {clean_url[:60]}... (element: {link.name if link else 'None'})")
 
                 link_data = {
                     'source_url': source_url,

@@ -524,17 +524,8 @@ class WebCrawler:
             self.issue_detector.detected_issues if self.issue_detector else []
         )
 
-        print(f"get_status called - crawl_results length: {len(self.crawl_results)}, status: {status}, crawled: {self.stats['crawled']}")
-        
-        # Debug: Check if link_path exists in links
+        # Get links to return
         links_to_return = self.link_manager.all_links.copy() if self.link_manager else []
-        if links_to_return:
-            first_link = links_to_return[0]
-            has_link_path = 'link_path' in first_link
-            link_path_value = first_link.get('link_path', 'MISSING')
-            print(f"DEBUG get_status: First link has link_path? {has_link_path}, value: '{link_path_value}'")
-            if not has_link_path:
-                print(f"DEBUG get_status: First link keys: {list(first_link.keys())}")
 
         return {
             'status': status,
@@ -586,7 +577,6 @@ class WebCrawler:
             )
 
             self.last_save_time = time.time()
-            print(f"Saved batch to database for crawl {self.crawl_id}")
 
         except Exception as e:
             print(f"Error saving batch to database: {e}")

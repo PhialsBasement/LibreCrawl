@@ -427,7 +427,6 @@ def set_crawl_status(crawl_id, status):
                     WHERE id = ?
                 ''', (status, crawl_id))
 
-            print(f"Updated crawl {crawl_id} status to: {status}")
             return True
 
     except Exception as e:
