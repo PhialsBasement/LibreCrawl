@@ -157,6 +157,102 @@ body {
     color: #e2e8f0;
     min-width: 140px;
     font-weight: 500;
+    transition: color 0.3s ease;
+}
+
+/* Colored progress states */
+.progress-text.state-initializing {
+    color: #94a3b8;
+}
+
+.progress-text.state-starting {
+    color: #3b82f6;
+}
+
+.progress-text.state-crawling {
+    color: #8b5cf6;
+}
+
+.progress-text.state-finishing {
+    color: #f59e0b;
+}
+
+.progress-text.state-completed {
+    color: #10b981;
+    font-weight: 600;
+    animation: pulse-success 1s ease-in-out;
+}
+
+.progress-text.state-pagespeed {
+    color: #a855f7;
+}
+
+@keyframes pulse-success {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.7;
+    }
+}
+
+/* Fireworks canvas container */
+.fireworks-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 9999;
+    background: rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(2px);
+}
+
+.fireworks-canvas {
+    width: 100%;
+    height: 100%;
+}
+
+.fireworks-complete-text {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 48px;
+    font-weight: 700;
+    color: #10b981;
+    text-shadow: 0 0 20px rgba(16, 185, 129, 0.5), 
+                 0 0 40px rgba(16, 185, 129, 0.3),
+                 2px 2px 4px rgba(0, 0, 0, 0.5);
+    z-index: 10000;
+    pointer-events: none;
+    animation: fadeInScale 0.5s ease-out, pulseGlow 2s ease-in-out infinite;
+    letter-spacing: 2px;
+}
+
+@keyframes fadeInScale {
+    from {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(0.8);
+    }
+    to {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1);
+    }
+}
+
+@keyframes pulseGlow {
+    0%, 100% {
+        text-shadow: 0 0 20px rgba(16, 185, 129, 0.5), 
+                     0 0 40px rgba(16, 185, 129, 0.3),
+                     2px 2px 4px rgba(0, 0, 0, 0.5);
+    }
+    50% {
+        text-shadow: 0 0 30px rgba(16, 185, 129, 0.7), 
+                     0 0 60px rgba(16, 185, 129, 0.5),
+                     2px 2px 4px rgba(0, 0, 0, 0.5);
+    }
 }
 
 /* Buttons */
@@ -472,6 +568,80 @@ body {
     font-size: 13px;
     color: #cbd5e1;
     font-weight: 500;
+    transition: background-color 0.3s ease, border-color 0.3s ease;
+}
+
+#statusText {
+    transition: color 0.3s ease;
+}
+
+/* Status bar colored states - entire bar colored */
+.status-bar.status-ready {
+    background: rgba(37, 41, 67, 0.98);
+    border-top-color: #475569;
+}
+
+.status-bar.status-starting,
+.status-bar.status-resuming {
+    background: rgba(59, 130, 246, 0.2);
+    border-top-color: rgba(59, 130, 246, 0.5);
+}
+
+.status-bar.status-starting #statusText,
+.status-bar.status-resuming #statusText {
+    color: #93c5fd;
+}
+
+.status-bar.status-crawling,
+.status-bar.status-pagespeed {
+    background: rgba(139, 92, 246, 0.2);
+    border-top-color: rgba(139, 92, 246, 0.5);
+}
+
+.status-bar.status-crawling #statusText,
+.status-bar.status-pagespeed #statusText {
+    color: #c4b5fd;
+}
+
+.status-bar.status-paused {
+    background: rgba(245, 158, 11, 0.2);
+    border-top-color: rgba(245, 158, 11, 0.5);
+}
+
+.status-bar.status-paused #statusText {
+    color: #fcd34d;
+}
+
+.status-bar.status-completed {
+    background: rgba(16, 185, 129, 0.2);
+    border-top-color: rgba(16, 185, 129, 0.5);
+}
+
+.status-bar.status-completed #statusText {
+    color: #6ee7b7;
+    font-weight: 600;
+}
+
+.status-bar.status-stopped,
+.status-bar.status-error {
+    background: rgba(239, 68, 68, 0.2);
+    border-top-color: rgba(239, 68, 68, 0.5);
+}
+
+.status-bar.status-stopped #statusText,
+.status-bar.status-error #statusText {
+    color: #fca5a5;
+}
+
+.status-bar.status-loaded,
+.status-bar.status-cleared {
+    background: rgba(148, 163, 184, 0.15);
+    border-top-color: rgba(148, 163, 184, 0.4);
+}
+
+.status-bar.status-loaded #statusText,
+.status-bar.status-cleared #statusText {
+    color: #cbd5e1;
 }
 
 /* Scrollbar Styling */

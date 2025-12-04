@@ -419,6 +419,8 @@ function pollCrawlProgress() {
             } else if (data.status === 'completed') {
                 stopCrawl();
                 updateStatus('Crawl completed');
+                // Trigger fireworks effect
+                triggerFireworks();
                 // Update visualization one final time when crawl completes
                 if (typeof loadVisualizationData === 'function') {
                     loadVisualizationData();
@@ -515,21 +517,30 @@ function updateProgressText(data) {
     const progressText = document.getElementById('progressText');
     if (!progressText) return;
 
+    // Remove all state classes
+    progressText.classList.remove('state-initializing', 'state-starting', 'state-crawling', 'state-finishing', 'state-completed', 'state-pagespeed');
+
     if (data.is_running_pagespeed) {
         progressText.textContent = 'Running PageSpeed analysis...';
+        progressText.classList.add('state-pagespeed');
     } else if (data.status === 'completed') {
         progressText.textContent = 'Crawl completed';
+        progressText.classList.add('state-completed');
     } else if (data.status === 'running') {
         const stats = data.stats || crawlState.stats;
         if (stats.crawled === 0) {
             progressText.textContent = 'Starting crawl...';
+            progressText.classList.add('state-starting');
         } else if (stats.discovered > stats.crawled) {
             progressText.textContent = `Crawling... (${stats.crawled}/${stats.discovered} URLs)`;
+            progressText.classList.add('state-crawling');
         } else {
             progressText.textContent = `Finishing up... (${stats.crawled} URLs crawled)`;
+            progressText.classList.add('state-finishing');
         }
     } else {
         progressText.textContent = 'Initializing...';
+        progressText.classList.add('state-initializing');
     }
 }
 
@@ -625,7 +636,42 @@ function updateProgress(percentage) {
 }
 
 function updateStatus(message) {
-    document.getElementById('statusText').textContent = message;
+    const statusText = document.getElementById('statusText');
+    const statusBar = document.querySelector('.status-bar');
+    if (!statusText || !statusBar) return;
+    
+    statusText.textContent = message;
+    
+    // Remove all status classes from both status bar and text
+    const statusClasses = ['status-ready', 'status-starting', 'status-resuming', 
+                          'status-crawling', 'status-pagespeed', 'status-paused', 
+                          'status-completed', 'status-stopped', 'status-error', 
+                          'status-loaded', 'status-cleared'];
+    statusBar.classList.remove(...statusClasses);
+    statusText.classList.remove(...statusClasses);
+    
+    // Apply color class based on message content
+    const msg = message.toLowerCase();
+    let statusClass = 'status-ready';
+    
+    if (msg.includes('completed')) {
+        statusClass = 'status-completed';
+    } else if (msg.includes('error') || msg.includes('stopped')) {
+        statusClass = 'status-error';
+    } else if (msg.includes('starting') || msg.includes('resuming') || msg.includes('resumed')) {
+        statusClass = 'status-starting';
+    } else if (msg.includes('crawling') || msg.includes('in progress')) {
+        statusClass = 'status-crawling';
+    } else if (msg.includes('pagespeed')) {
+        statusClass = 'status-pagespeed';
+    } else if (msg.includes('paused')) {
+        statusClass = 'status-paused';
+    } else if (msg.includes('loaded') || msg.includes('cleared')) {
+        statusClass = 'status-loaded';
+    }
+    
+    // Apply class to status bar (which will style the entire bar)
+    statusBar.classList.add(statusClass);
 }
 
 function updateTimer() {
@@ -2261,4 +2307,157 @@ function renderIssueRow(row, issue, index) {
         <td>${issue.issue}</td>
         <td style="word-break: break-word;" title="${issue.details}">${issue.details}</td>
     `;
+}
+
+// Fireworks effect for crawl completion
+function triggerFireworks() {
+    // Create fireworks container if it doesn't exist
+    let container = document.getElementById('fireworks-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'fireworks-container';
+        container.className = 'fireworks-container';
+        document.body.appendChild(container);
+    }
+
+    // Create "Crawl Complete" text overlay
+    const completeText = document.createElement('div');
+    completeText.className = 'fireworks-complete-text';
+    completeText.textContent = '🎉 Crawl Complete! 🎉';
+    container.appendChild(completeText);
+
+    // Create canvas
+    const canvas = document.createElement('canvas');
+    canvas.className = 'fireworks-canvas';
+    container.appendChild(canvas);
+
+    const ctx = canvas.getContext('2d');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    // Resize handler
+    const handleResize = () => {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    };
+    window.addEventListener('resize', handleResize);
+
+    // Fireworks colors matching the app theme
+    const colors = ['#8b5cf6', '#7c3aed', '#a855f7', '#10b981', '#3b82f6', '#f59e0b', '#ef4444'];
+    
+    const particles = [];
+    const particleCount = 50;
+    const duration = 3000; // 3 seconds
+    const startTime = Date.now();
+
+    // Store reference for cleanup
+    const cleanupElements = { completeText, canvas, container, handleResize };
+
+    // Create initial particles
+    for (let i = 0; i < 8; i++) {
+        const angle = (Math.PI * 2 * i) / 8;
+        const speed = 2 + Math.random() * 2;
+        const x = canvas.width / 2;
+        const y = canvas.height / 2;
+        
+        particles.push({
+            x: x,
+            y: y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            color: colors[Math.floor(Math.random() * colors.length)],
+            life: 1.0,
+            decay: 0.015 + Math.random() * 0.01,
+            size: 3 + Math.random() * 3
+        });
+    }
+
+    // Animation loop
+    function animate() {
+        const elapsed = Date.now() - startTime;
+        if (elapsed > duration) {
+            // Clean up
+            window.removeEventListener('resize', cleanupElements.handleResize);
+            if (cleanupElements.completeText && cleanupElements.completeText.parentNode) {
+                cleanupElements.container.removeChild(cleanupElements.completeText);
+            }
+            if (cleanupElements.canvas && cleanupElements.canvas.parentNode) {
+                cleanupElements.container.removeChild(cleanupElements.canvas);
+            }
+            if (cleanupElements.container.children.length === 0) {
+                cleanupElements.container.remove();
+            }
+            return;
+        }
+
+        // Clear canvas with fade effect (lighter background)
+        ctx.fillStyle = 'rgba(26, 29, 41, 0.05)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Update and draw particles
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            
+            // Update position
+            p.x += p.vx;
+            p.y += p.vy;
+            p.vy += 0.1; // Gravity
+            p.life -= p.decay;
+
+            // Remove dead particles
+            if (p.life <= 0) {
+                particles.splice(i, 1);
+                continue;
+            }
+
+            // Draw particle
+            ctx.globalAlpha = p.life;
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Create trail particles occasionally
+            if (Math.random() < 0.1 && p.life > 0.5) {
+                particles.push({
+                    x: p.x,
+                    y: p.y,
+                    vx: p.vx * 0.5 + (Math.random() - 0.5) * 2,
+                    vy: p.vy * 0.5 + (Math.random() - 0.5) * 2,
+                    color: p.color,
+                    life: p.life * 0.5,
+                    decay: p.decay * 1.5,
+                    size: p.size * 0.5
+                });
+            }
+        }
+
+        // Create new bursts periodically
+        if (elapsed < duration * 0.6 && particles.length < 100 && Math.random() < 0.05) {
+            const burstX = canvas.width * 0.2 + Math.random() * canvas.width * 0.6;
+            const burstY = canvas.height * 0.2 + Math.random() * canvas.height * 0.6;
+            const burstCount = 15 + Math.floor(Math.random() * 10);
+            
+            for (let j = 0; j < burstCount; j++) {
+                const angle = (Math.PI * 2 * j) / burstCount + Math.random() * 0.5;
+                const speed = 1 + Math.random() * 2;
+                
+                particles.push({
+                    x: burstX,
+                    y: burstY,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    color: colors[Math.floor(Math.random() * colors.length)],
+                    life: 1.0,
+                    decay: 0.01 + Math.random() * 0.015,
+                    size: 2 + Math.random() * 3
+                });
+            }
+        }
+
+        ctx.globalAlpha = 1.0;
+        requestAnimationFrame(animate);
+    }
+
+    animate();
 }
