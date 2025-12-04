@@ -1,3 +1,10 @@
 
 *.pyc
 .claude/settings.local.json
+
+# Database files (runtime data, should not be committed)
+*.db
+*.sqlite
+*.sqlite3
+users.db
+data/
