@@ -2155,6 +2155,15 @@ function renderExternalRow(row, urlData, index) {
 function renderInternalLinkRow(row, link, index) {
     const statusBadge = link.target_status ? `<span class="status-badge status-${Math.floor(link.target_status / 100)}xx">${link.target_status}</span>` : '';
     const placement = link.placement ? link.placement.charAt(0).toUpperCase() + link.placement.slice(1) : 'Unknown';
+    const linkPath = link.link_path || '';
+    // Debug: log first few to verify
+    if (index < 3) {
+        console.log(`DEBUG renderInternalLinkRow[${index}]: link_path =`, linkPath);
+    }
+    // Truncate long paths and add tooltip
+    const linkPathDisplay = linkPath.length > 60 ? 
+        `<span title="${linkPath.replace(/"/g, '&quot;')}">${linkPath.substring(0, 60)}...</span>` : 
+        linkPath;
 
     row.innerHTML = `
         <td style="word-break: break-all;">${link.source_url}</td>
@@ -2162,12 +2171,22 @@ function renderInternalLinkRow(row, link, index) {
         <td>${statusBadge}</td>
         <td>${link.anchor_text || ''}</td>
         <td>${placement}</td>
+        <td title="${linkPath.replace(/"/g, '&quot;')}">${linkPathDisplay}</td>
     `;
 }
 
 function renderExternalLinkRow(row, link, index) {
     const statusBadge = link.target_status ? `<span class="status-badge status-${Math.floor(link.target_status / 100)}xx">${link.target_status}</span>` : '';
     const placement = link.placement ? link.placement.charAt(0).toUpperCase() + link.placement.slice(1) : 'Unknown';
+    const linkPath = link.link_path || '';
+    // Debug: log first few to verify
+    if (index < 3) {
+        console.log(`DEBUG renderExternalLinkRow[${index}]: link_path =`, linkPath);
+    }
+    // Truncate long paths and add tooltip
+    const linkPathDisplay = linkPath.length > 60 ? 
+        `<span title="${linkPath.replace(/"/g, '&quot;')}">${linkPath.substring(0, 60)}...</span>` : 
+        linkPath;
 
     row.innerHTML = `
         <td style="word-break: break-all;">${link.source_url}</td>
@@ -2175,6 +2194,7 @@ function renderExternalLinkRow(row, link, index) {
         <td>${statusBadge}</td>
         <td>${link.target_domain || ''}</td>
         <td>${placement}</td>
+        <td title="${linkPath.replace(/"/g, '&quot;')}">${linkPathDisplay}</td>
     `;
 }
 
