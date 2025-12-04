@@ -1183,6 +1183,67 @@ def crawl_stats():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/api/fetch_html', methods=['POST'])
+@login_required
+def fetch_html():
+    """Fetch HTML content for a URL (for selector search)"""
+    try:
+        data = request.get_json()
+        url = data.get('url')
+        
+        if not url:
+            return jsonify({'success': False, 'error': 'URL is required'}), 400
+        
+        # Get crawler instance to reuse its session and config
+        crawler = get_or_create_crawler()
+        settings_manager = get_session_settings()
+        settings = settings_manager.get_settings()
+        
+        # Update crawler config with current settings
+        crawler.config.update({
+            'timeout': settings.get('timeout', 30),
+            'user_agent': settings.get('user_agent', 'LibreCrawl/1.0'),
+            'follow_redirects': settings.get('follow_redirects', True),
+            'retries': settings.get('retries', 3)
+        })
+        
+        # Update session headers
+        if settings.get('user_agent'):
+            crawler.session.headers.update({'User-Agent': settings['user_agent']})
+        
+        # Fetch the HTML
+        try:
+            response = crawler.session.get(
+                url,
+                timeout=crawler.config['timeout'],
+                allow_redirects=crawler.config['follow_redirects']
+            )
+            response.raise_for_status()
+            
+            # Check if it's HTML
+            content_type = response.headers.get('content-type', '').lower()
+            if 'text/html' not in content_type:
+                return jsonify({
+                    'success': False,
+                    'error': f'URL does not return HTML (content-type: {content_type})'
+                }), 400
+            
+            return jsonify({
+                'success': True,
+                'html': response.text,
+                'status_code': response.status_code
+            })
+        except Exception as e:
+            return jsonify({
+                'success': False,
+                'error': f'Failed to fetch URL: {str(e)}'
+            }), 500
+            
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/export_data', methods=['POST'])
 @login_required
 def export_data():
