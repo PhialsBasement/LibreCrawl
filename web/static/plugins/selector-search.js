@@ -40,12 +40,22 @@ LibreCrawlPlugin.register({
                         urls: apiData.urls,
                         links: apiData.links || [],
                         issues: apiData.issues || [],
-                        stats: apiData.stats || {}
+                        stats: apiData.stats || {},
+                        status: apiData.status || 'idle'
                     };
                 }
             } catch (error) {
                 console.error('Failed to fetch crawl data:', error);
             }
+        }
+        
+        // Also fetch current status to check if crawl is running
+        try {
+            const response = await fetch('/api/crawl_status');
+            const apiData = await response.json();
+            data.status = apiData.status || 'idle';
+        } catch (error) {
+            // Ignore error, use existing data
         }
         
         this.render(container, data);
@@ -57,10 +67,8 @@ LibreCrawlPlugin.register({
     
     onDataUpdate(data) {
         if (this.isActive && this.container) {
-            // Update the URL list if search is active
-            if (this.searchState.selector && this.searchState.results.length > 0) {
-                this.render(this.container, data);
-            }
+            // Re-render to update crawl state (enable/disable button)
+            this.render(this.container, data);
         }
     },
     
@@ -69,6 +77,11 @@ LibreCrawlPlugin.register({
             container.innerHTML = this.renderEmptyState();
             return;
         }
+        
+        // Check if crawl is currently running
+        // Only disable when status is explicitly 'running'
+        // Enable when status is 'completed', 'idle', or undefined (crawl done)
+        const isCrawlRunning = data.status === 'running';
         
         container.innerHTML = `
             <div class="plugin-content" style="padding: 20px; overflow-y: auto; max-height: calc(100vh - 280px);">
@@ -91,22 +104,21 @@ LibreCrawlPlugin.register({
                                 type="text" 
                                 id="selector-input" 
                                 placeholder="e.g., div > h1, .class-name, #id-name"
-                                value="${this.utils.escapeHtml(this.searchState.selector)}"
                                 style="width: 100%; padding: 10px 14px; background: #111827; border: 1px solid #374151; border-radius: 8px; color: #e5e7eb; font-size: 14px; font-family: monospace;"
-                                ${this.searchState.isSearching ? 'disabled' : ''}
+                                ${this.searchState.isSearching || isCrawlRunning ? 'disabled' : ''}
                             />
                             <p style="color: #9ca3af; font-size: 12px; margin-top: 8px;">
-                                Enter a CSS selector to search for (e.g., <code style="background: #111827; padding: 2px 6px; border-radius: 4px;">div > h1</code>, <code style="background: #111827; padding: 2px 6px; border-radius: 4px;">.class-name</code>, <code style="background: #111827; padding: 2px 6px; border-radius: 4px;">#id-name</code>)
+                                ${isCrawlRunning ? '<span style="color: #fbbf24;">⚠️ Please wait until the crawl is complete before searching.</span>' : 'Enter a CSS selector to search for (e.g., <code style="background: #111827; padding: 2px 6px; border-radius: 4px;">div > h1</code>, <code style="background: #111827; padding: 2px 6px; border-radius: 4px;">.class-name</code>, <code style="background: #111827; padding: 2px 6px; border-radius: 4px;">#id-name</code>)'}
                             </p>
                         </div>
                         <div style="margin-top: 28px;">
                             <button 
                                 id="search-btn"
                                 onclick="window.selectorSearchPlugin?.performSearch()"
-                                style="padding: 10px 24px; background: ${this.searchState.isSearching ? '#4b5563' : '#7c3aed'}; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: ${this.searchState.isSearching ? 'not-allowed' : 'pointer'}; font-size: 14px; white-space: nowrap;"
-                                ${this.searchState.isSearching ? 'disabled' : ''}
+                                style="padding: 10px 24px; background: ${this.searchState.isSearching || isCrawlRunning ? '#4b5563' : '#7c3aed'}; color: white; border: none; border-radius: 8px; font-weight: 600; cursor: ${this.searchState.isSearching || isCrawlRunning ? 'not-allowed' : 'pointer'}; font-size: 14px; white-space: nowrap;"
+                                ${this.searchState.isSearching || isCrawlRunning ? 'disabled' : ''}
                             >
-                                ${this.searchState.isSearching ? 'Searching...' : 'Search'}
+                                ${this.searchState.isSearching ? 'Searching...' : (isCrawlRunning ? 'Wait for crawl...' : 'Search')}
                             </button>
                         </div>
                     </div>
@@ -125,9 +137,12 @@ LibreCrawlPlugin.register({
         // Store reference for button click
         window.selectorSearchPlugin = this;
         
-        // Add Enter key support
+        // Set input value programmatically to avoid quote escaping issues
         const input = document.getElementById('selector-input');
         if (input) {
+            input.value = this.searchState.selector || '';
+            
+            // Add Enter key support
             input.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter' && !this.searchState.isSearching) {
                     this.performSearch();
@@ -137,6 +152,22 @@ LibreCrawlPlugin.register({
     },
     
     async performSearch() {
+        // Check if crawl is running - fetch current status to be sure
+        let isRunning = false;
+        try {
+            const response = await fetch('/api/crawl_status');
+            const apiData = await response.json();
+            isRunning = apiData.status === 'running';
+        } catch (error) {
+            // Fallback to window.crawlState if API fails
+            isRunning = window.crawlState && window.crawlState.isRunning;
+        }
+        
+        if (isRunning) {
+            this.utils.showNotification('Please wait until the crawl is complete before searching', 'error');
+            return;
+        }
+        
         const input = document.getElementById('selector-input');
         if (!input) return;
         
@@ -178,13 +209,11 @@ LibreCrawlPlugin.register({
                     try {
                         // Only search HTML pages
                         if (urlData.status_code !== 200) {
-                            processed++;
                             return;
                         }
                         
                         const contentType = urlData.content_type || '';
                         if (!contentType.includes('text/html')) {
-                            processed++;
                             return;
                         }
                         
@@ -215,13 +244,14 @@ LibreCrawlPlugin.register({
                     } catch (error) {
                         console.error(`Error processing ${urlData.url}:`, error);
                     } finally {
+                        // Always increment processed count, regardless of success or skip
                         processed++;
                     }
                 }));
                 
-                // Update progress
+                // Update progress (cap at 100%)
                 if (this.container) {
-                    const progress = Math.round((processed / totalUrls) * 100);
+                    const progress = Math.min(100, Math.round((processed / totalUrls) * 100));
                     const btn = document.getElementById('search-btn');
                     if (btn) {
                         btn.textContent = `Searching... ${progress}%`;

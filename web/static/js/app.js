@@ -25,6 +25,9 @@ let crawlState = {
     }
 };
 
+// Make crawlState available globally for plugins
+window.crawlState = crawlState;
+
 // Incremental polling instance
 let incrementalPoller = null;
 
@@ -502,7 +505,8 @@ function updateCrawlData(data) {
             urls: crawlState.urls,
             links: crawlState.links,
             issues: crawlState.issues,
-            stats: crawlState.stats
+            stats: crawlState.stats,
+            status: data.status || (crawlState.isRunning ? 'running' : 'idle')
         });
     }
 }
@@ -1051,25 +1055,30 @@ async function handlePluginTabSwitch(tabName) {
         urls: crawlState.urls,
         links: crawlState.links,
         issues: crawlState.issues,
-        stats: crawlState.stats
+        stats: crawlState.stats,
+        status: crawlState.isRunning ? 'running' : 'idle'
     };
 
-    // If no URLs in state but we might have crawl data, fetch from API
-    if ((!crawlState.urls || crawlState.urls.length === 0) && crawlState.stats && crawlState.stats.crawled > 0) {
-        try {
-            const response = await fetch('/api/crawl_status');
-            const apiData = await response.json();
-            if (apiData.urls && apiData.urls.length > 0) {
-                pluginData = {
-                    urls: apiData.urls,
-                    links: apiData.links || [],
-                    issues: apiData.issues || [],
-                    stats: apiData.stats || {}
-                };
-            }
-        } catch (error) {
-            console.error('Failed to fetch crawl data for plugin:', error);
+    // Always fetch current status to ensure it's up to date
+    try {
+        const response = await fetch('/api/crawl_status');
+        const apiData = await response.json();
+        
+        // If no URLs in state but we might have crawl data, use API data
+        if ((!crawlState.urls || crawlState.urls.length === 0) && apiData.urls && apiData.urls.length > 0) {
+            pluginData = {
+                urls: apiData.urls,
+                links: apiData.links || [],
+                issues: apiData.issues || [],
+                stats: apiData.stats || {},
+                status: apiData.status || 'idle'
+            };
+        } else {
+            // Update status from API
+            pluginData.status = apiData.status || (crawlState.isRunning ? 'running' : 'idle');
         }
+    } catch (error) {
+        console.error('Failed to fetch crawl data for plugin:', error);
     }
 
     // Activate the new plugin
