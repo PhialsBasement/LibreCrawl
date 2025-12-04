@@ -1034,7 +1034,7 @@ function switchTab(tabName) {
 }
 
 // Handle plugin tab activation
-function handlePluginTabSwitch(tabName) {
+async function handlePluginTabSwitch(tabName) {
     if (!window.LibreCrawlPlugin || !window.LibreCrawlPlugin.loader) {
         return;
     }
@@ -1046,13 +1046,34 @@ function handlePluginTabSwitch(tabName) {
         loader.deactivatePlugin(loader.activePluginId);
     }
 
-    // Activate the new plugin
-    loader.activatePlugin(tabName, {
+    // Fetch fresh data from API if crawlState.urls is empty (e.g., after loading from DB)
+    let pluginData = {
         urls: crawlState.urls,
         links: crawlState.links,
         issues: crawlState.issues,
         stats: crawlState.stats
-    });
+    };
+
+    // If no URLs in state but we might have crawl data, fetch from API
+    if ((!crawlState.urls || crawlState.urls.length === 0) && crawlState.stats && crawlState.stats.crawled > 0) {
+        try {
+            const response = await fetch('/api/crawl_status');
+            const apiData = await response.json();
+            if (apiData.urls && apiData.urls.length > 0) {
+                pluginData = {
+                    urls: apiData.urls,
+                    links: apiData.links || [],
+                    issues: apiData.issues || [],
+                    stats: apiData.stats || {}
+                };
+            }
+        } catch (error) {
+            console.error('Failed to fetch crawl data for plugin:', error);
+        }
+    }
+
+    // Activate the new plugin
+    loader.activatePlugin(tabName, pluginData);
 }
 
 // Issue Filtering
