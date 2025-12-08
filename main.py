@@ -621,9 +621,11 @@ def start_crawl():
 
     data = request.get_json()
     url = data.get('url')
+    url_list = data.get('urlList', [])
 
-    if not url:
-        return jsonify({'success': False, 'error': 'URL is required'})
+    # Either url or url_list must be provided
+    if not url and not url_list:
+        return jsonify({'success': False, 'error': 'Either URL or URL list is required'})
 
     user_id = session.get('user_id')
     session_id = session.get('session_id')
@@ -655,7 +657,7 @@ def start_crawl():
         print(f"Warning: Could not apply settings: {e}")
 
     # Pass user_id and session_id for database persistence
-    success, message = crawler.start_crawl(url, user_id=user_id, session_id=session_id)
+    success, message = crawler.start_crawl(url, user_id=user_id, session_id=session_id, url_list=url_list)
 
     # Store crawl_id in session
     if success and crawler.crawl_id:
@@ -671,6 +673,70 @@ def stop_crawl():
     crawler = get_or_create_crawler()
     success, message = crawler.stop_crawl()
     return jsonify({'success': success, 'message': message})
+
+
+
+@app.route('/api/parse_url_list', methods=['POST'])
+@login_required
+def parse_url_list():
+    """Parse and validate a URL list from text"""
+    from src.utils.url_list_parser import parse_url_list, get_url_statistics
+    
+    data = request.get_json()
+    url_text = data.get('urlText', '')
+    
+    if not url_text:
+        return jsonify({'success': False, 'error': 'URL text is required'})
+    
+    try:
+        valid_urls, invalid_urls = parse_url_list(url_text)
+        stats = get_url_statistics(valid_urls)
+        
+        return jsonify({
+            'success': True,
+            'validUrls': valid_urls,
+            'invalidUrls': invalid_urls,
+            'stats': stats
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/upload_url_list', methods=['POST'])
+@login_required
+def upload_url_list():
+    """Handle URL list file upload"""
+    from src.utils.url_list_parser import parse_file_content, parse_url_list, get_url_statistics
+    
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': 'No file uploaded'})
+    
+    file = request.files['file']
+    
+    if file.filename == '':
+        return jsonify({'success': False, 'error': 'No file selected'})
+    
+    # Check file extension
+    if not file.filename.endswith('.txt'):
+        return jsonify({'success': False, 'error': 'Only .txt files are supported'})
+    
+    try:
+        # Read file content
+        file_content = file.read()
+        url_text = parse_file_content(file_content)
+        
+        # Parse URLs
+        valid_urls, invalid_urls = parse_url_list(url_text)
+        stats = get_url_statistics(valid_urls)
+        
+        return jsonify({
+            'success': True,
+            'validUrls': valid_urls,
+            'invalidUrls': invalid_urls,
+            'stats': stats
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
 
 @app.route('/api/crawl_status')
 @login_required

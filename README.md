@@ -28,6 +28,47 @@ LibreCrawl crawls websites and gives you detailed information about pages, links
 - 💾 **Multiple export formats** - CSV, JSON, or XML
 - 🔍 **Issue detection** - Automated SEO issue identification
 - ⚡ **Real-time crawling progress** with live statistics
+- 📋 **List Mode** - Crawl specific URLs from a list instead of discovering links
+
+## Crawl Modes
+
+### Standard Mode
+The default mode - enter a URL and LibreCrawl will crawl the entire website, following internal links and discovering pages automatically.
+
+### List Mode
+Crawl only specific URLs from a list. This is useful when you:
+- Want to audit specific pages without crawling the entire site
+- Have a list of URLs from a sitemap or other source
+- Need to check specific landing pages or product URLs
+
+**How to use List Mode:**
+
+1. Select **"List Mode"** using the radio buttons at the top of the page
+2. Choose how to input your URLs:
+   - **Paste URLs**: Enter URLs directly in the textarea (one URL per line)
+   - **Upload File**: Upload a `.txt` file with URLs (one per line)
+3. The validator will show you:
+   - ✅ Number of valid URLs
+   - ❌ Number of invalid URLs (if any)
+   - 🌐 Number of unique domains
+4. Click **Start** to begin crawling
+
+**URL format tips:**
+- One URL per line
+- URLs can be with or without `https://` prefix
+- Lines starting with `#` are treated as comments
+- Empty lines are ignored
+
+**Example URL list:**
+```
+https://example.com/page1
+https://example.com/page2
+# This is a comment
+example.com/page3
+https://example.com/products/item-1
+```
+
+
 
 ## Getting started
 ### Quick Start (Automatic Installation)
@@ -266,6 +307,68 @@ Check out these example plugins to get started:
 - No rate limits or tier restrictions
 - Perfect for personal use or single-user self-hosting
 - Recommended for local development and testing
+
+### User Administration
+
+When running in **Standard Mode**, new users require admin approval before they can log in. Use these commands to manage users:
+
+**Verify a user and grant admin access:**
+```bash
+python3 -c "
+import sqlite3
+conn = sqlite3.connect('users.db')
+cursor = conn.cursor()
+
+# Replace 'username_here' with the actual username
+username = 'username_here'
+
+cursor.execute('SELECT id FROM users WHERE username = ?', (username,))
+user = cursor.fetchone()
+if user:
+    user_id = user[0]
+    cursor.execute('UPDATE users SET verified = 1, tier = ? WHERE id = ?', ('admin', user_id))
+    conn.commit()
+    print(f'✅ User {username} is now verified with admin access!')
+else:
+    print(f'User {username} not found')
+conn.close()
+"
+```
+
+**Available tiers:**
+- `guest` - Limited access (3 crawls/24h)
+- `user` - Standard access
+- `extra` - Extended access
+- `admin` - Full admin access (no limits)
+
+**Verify a user without admin access:**
+```bash
+python3 -c "
+import sqlite3
+conn = sqlite3.connect('users.db')
+cursor = conn.cursor()
+cursor.execute('UPDATE users SET verified = 1, tier = ? WHERE username = ?', ('user', 'username_here'))
+conn.commit()
+print('User verified!')
+conn.close()
+"
+```
+
+**List all users:**
+```bash
+python3 -c "
+import sqlite3
+conn = sqlite3.connect('users.db')
+conn.row_factory = sqlite3.Row
+cursor = conn.cursor()
+cursor.execute('SELECT id, username, email, verified, tier FROM users')
+for user in cursor.fetchall():
+    status = '✅' if user['verified'] else '❌'
+    print(f\"{status} {user['username']} ({user['email']}) - tier: {user['tier']}\")
+conn.close()
+"
+```
+
 
 ## Configuration
 

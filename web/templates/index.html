@@ -1,12 +1,15 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <title>LibreCrawl - SEO Spider</title>
     <link rel="stylesheet" href="/static/css/styles.css">
+    <link rel="stylesheet" href="/static/css/list-mode.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js"></script>
 </head>
+
 <body>
     <div class="app-container">
         <!-- Header -->
@@ -25,35 +28,151 @@
             </div>
         </header>
 
+        <!-- Crawl Mode Selector -->
+        <section class="crawl-mode-section">
+            <div class="url-container">
+                <div class="mode-selector">
+                    <label class="mode-option">
+                        <input type="radio" name="crawlMode" value="standard" checked
+                            onchange="switchCrawlMode('standard')">
+                        <span class="mode-label">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <circle cx="12" cy="12" r="10" />
+                                <path d="M12 6v6l4 2" />
+                            </svg>
+                            Standard Crawl
+                        </span>
+                        <span class="mode-description">Crawl a website starting from one URL</span>
+                    </label>
+                    <label class="mode-option">
+                        <input type="radio" name="crawlMode" value="list" onchange="switchCrawlMode('list')">
+                        <span class="mode-label">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path
+                                    d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                                <path d="M9 12h6m-6 4h6" />
+                            </svg>
+                            List Mode
+                        </span>
+                        <span class="mode-description">Crawl specific URLs from a list</span>
+                    </label>
+                </div>
+            </div>
+        </section>
+
         <!-- URL Input Section -->
         <section class="url-section">
             <div class="url-container">
-                <div class="input-group">
+                <!-- Standard Mode Input -->
+                <div id="standardModeInput" class="input-group">
                     <label for="urlInput" class="input-label">URL to Crawl</label>
-                    <input
-                        type="url"
-                        id="urlInput"
-                        class="url-input"
-                        placeholder="https://example.com"
-                        onkeypress="handleUrlKeypress(event)"
-                    >
+                    <input type="url" id="urlInput" class="url-input" placeholder="https://example.com"
+                        onkeypress="handleUrlKeypress(event)">
+                </div>
+
+                <!-- List Mode Input -->
+                <div id="listModeInput" class="input-group" style="display: none;">
+                    <div class="list-mode-tabs">
+                        <button class="list-tab active" onclick="switchListTab('paste')" id="pasteTab">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" />
+                                <path d="M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                            </svg>
+                            Paste URLs
+                        </button>
+                        <button class="list-tab" onclick="switchListTab('upload')" id="uploadTab">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                                <polyline points="17 8 12 3 7 8" />
+                                <line x1="12" y1="3" x2="12" y2="15" />
+                            </svg>
+                            Upload File
+                        </button>
+                    </div>
+
+                    <!-- Paste URLs Tab -->
+                    <div id="pasteUrlsContent" class="list-tab-content active">
+                        <label for="urlListText" class="input-label">
+                            Paste URLs (one per line)
+                            <span class="label-hint">Supports comments with #</span>
+                        </label>
+                        <textarea id="urlListText" class="url-list-textarea"
+                            placeholder="https://example.com/page1&#10;https://example.com/page2&#10;# This is a comment&#10;https://example.com/page3"
+                            rows="8" oninput="validateUrlList()"></textarea>
+                        <div class="url-list-stats" id="urlListStats" style="display: none;">
+                            <span class="stat-badge stat-success">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                <span id="validUrlCount">0</span> valid
+                            </span>
+                            <span class="stat-badge stat-error" id="invalidUrlBadge" style="display: none;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                <span id="invalidUrlCount">0</span> invalid
+                            </span>
+                            <span class="stat-badge stat-info">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    <path d="M9 10a1 1 0 011-1h4a1 1 0 110 2h-4a1 1 0 01-1-1z" />
+                                </svg>
+                                <span id="uniqueDomainCount">0</span> domains
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Upload File Tab -->
+                    <div id="uploadFileContent" class="list-tab-content" style="display: none;">
+                        <label for="urlListFile" class="input-label">
+                            Upload TXT File
+                            <span class="label-hint">One URL per line</span>
+                        </label>
+                        <div class="file-upload-area" id="fileUploadArea">
+                            <input type="file" id="urlListFile" accept=".txt" onchange="handleFileUpload(event)"
+                                style="display: none;">
+                            <label for="urlListFile" class="file-upload-label">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="1.5">
+                                    <path d="M7 18a4.6 4.4 0 0 1 0 -9a5 4.5 0 0 1 11 2h1a3.5 3.5 0 0 1 0 7h-1" />
+                                    <polyline points="9 15 12 12 15 15" />
+                                    <line x1="12" y1="12" x2="12" y2="21" />
+                                </svg>
+                                <span class="upload-text">Click to upload or drag and drop</span>
+                                <span class="upload-hint">TXT files only</span>
+                            </label>
+                            <div id="fileInfo" class="file-info" style="display: none;">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                    <path
+                                        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                                <span id="fileName"></span>
+                                <button onclick="clearFile()" class="clear-file-btn">×</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div class="control-buttons">
                     <button id="startBtn" class="btn btn-primary" onclick="toggleCrawl()">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M8 5v14l11-7z"/>
+                            <path d="M8 5v14l11-7z" />
                         </svg>
                         Start
                     </button>
                     <button id="stopBtn" class="btn btn-danger" onclick="stopCrawl()" disabled>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                            <rect x="6" y="6" width="12" height="12"/>
+                            <rect x="6" y="6" width="12" height="12" />
                         </svg>
                         Stop
                     </button>
                     <button id="clearBtn" class="btn btn-secondary" onclick="clearCrawlData()">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                            <path
+                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                         </svg>
                         Clear
                     </button>
@@ -279,17 +398,21 @@
                             <div class="links-tab-scroll-container">
                                 <div class="links-sections">
                                     <div class="links-section">
-                                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                        <div
+                                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                                             <h3 class="links-section-title">🔗 Internal Links</h3>
                                             <div style="display: flex; gap: 10px; align-items: center;">
-                                                <select onchange="filterInternalLinks(this.value)" style="padding: 6px 12px; border-radius: 6px; border: 1px solid #4b5563; background: #1f2937; color: white; font-size: 13px;">
+                                                <select onchange="filterInternalLinks(this.value)"
+                                                    style="padding: 6px 12px; border-radius: 6px; border: 1px solid #4b5563; background: #1f2937; color: white; font-size: 13px;">
                                                     <option value="all">All Status Codes</option>
                                                     <option value="2xx">2xx Success</option>
                                                     <option value="3xx">3xx Redirect</option>
                                                     <option value="4xx">4xx Client Error</option>
                                                     <option value="5xx">5xx Server Error</option>
                                                 </select>
-                                                <input type="text" placeholder="Search..." oninput="searchInternalLinks(this.value)" style="padding: 6px 12px; border-radius: 6px; border: 1px solid #4b5563; background: #1f2937; color: white; font-size: 13px; width: 200px;">
+                                                <input type="text" placeholder="Search..."
+                                                    oninput="searchInternalLinks(this.value)"
+                                                    style="padding: 6px 12px; border-radius: 6px; border: 1px solid #4b5563; background: #1f2937; color: white; font-size: 13px; width: 200px;">
                                             </div>
                                         </div>
                                         <div class="table-container internal-links-container">
@@ -311,17 +434,21 @@
                                     </div>
 
                                     <div class="links-section">
-                                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                        <div
+                                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                                             <h3 class="links-section-title">🌐 External Links</h3>
                                             <div style="display: flex; gap: 10px; align-items: center;">
-                                                <select onchange="filterExternalLinks(this.value)" style="padding: 6px 12px; border-radius: 6px; border: 1px solid #4b5563; background: #1f2937; color: white; font-size: 13px;">
+                                                <select onchange="filterExternalLinks(this.value)"
+                                                    style="padding: 6px 12px; border-radius: 6px; border: 1px solid #4b5563; background: #1f2937; color: white; font-size: 13px;">
                                                     <option value="all">All Status Codes</option>
                                                     <option value="2xx">2xx Success</option>
                                                     <option value="3xx">3xx Redirect</option>
                                                     <option value="4xx">4xx Client Error</option>
                                                     <option value="5xx">5xx Server Error</option>
                                                 </select>
-                                                <input type="text" placeholder="Search..." oninput="searchExternalLinks(this.value)" style="padding: 6px 12px; border-radius: 6px; border: 1px solid #4b5563; background: #1f2937; color: white; font-size: 13px; width: 200px;">
+                                                <input type="text" placeholder="Search..."
+                                                    oninput="searchExternalLinks(this.value)"
+                                                    style="padding: 6px 12px; border-radius: 6px; border: 1px solid #4b5563; background: #1f2937; color: white; font-size: 13px; width: 200px;">
                                             </div>
                                         </div>
                                         <div class="table-container external-links-container">
@@ -347,17 +474,23 @@
 
                         <div id="issues-tab" class="tab-pane">
                             <!-- Severity Filters -->
-                            <div class="filter-bar" style="margin-bottom: 20px; display: flex; gap: 10px; justify-content: center; align-items: center;">
-                                <button class="filter-item active" onclick="filterIssues('all')" data-filter="all" style="background: #374151; border: 1px solid #4b5563; color: white; padding: 8px 16px; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-size: 14px; font-weight: 500; min-width: 120px;">
+                            <div class="filter-bar"
+                                style="margin-bottom: 20px; display: flex; gap: 10px; justify-content: center; align-items: center;">
+                                <button class="filter-item active" onclick="filterIssues('all')" data-filter="all"
+                                    style="background: #374151; border: 1px solid #4b5563; color: white; padding: 8px 16px; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-size: 14px; font-weight: 500; min-width: 120px;">
                                     All Issues <span id="issues-all-count" style="opacity: 0.7;">(0)</span>
                                 </button>
-                                <button class="filter-item" onclick="filterIssues('error')" data-filter="error" style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: #ef4444; padding: 8px 16px; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-size: 14px; font-weight: 500; min-width: 100px;">
+                                <button class="filter-item" onclick="filterIssues('error')" data-filter="error"
+                                    style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: #ef4444; padding: 8px 16px; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-size: 14px; font-weight: 500; min-width: 100px;">
                                     <span>❌</span> Errors <span id="issues-error-count" style="opacity: 0.7;">(0)</span>
                                 </button>
-                                <button class="filter-item" onclick="filterIssues('warning')" data-filter="warning" style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); color: #f59e0b; padding: 8px 16px; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-size: 14px; font-weight: 500; min-width: 120px;">
-                                    <span>⚠️</span> Warnings <span id="issues-warning-count" style="opacity: 0.7;">(0)</span>
+                                <button class="filter-item" onclick="filterIssues('warning')" data-filter="warning"
+                                    style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); color: #f59e0b; padding: 8px 16px; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-size: 14px; font-weight: 500; min-width: 120px;">
+                                    <span>⚠️</span> Warnings <span id="issues-warning-count"
+                                        style="opacity: 0.7;">(0)</span>
                                 </button>
-                                <button class="filter-item" onclick="filterIssues('info')" data-filter="info" style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); color: #3b82f6; padding: 8px 16px; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-size: 14px; font-weight: 500; min-width: 90px;">
+                                <button class="filter-item" onclick="filterIssues('info')" data-filter="info"
+                                    style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); color: #3b82f6; padding: 8px 16px; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-size: 14px; font-weight: 500; min-width: 90px;">
                                     <span>ℹ️</span> Info <span id="issues-info-count" style="opacity: 0.7;">(0)</span>
                                 </button>
                             </div>
@@ -379,9 +512,10 @@
                                 </table>
                                 <div class="empty-state" id="issuesEmptyState" style="display: none;">
                                     <div class="empty-state-content">
-                                        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                            <circle cx="12" cy="12" r="10"/>
-                                            <path d="M12 8v4M12 16h0"/>
+                                        <svg width="64" height="64" viewBox="0 0 24 24" fill="none"
+                                            stroke="currentColor">
+                                            <circle cx="12" cy="12" r="10" />
+                                            <path d="M12 8v4M12 16h0" />
                                         </svg>
                                         <h3>No Issues Found</h3>
                                         <p>Start crawling to detect SEO issues and problems on your website.</p>
@@ -394,12 +528,14 @@
                             <div class="pagespeed-container">
                                 <div class="pagespeed-header">
                                     <h3>PageSpeed Insights Results</h3>
-                                    <p class="pagespeed-description">Performance analysis for homepage and category pages (powered by Google PageSpeed Insights)</p>
+                                    <p class="pagespeed-description">Performance analysis for homepage and category
+                                        pages (powered by Google PageSpeed Insights)</p>
                                 </div>
                                 <div id="pagespeedResults" class="pagespeed-results">
                                     <div class="pagespeed-placeholder">
                                         <p>🚀 PageSpeed analysis will appear here after crawl completion</p>
-                                        <p>Enable PageSpeed Analysis in settings to get Core Web Vitals and performance scores</p>
+                                        <p>Enable PageSpeed Analysis in settings to get Core Web Vitals and performance
+                                            scores</p>
                                     </div>
                                 </div>
                             </div>
@@ -425,22 +561,25 @@
                                             <option value="4xx">4xx Errors</option>
                                             <option value="5xx">5xx Errors</option>
                                         </select>
-                                        <button class="btn btn-secondary" onclick="resetVisualization()">Reset View</button>
-                                        <button class="btn btn-secondary" onclick="exportVisualizationImage()">Export PNG</button>
+                                        <button class="btn btn-secondary" onclick="resetVisualization()">Reset
+                                            View</button>
+                                        <button class="btn btn-secondary" onclick="exportVisualizationImage()">Export
+                                            PNG</button>
                                     </div>
                                 </div>
                                 <div id="cy" class="graph-container">
                                     <div class="graph-placeholder">
-                                        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                                            <circle cx="12" cy="12" r="3"/>
-                                            <circle cx="6" cy="6" r="2"/>
-                                            <circle cx="18" cy="6" r="2"/>
-                                            <circle cx="6" cy="18" r="2"/>
-                                            <circle cx="18" cy="18" r="2"/>
-                                            <line x1="12" y1="12" x2="6" y2="6"/>
-                                            <line x1="12" y1="12" x2="18" y2="6"/>
-                                            <line x1="12" y1="12" x2="6" y2="18"/>
-                                            <line x1="12" y1="12" x2="18" y2="18"/>
+                                        <svg width="64" height="64" viewBox="0 0 24 24" fill="none"
+                                            stroke="currentColor">
+                                            <circle cx="12" cy="12" r="3" />
+                                            <circle cx="6" cy="6" r="2" />
+                                            <circle cx="18" cy="6" r="2" />
+                                            <circle cx="6" cy="18" r="2" />
+                                            <circle cx="18" cy="18" r="2" />
+                                            <line x1="12" y1="12" x2="6" y2="6" />
+                                            <line x1="12" y1="12" x2="18" y2="6" />
+                                            <line x1="12" y1="12" x2="6" y2="18" />
+                                            <line x1="12" y1="12" x2="18" y2="18" />
                                         </svg>
                                         <h3>No Data Yet</h3>
                                         <p>Start crawling to visualize your site structure</p>
@@ -604,7 +743,8 @@
                             <input type="checkbox" id="discoverSitemaps" checked>
                             Discover Sitemaps
                         </label>
-                        <span class="setting-help">Automatically find and parse sitemap.xml files (including nested sitemaps)</span>
+                        <span class="setting-help">Automatically find and parse sitemap.xml files (including nested
+                            sitemaps)</span>
                     </div>
 
                     <div class="setting-group">
@@ -612,15 +752,18 @@
                             <input type="checkbox" id="enablePageSpeed">
                             Enable PageSpeed Analysis
                         </label>
-                        <span class="setting-help">Run Google PageSpeed Insights on homepage and 2 category pages after crawl completes</span>
+                        <span class="setting-help">Run Google PageSpeed Insights on homepage and 2 category pages after
+                            crawl completes</span>
                     </div>
 
                     <div class="setting-group">
                         <label for="googleApiKey">Google PageSpeed API Key</label>
-                        <input type="password" id="googleApiKey" placeholder="Enter your Google PageSpeed Insights API key">
+                        <input type="password" id="googleApiKey"
+                            placeholder="Enter your Google PageSpeed Insights API key">
                         <span class="setting-help">
                             API key for higher rate limits (25k requests/day vs limited without key).
-                            <a href="https://developers.google.com/speed/docs/insights/v5/get-started" target="_blank" style="color: #8b5cf6;">Get API key here</a>
+                            <a href="https://developers.google.com/speed/docs/insights/v5/get-started" target="_blank"
+                                style="color: #8b5cf6;">Get API key here</a>
                         </span>
                     </div>
                 </div>
@@ -643,13 +786,15 @@
 
                     <div class="setting-group">
                         <label for="includePatterns">Include URL Patterns</label>
-                        <textarea id="includePatterns" rows="3" placeholder="One pattern per line (regex supported)"></textarea>
+                        <textarea id="includePatterns" rows="3"
+                            placeholder="One pattern per line (regex supported)"></textarea>
                         <span class="setting-help">Only crawl URLs matching these patterns</span>
                     </div>
 
                     <div class="setting-group">
                         <label for="excludePatterns">Exclude URL Patterns</label>
-                        <textarea id="excludePatterns" rows="3" placeholder="One pattern per line (regex supported)"></textarea>
+                        <textarea id="excludePatterns" rows="3"
+                            placeholder="One pattern per line (regex supported)"></textarea>
                         <span class="setting-help">Skip URLs matching these patterns</span>
                     </div>
 
@@ -672,7 +817,8 @@
                     <div class="setting-group">
                         <label for="duplicationThreshold">Duplication Similarity Threshold</label>
                         <input type="number" id="duplicationThreshold" value="0.85" min="0" max="1" step="0.05">
-                        <span class="setting-help">Content similarity threshold (0.0-1.0). Higher values = stricter matching. Default: 0.85 (85% similar)</span>
+                        <span class="setting-help">Content similarity threshold (0.0-1.0). Higher values = stricter
+                            matching. Default: 0.85 (85% similar)</span>
                     </div>
                 </div>
 
@@ -795,7 +941,8 @@
                             <input type="checkbox" id="enableJavaScript">
                             Enable JavaScript Rendering
                         </label>
-                        <span class="setting-help">Render pages with JavaScript for dynamic content (slower but more accurate)</span>
+                        <span class="setting-help">Render pages with JavaScript for dynamic content (slower but more
+                            accurate)</span>
                     </div>
 
                     <div class="setting-group" id="jsSettings" style="display: none;">
@@ -825,7 +972,8 @@
                             <input type="checkbox" id="jsHeadless" checked>
                             Headless Mode
                         </label>
-                        <span class="setting-help">Run browser without visible window (recommended for performance)</span>
+                        <span class="setting-help">Run browser without visible window (recommended for
+                            performance)</span>
                     </div>
 
                     <div class="setting-group" id="jsUserAgentGroup" style="display: none;">
@@ -837,9 +985,11 @@
                     <div class="setting-group" id="jsViewportGroup" style="display: none;">
                         <label>Browser Viewport Size</label>
                         <div style="display: flex; gap: 10px; align-items: center;">
-                            <input type="number" id="jsViewportWidth" value="1920" min="800" max="4000" placeholder="Width">
+                            <input type="number" id="jsViewportWidth" value="1920" min="800" max="4000"
+                                placeholder="Width">
                             <span>×</span>
-                            <input type="number" id="jsViewportHeight" value="1080" min="600" max="3000" placeholder="Height">
+                            <input type="number" id="jsViewportHeight" value="1080" min="600" max="3000"
+                                placeholder="Height">
                         </div>
                         <span class="setting-help">Browser window size for rendering (affects responsive layouts)</span>
                     </div>
@@ -847,13 +997,16 @@
                     <div class="setting-group" id="jsConcurrencyGroup" style="display: none;">
                         <label for="jsMaxConcurrentPages">Max Concurrent Browser Pages</label>
                         <input type="number" id="jsMaxConcurrentPages" value="3" min="1" max="10">
-                        <span class="setting-help">Number of browser pages for parallel JavaScript rendering (higher = faster but more memory)</span>
+                        <span class="setting-help">Number of browser pages for parallel JavaScript rendering (higher =
+                            faster but more memory)</span>
                     </div>
 
                     <div class="setting-group" id="jsWarning" style="display: none;">
-                        <div style="background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.3); border-radius: 6px; padding: 12px; color: #fbbf24;">
+                        <div
+                            style="background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.3); border-radius: 6px; padding: 12px; color: #fbbf24;">
                             <strong>⚠️ Performance Impact</strong><br>
-                            JavaScript rendering is significantly slower than HTTP-only crawling. Use for sites with dynamic content or when static crawling produces incomplete results.
+                            JavaScript rendering is significantly slower than HTTP-only crawling. Use for sites with
+                            dynamic content or when static crawling produces incomplete results.
                         </div>
                     </div>
                 </div>
@@ -861,7 +1014,9 @@
                 <!-- Issue Exclusion Settings -->
                 <div id="issues-settings" class="settings-tab-content">
                     <h3>Issue Exclusion Patterns</h3>
-                    <p class="setting-help">URLs matching these patterns will be excluded from issue detection. These are typically admin areas, development files, and framework internals that should never be indexed by search engines.</p>
+                    <p class="setting-help">URLs matching these patterns will be excluded from issue detection. These
+                        are typically admin areas, development files, and framework internals that should never be
+                        indexed by search engines.</p>
 
                     <div class="setting-group">
                         <label for="issueExclusionPatterns">Exclusion Patterns (one per line)</label>
@@ -870,15 +1025,18 @@
 *.json"></textarea>
                         <span class="setting-help">Use * for wildcards. Examples: /admin/*, *.json, /test/*</span>
                         <div style="margin-top: 10px;">
-                            <button type="button" onclick="resetIssueExclusions()" style="background: #6b7280; padding: 8px 16px; border-radius: 6px; border: none; color: white; cursor: pointer;">
+                            <button type="button" onclick="resetIssueExclusions()"
+                                style="background: #6b7280; padding: 8px 16px; border-radius: 6px; border: none; color: white; cursor: pointer;">
                                 Reset to Defaults
                             </button>
-                            <span class="setting-help" style="margin-left: 10px;">Restore the default exclusion patterns</span>
+                            <span class="setting-help" style="margin-left: 10px;">Restore the default exclusion
+                                patterns</span>
                         </div>
                     </div>
 
                     <div class="setting-group">
-                        <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 6px; padding: 12px;">
+                        <div
+                            style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 6px; padding: 12px;">
                             <strong>ℹ️ Default Exclusions Include:</strong><br>
                             • WordPress admin areas (/wp-admin/*, /wp-content/plugins/*)<br>
                             • Common admin panels (/admin/*, /administrator/*, /cpanel/*)<br>
@@ -893,7 +1051,8 @@
                 <!-- Custom CSS Settings -->
                 <div id="customcss-settings" class="settings-tab-content">
                     <h3>Custom CSS Styling</h3>
-                    <p class="setting-help">Write custom CSS to personalize the look and feel of the LibreCrawl interface. Changes apply immediately after saving.</p>
+                    <p class="setting-help">Write custom CSS to personalize the look and feel of the LibreCrawl
+                        interface. Changes apply immediately after saving.</p>
 
                     <div class="setting-group">
                         <label for="customCSS">Custom CSS Code</label>
@@ -906,21 +1065,27 @@
                     </div>
 
                     <div class="setting-group">
-                        <div style="background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 6px; padding: 12px;">
+                        <div
+                            style="background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 6px; padding: 12px;">
                             <strong>💡 CSS Tips:</strong><br>
-                            • Target specific elements: <code>.header</code>, <code>.data-table</code>, <code>.sidebar</code><br>
-                            • Change colors: <code>background-color</code>, <code>color</code>, <code>border-color</code><br>
+                            • Target specific elements: <code>.header</code>, <code>.data-table</code>,
+                            <code>.sidebar</code><br>
+                            • Change colors: <code>background-color</code>, <code>color</code>,
+                            <code>border-color</code><br>
                             • Modify spacing: <code>padding</code>, <code>margin</code>, <code>gap</code><br>
-                            • Adjust fonts: <code>font-family</code>, <code>font-size</code>, <code>font-weight</code><br>
+                            • Adjust fonts: <code>font-family</code>, <code>font-size</code>,
+                            <code>font-weight</code><br>
                             • Use <code>!important</code> to override default styles if needed<br>
                             • Changes only affect the frontend UI
                         </div>
                     </div>
 
                     <div class="setting-group">
-                        <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 6px; padding: 12px;">
+                        <div
+                            style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 6px; padding: 12px;">
                             <strong>🎨 Example Customizations:</strong><br><br>
-                            <code style="display: block; background: #1f2937; padding: 10px; border-radius: 4px; margin: 8px 0; font-size: 13px; color: #e5e7eb;">
+                            <code
+                                style="display: block; background: #1f2937; padding: 10px; border-radius: 4px; margin: 8px 0; font-size: 13px; color: #e5e7eb;">
                             /* Dark purple header */<br>
                             .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }<br><br>
                             /* Green accent buttons */<br>
@@ -939,7 +1104,8 @@
                     <div class="setting-group">
                         <label for="concurrency">Concurrent Requests</label>
                         <input type="number" id="concurrency" value="5" min="1" max="50">
-                        <span class="setting-help">Number of simultaneous requests (higher = faster but more resource intensive)</span>
+                        <span class="setting-help">Number of simultaneous requests (higher = faster but more resource
+                            intensive)</span>
                     </div>
 
                     <div class="setting-group">
@@ -983,7 +1149,8 @@
 
                     <div class="setting-group">
                         <label for="customHeaders">Custom Headers</label>
-                        <textarea id="customHeaders" rows="4" placeholder="Header-Name: Header-Value&#10;Another-Header: Another-Value"></textarea>
+                        <textarea id="customHeaders" rows="4"
+                            placeholder="Header-Name: Header-Value&#10;Another-Header: Another-Value"></textarea>
                         <span class="setting-help">Additional HTTP headers to send (one per line)</span>
                     </div>
                 </div>
@@ -1001,8 +1168,10 @@
     <script src="/static/js/column-resize.js"></script>
     <script src="/static/js/visualization.js"></script>
     <script src="/static/js/plugin-loader.js"></script>
-    <script src="/static/js/app.js"></script>
+    <script src="/static/js/list-mode.js"></script>
+    <script src="/static/js/app.js?v=2.0"></script>
     <script src="/static/js/dashboard.js"></script>
     <script src="/static/js/settings.js"></script>
 </body>
+
 </html>

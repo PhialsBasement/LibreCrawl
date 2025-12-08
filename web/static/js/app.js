@@ -39,7 +39,7 @@ let virtualScrollers = {
 };
 
 // Initialize application
-document.addEventListener('DOMContentLoaded', async function() {
+document.addEventListener('DOMContentLoaded', async function () {
     await initializeApp();
 });
 
@@ -197,31 +197,47 @@ function toggleCrawl() {
 }
 
 function startCrawl() {
-    const urlInput = document.getElementById('urlInput');
-    let url = urlInput.value.trim();
+    let url = null;
 
-    if (!url) {
-        alert('Please enter a URL to crawl');
-        urlInput.focus();
-        return;
+    // Check which mode we're in (use window. to access list-mode.js variables)
+    if (window.currentCrawlMode === 'standard') {
+        const urlInput = document.getElementById('urlInput');
+        url = urlInput.value.trim();
+
+        if (!url) {
+            alert('Please enter a URL to crawl');
+            urlInput.focus();
+            return;
+        }
+
+        // Normalize the URL - add protocol if missing
+        url = normalizeUrl(url);
+
+        if (!isValidUrl(url)) {
+            alert('Please enter a valid URL or domain');
+            urlInput.focus();
+            return;
+        }
+
+        // Update the input field with the normalized URL
+        urlInput.value = url;
+        crawlState.baseUrl = url;
+    } else if (window.currentCrawlMode === 'list') {
+        // List mode - validate that we have URLs
+        if (!window.validUrlList || window.validUrlList.length === 0) {
+            alert('Please enter or upload a list of URLs to crawl');
+            document.getElementById('urlListText').focus();
+            return;
+        }
+
+        // Use the first URL as base URL for display purposes
+        crawlState.baseUrl = window.validUrlList[0];
+        updateStatus(`Starting list mode crawl with ${window.validUrlList.length} URLs...`);
     }
-
-    // Normalize the URL - add protocol if missing
-    url = normalizeUrl(url);
-
-    if (!isValidUrl(url)) {
-        alert('Please enter a valid URL or domain');
-        urlInput.focus();
-        return;
-    }
-
-    // Update the input field with the normalized URL
-    urlInput.value = url;
 
     crawlState.isRunning = true;
     crawlState.isPaused = false;
     crawlState.startTime = new Date();
-    crawlState.baseUrl = url;
 
     // Initialize incremental poller for new crawl
     if (!incrementalPoller) {
@@ -351,39 +367,43 @@ function startPythonCrawl(url) {
         headers: {
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ url: url })
+        body: JSON.stringify({
+            url: url || null,
+            mode: window.currentCrawlMode || 'standard',
+            urlList: (window.currentCrawlMode === 'list' && window.validUrlList && window.validUrlList.length > 0) ? window.validUrlList : null
+        })
     })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            updateStatus('Crawling in progress...');
-            // Refresh user info to update crawl count
-            loadUserInfo();
-            // Start polling for updates
-            pollCrawlProgress();
-        } else {
-            updateStatus('Error: ' + data.error);
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                updateStatus('Crawling in progress...');
+                // Refresh user info to update crawl count
+                loadUserInfo();
+                // Start polling for updates
+                pollCrawlProgress();
+            } else {
+                updateStatus('Error: ' + data.error);
+                stopCrawl();
+            }
+        })
+        .catch(error => {
+            console.error('Error starting crawl:', error);
+            updateStatus('Error starting crawl');
             stopCrawl();
-        }
-    })
-    .catch(error => {
-        console.error('Error starting crawl:', error);
-        updateStatus('Error starting crawl');
-        stopCrawl();
-    });
+        });
 }
 
 function stopPythonCrawl() {
     fetch('/api/stop_crawl', {
         method: 'POST'
     })
-    .then(response => response.json())
-    .then(data => {
-        console.log('Crawl stopped:', data);
-    })
-    .catch(error => {
-        console.error('Error stopping crawl:', error);
-    });
+        .then(response => response.json())
+        .then(data => {
+            console.log('Crawl stopped:', data);
+        })
+        .catch(error => {
+            console.error('Error stopping crawl:', error);
+        });
 }
 
 function pollCrawlProgress() {
@@ -1655,16 +1675,16 @@ function showUrlDetails(url) {
                                 <div class="details-subsection">
                                     <h5>OpenGraph Tags:</h5>
                                     ${Object.entries(urlData.og_tags || {}).map(([key, value]) =>
-                                        `<div><strong>og:${escapeHtml(key)}:</strong> ${escapeHtml(value)}</div>`
-                                    ).join('')}
+        `<div><strong>og:${escapeHtml(key)}:</strong> ${escapeHtml(value)}</div>`
+    ).join('')}
                                 </div>
                             ` : ''}
                             ${Object.keys(urlData.twitter_tags || {}).length > 0 ? `
                                 <div class="details-subsection">
                                     <h5>Twitter Cards:</h5>
                                     ${Object.entries(urlData.twitter_tags || {}).map(([key, value]) =>
-                                        `<div><strong>twitter:${escapeHtml(key)}:</strong> ${escapeHtml(value)}</div>`
-                                    ).join('')}
+        `<div><strong>twitter:${escapeHtml(key)}:</strong> ${escapeHtml(value)}</div>`
+    ).join('')}
                                 </div>
                             ` : ''}
                         </div>
@@ -1699,9 +1719,9 @@ function showUrlDetails(url) {
                             <div class="details-subsection">
                                 <ul style="list-style: none; padding: 0; margin: 10px 0;">
                                     ${urlData.linked_from.slice(0, 20).map(sourceUrl => {
-                                        const escapedUrl = escapeHtml(sourceUrl);
-                                        return `<li style="padding: 5px 0; word-break: break-all;"><a href="${escapedUrl}" target="_blank" style="color: #8b5cf6; text-decoration: none;">${escapedUrl}</a></li>`;
-                                    }).join('')}
+        const escapedUrl = escapeHtml(sourceUrl);
+        return `<li style="padding: 5px 0; word-break: break-all;"><a href="${escapedUrl}" target="_blank" style="color: #8b5cf6; text-decoration: none;">${escapedUrl}</a></li>`;
+    }).join('')}
                                     ${urlData.linked_from.length > 20 ? `<li style="padding: 5px 0; font-style: italic; color: #9ca3af;">... and ${urlData.linked_from.length - 20} more</li>` : ''}
                                 </ul>
                             </div>
@@ -1917,7 +1937,7 @@ function loadCrawl() {
     fileInput.accept = '.json';
     fileInput.style.display = 'none';
 
-    fileInput.addEventListener('change', async function(event) {
+    fileInput.addEventListener('change', async function (event) {
         const file = event.target.files[0];
         if (!file) return;
 
@@ -2212,3 +2232,16 @@ function renderIssueRow(row, issue, index) {
         <td style="word-break: break-word;" title="${issue.details}">${issue.details}</td>
     `;
 }
+
+// Show notification (helper function)
+function showNotification(message, type = 'info') {
+    // Simple notification - can be enhanced
+    const statusText = document.getElementById('statusText');
+    if (statusText) {
+        statusText.textContent = message;
+        setTimeout(() => {
+            statusText.textContent = 'Ready';
+        }, 3000);
+    }
+}
+

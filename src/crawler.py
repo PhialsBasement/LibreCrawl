@@ -56,6 +56,11 @@ class WebCrawler:
         self.is_running = False
         self.is_paused = False
         self.is_running_pagespeed = False
+        
+        # List mode
+        self.list_mode = False
+        self.url_list = []
+
 
         # Configuration
         self.config = self._get_default_config()
@@ -201,25 +206,40 @@ class WebCrawler:
             ]
         }
 
-    def start_crawl(self, url, user_id=None, session_id=None):
+    def start_crawl(self, url=None, user_id=None, session_id=None, url_list=None):
         """Start crawling from the given URL"""
         if self.is_running:
             return False, "Crawl already in progress"
 
         try:
-            # Validate and normalize URL
-            if not url.startswith(('http://', 'https://')):
-                url = 'https://' + url
+            # Check if list mode
+            if url_list and len(url_list) > 0:
+                self.list_mode = True
+                self.url_list = url_list
+                # Use first URL to determine base domain
+                first_url = url_list[0]
+                if not first_url.startswith(('http://', 'https://')):
+                    first_url = 'https://' + first_url
+                parsed = urlparse(first_url)
+                self.base_url = f"{parsed.scheme}://{parsed.netloc}"
+                self.base_domain = parsed.netloc
+                print(f"List mode enabled with {len(url_list)} URLs")
+            elif url:
+                # Standard mode - validate and normalize URL
+                if not url.startswith(('http://', 'https://')):
+                    url = 'https://' + url
 
-            parsed = urlparse(url)
-            self.base_url = f"{parsed.scheme}://{parsed.netloc}"
-            self.base_domain = parsed.netloc
+                parsed = urlparse(url)
+                self.base_url = f"{parsed.scheme}://{parsed.netloc}"
+                self.base_domain = parsed.netloc
 
-            # If URL has a path (not just domain), set max_depth to 0 to only crawl that page
-            has_path = parsed.path and parsed.path not in ('/', '')
-            if has_path:
-                print(f"URL has path '{parsed.path}' - limiting crawl to single page only")
-                self.config['max_depth'] = 0
+                # If URL has a path (not just domain), set max_depth to 0 to only crawl that page
+                has_path = parsed.path and parsed.path not in ('/', '')
+                if has_path:
+                    print(f"URL has path '{parsed.path}' - limiting crawl to single page only")
+                    self.config['max_depth'] = 0
+            else:
+                return False, "Either url or url_list must be provided"
 
             # Create database crawl record if session_id provided
             if session_id:
@@ -241,15 +261,28 @@ class WebCrawler:
             # Reset state
             self._reset_state()
 
-            # Add initial URL
-            self.link_manager.add_url(url, 0)
-            self.stats['discovered'] = 1
+            # Add URLs to queue
+            if self.list_mode:
+                # List mode: add all URLs from the list
+                for list_url in self.url_list:
+                    # Normalize URL
+                    if not list_url.startswith(('http://', 'https://')):
+                        list_url = 'http://' + list_url
+                    self.link_manager.add_url(list_url, 0)
+                self.stats['discovered'] = len(self.url_list)
+                print(f"Added {len(self.url_list)} URLs from list to queue")
+                # Disable sitemap discovery in list mode
+                self.config['discover_sitemaps'] = False
+            else:
+                # Standard mode: add initial URL
+                self.link_manager.add_url(url, 0)
+                self.stats['discovered'] = 1
 
-            # Discover sitemaps if enabled
-            if self.config.get('discover_sitemaps', True):
-                print(f"Starting sitemap discovery for {url}")
-                self._discover_and_add_sitemap_urls(url)
-                print(f"Sitemap discovery completed. Total discovered URLs: {self.stats['discovered']}")
+                # Discover sitemaps if enabled
+                if self.config.get('discover_sitemaps', True):
+                    print(f"Starting sitemap discovery for {url}")
+                    self._discover_and_add_sitemap_urls(url)
+                    print(f"Sitemap discovery completed. Total discovered URLs: {self.stats['discovered']}")
 
             # Start auto-save thread if DB enabled
             if self.db_save_enabled:
