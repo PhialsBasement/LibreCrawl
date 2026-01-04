@@ -16,6 +16,15 @@ services:
       - LOCAL_MODE=${LOCAL_MODE:-true}
       # Set to "true" to disable new user registrations
       - REGISTRATION_DISABLED=${REGISTRATION_DISABLED:-false}
+      # Uncomment these for SMTP sending
+      # - SMTP_HOST=${SMTP_HOST}
+      # - SMTP_PORT=${SMTP_PORT}
+      # - SMTP_USER=${SMTP_USER}
+      # - SMTP_PASSWORD=${SMTP_PASSWORD}
+      # - SMTP_FROM=${SMTP_FROM}
+      # - SMTP_FROM_NAME=${SMTP_FROM_NAME}
+      # Add this for correct links in the verification emails
+      # - MAIN_APP_URL=${MAIN_APP_URL}
     restart: unless-stopped
     command: >
       sh -c "
@@ -30,3 +39,4 @@ services:
 
     # Increase shared memory size for Chrome to prevent crashes
     shm_size: '2gb'
+
