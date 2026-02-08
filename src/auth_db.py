@@ -9,8 +9,8 @@ import secrets
 from datetime import datetime, timedelta
 from contextlib import contextmanager
 
-# Database file location
-DB_FILE = 'users.db'
+# Database file location - stored in data/ for Docker volume persistence
+DB_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'users.db')
 
 @contextmanager
 def get_db():
@@ -28,6 +28,7 @@ def get_db():
 
 def init_db():
     """Initialize the database with users and settings tables"""
+    os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute('''

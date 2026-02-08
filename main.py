@@ -52,7 +52,7 @@ def auto_login_local_mode():
     """Auto-login for local mode - creates or logs into 'local' admin account"""
     import sqlite3
     try:
-        conn = sqlite3.connect('users.db')
+        conn = sqlite3.connect(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'users.db'))
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
@@ -485,7 +485,7 @@ def register():
             from src.auth_db import verify_user, set_user_tier
             # Get the user that was just created
             import sqlite3
-            conn = sqlite3.connect('users.db')
+            conn = sqlite3.connect(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'users.db'))
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute('SELECT id FROM users WHERE username = ?', (username,))
@@ -1159,7 +1159,7 @@ def crawl_stats():
         import sqlite3
 
         # Get counts by status
-        conn = sqlite3.connect('users.db')
+        conn = sqlite3.connect(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'users.db'))
         cursor = conn.cursor()
 
         cursor.execute('''
