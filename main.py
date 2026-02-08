@@ -771,7 +771,8 @@ def visualization_data():
                     'status_code': status_code,
                     'title': page.get('title', ''),
                     'color': color,
-                    'size': 30 if idx == 0 else 20  # Make root node larger
+                    'size': 30 if idx == 0 else 20,  # Make root node larger
+                    'depth': page.get('depth', 0)
                 }
             }
             nodes.append(node)

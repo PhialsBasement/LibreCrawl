@@ -93,8 +93,12 @@ function initVisualization() {
     // Add interaction handlers
     setupInteractions();
 
-    // Load initial data
-    loadVisualizationData();
+    // Use already-loaded data if available, otherwise fetch from backend
+    if (graphData.nodes.length > 0) {
+        updateGraph();
+    } else {
+        loadVisualizationData();
+    }
 }
 
 /**
@@ -294,8 +298,20 @@ function applyLayout(layoutName) {
         layoutConfig.randomize = true;
         layoutConfig.componentSpacing = 200;      // Space between disconnected components
     } else if (layoutName === 'breadthfirst') {
-        layoutConfig.directed = true;
-        layoutConfig.spacingFactor = 1.5;
+        // Use crawl depth data for hierarchy instead of BFS graph distance,
+        // since nav links often make every page 1 hop from root in the graph.
+        // We use concentric layout with depth as the ranking to achieve this.
+        layoutConfig.name = 'concentric';
+        layoutConfig.minNodeSpacing = 50;
+        layoutConfig.concentric = function(node) {
+            // Higher value = closer to center; root (depth 0) should be center
+            const maxDepth = cy.nodes().max(function(n) { return n.data('depth') || 0; }).value || 1;
+            return maxDepth - (node.data('depth') || 0);
+        };
+        layoutConfig.levelWidth = function() {
+            return 1;
+        };
+        layoutConfig.sweep = Math.PI * 2;
     } else if (layoutName === 'concentric') {
         layoutConfig.minNodeSpacing = 100;
         layoutConfig.concentric = function(node) {
@@ -439,7 +455,8 @@ function updateVisualizationFromLoadedData(urls, links) {
                 status_code: status_code,
                 title: page.title || '',
                 color: color,
-                size: idx === 0 ? 30 : 20
+                size: idx === 0 ? 30 : 20,
+                depth: page.depth || 0
             }
         };
         nodes.push(node);
