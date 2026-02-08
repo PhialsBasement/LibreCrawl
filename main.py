@@ -29,10 +29,13 @@ parser.add_argument('--local', '-l', action='store_true',
                     help='Run in local mode (all users get admin tier, no rate limits)')
 parser.add_argument('--disable-register', '-dr', action='store_true',
                     help='Disable new user registrations')
+parser.add_argument('--disable-guest', '-dg', action='store_true',
+                    help='Disable guest login')
 args = parser.parse_args()
 
 LOCAL_MODE = args.local
 DISABLE_REGISTER = args.disable_register
+DISABLE_GUEST = args.disable_guest or os.getenv('DISABLE_GUEST', '').lower() in ('true', '1', 'yes')
 
 app = Flask(__name__, template_folder='web/templates', static_folder='web/static')
 app.secret_key = 'librecrawl-secret-key-change-in-production'  # TODO: Use environment variable in production
@@ -108,6 +111,12 @@ if DISABLE_REGISTER:
     print("=" * 60)
     print("REGISTRATION DISABLED")
     print("New user registrations are not allowed")
+    print("=" * 60)
+
+if DISABLE_GUEST:
+    print("=" * 60)
+    print("GUEST MODE DISABLED")
+    print("Guest login is not allowed")
     print("=" * 60)
 
 def get_client_ip():
@@ -420,7 +429,7 @@ def login_page():
     # Redirect to app if already logged in
     if 'user_id' in session:
         return redirect(url_for('index'))
-    return render_template('login.html', registration_disabled=DISABLE_REGISTER)
+    return render_template('login.html', registration_disabled=DISABLE_REGISTER, guest_disabled=DISABLE_GUEST)
 
 @app.route('/register')
 def register_page():
@@ -547,6 +556,9 @@ def login():
 @app.route('/api/guest-login', methods=['POST'])
 def guest_login():
     """Login as a guest user (no account required, limited to 3 crawls/24h)"""
+    if DISABLE_GUEST:
+        return jsonify({'success': False, 'message': 'Guest login is disabled'})
+
     # Create a guest session with no user_id but with tier='guest'
     # In local mode, guests also get admin tier
     session['user_id'] = None

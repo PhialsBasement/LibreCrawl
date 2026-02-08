@@ -188,7 +188,9 @@
             <button type="submit" class="btn" id="loginBtn">Login</button>
         </form>
 
+        {% if not guest_disabled %}
         <button class="btn btn-guest" id="guestBtn">Continue as Guest (3 crawls/24h)</button>
+        {% endif %}
 
         <div class="register-link">
             Don't have an account? <a href="/register" id="registerLink">Register here</a>
@@ -249,7 +251,7 @@
 
         // Guest login
         const guestBtn = document.getElementById('guestBtn');
-        guestBtn.addEventListener('click', async () => {
+        if (guestBtn) guestBtn.addEventListener('click', async () => {
             hideAlert();
             guestBtn.disabled = true;
             guestBtn.textContent = 'Entering as guest...';
