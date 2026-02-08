@@ -1188,7 +1188,17 @@ class WebCrawler:
                 rp = RobotFileParser()
                 rp.set_url(robots_url)
                 try:
-                    rp.read()
+                    # Fetch robots.txt with our session (proper User-Agent)
+                    # instead of rp.read() which uses urllib with Python's
+                    # default UA — many servers return 403 for that, causing
+                    # RobotFileParser to set disallow_all=True and block everything.
+                    response = self.session.get(robots_url, timeout=10)
+                    if response.status_code in (401, 403):
+                        rp.disallow_all = True
+                    elif response.status_code >= 400:
+                        rp.allow_all = True
+                    else:
+                        rp.parse(response.text.splitlines())
                     self._robots_cache[robots_url] = rp
                 except:
                     return True
