@@ -33,8 +33,8 @@ parser.add_argument('--disable-guest', '-dg', action='store_true',
                     help='Disable guest login')
 args = parser.parse_args()
 
-LOCAL_MODE = args.local
-DISABLE_REGISTER = args.disable_register
+LOCAL_MODE = args.local or os.getenv('LOCAL_MODE', '').lower() in ('true', '1', 'yes')
+DISABLE_REGISTER = args.disable_register or os.getenv('REGISTRATION_DISABLED', '').lower() in ('true', '1', 'yes')
 DISABLE_GUEST = args.disable_guest or os.getenv('DISABLE_GUEST', '').lower() in ('true', '1', 'yes')
 
 app = Flask(__name__, template_folder='web/templates', static_folder='web/static')
