@@ -92,6 +92,7 @@ For production deployment with user authentication, edit your `.env` file:
 LOCAL_MODE=false
 HOST_BINDING=0.0.0.0
 REGISTRATION_DISABLED=false
+SECRET_KEY=super-secret-secret-key-goes-here--preferably-a-random-string
 ```
 
 
