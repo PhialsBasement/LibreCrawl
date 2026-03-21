@@ -1480,28 +1480,17 @@ async function exportData() {
         const exportFormat = settings.exportFormat || 'csv';
         const exportFields = settings.exportFields || ['url', 'status_code', 'title', 'meta_description', 'h1'];
 
-        // Check if there's data to export - always fetch fresh data from backend
+        // Check if there's data to export without loading all URLs
         let hasData = false;
-        let exportUrls = [];
-        let exportLinks = [];
-        let exportIssues = [];
-
-        // Always fetch from backend to ensure we have the latest data including links
-        const status = await fetch('/api/crawl_status');
-        const statusData = await status.json();
-
-        if (statusData.urls && statusData.urls.length > 0) {
+        if (crawlState.urls && crawlState.urls.length > 0) {
             hasData = true;
-            exportUrls = statusData.urls;
-            exportLinks = statusData.links || [];
-            exportIssues = statusData.issues || [];
-        } else if (crawlState.urls && crawlState.urls.length > 0) {
-            // Fallback to local state if backend has no data (e.g., loaded crawl)
-            hasData = true;
-            exportUrls = crawlState.urls;
-            // Get links and issues from stored state
-            exportLinks = crawlState.links || [];
-            exportIssues = crawlState.issues || window.currentIssues || [];
+        } else {
+            // Lightweight check — use incremental param to avoid fetching all data
+            const status = await fetch('/api/crawl_status?url_since=999999999');
+            const statusData = await status.json();
+            if (statusData.stats && statusData.stats.crawled > 0) {
+                hasData = true;
+            }
         }
 
         if (!hasData) {
@@ -1511,65 +1500,59 @@ async function exportData() {
 
         showNotification('Preparing export...', 'info');
 
-        // Request export from backend, including local data if available
-        const exportResponse = await fetch('/api/export_data', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
+        // Determine which data types to export based on settings
+        const hasIssues = exportFields.includes('issues_detected');
+        const hasLinks = exportFields.includes('links_detailed');
+        const regularFields = exportFields.filter(f => f !== 'issues_detected' && f !== 'links_detailed');
+
+        // Use streaming endpoint — downloads directly, no memory blow-up
+        const downloads = [];
+
+        if (regularFields.length > 0) {
+            const params = new URLSearchParams({
                 format: exportFormat,
-                fields: exportFields,
-                // Send local data if we have it (for loaded crawls)
-                localData: {
-                    urls: exportUrls,
-                    links: exportLinks,
-                    issues: exportIssues
-                }
-            })
-        });
+                fields: regularFields.join(','),
+                type: 'urls'
+            });
+            downloads.push('/api/export_stream?' + params.toString());
+        }
 
-        const exportData = await exportResponse.json();
+        if (hasLinks) {
+            const params = new URLSearchParams({
+                format: exportFormat,
+                type: 'links'
+            });
+            downloads.push('/api/export_stream?' + params.toString());
+        }
 
-        if (!exportData.success) {
-            showNotification(exportData.error || 'Export failed', 'error');
+        if (hasIssues) {
+            const params = new URLSearchParams({
+                format: exportFormat,
+                type: 'issues'
+            });
+            downloads.push('/api/export_stream?' + params.toString());
+        }
+
+        if (downloads.length === 0) {
+            showNotification('No fields selected for export', 'error');
             return;
         }
 
-        // Check if we have multiple files to download
-        if (exportData.multiple_files && exportData.files) {
-            // Download each file separately
-            exportData.files.forEach((file, index) => {
-                setTimeout(() => {
-                    const blob = new Blob([file.content], { type: file.mimetype });
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.style.display = 'none';
-                    a.href = url;
-                    a.download = file.filename;
-                    document.body.appendChild(a);
-                    a.click();
-                    window.URL.revokeObjectURL(url);
-                    document.body.removeChild(a);
-                }, index * 500); // Delay between downloads to avoid browser blocking
-            });
+        // Trigger each download
+        downloads.forEach((url, index) => {
+            setTimeout(() => {
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = '';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            }, index * 500);
+        });
 
-            showNotification(`Exporting ${exportData.files.length} files...`, 'success');
-        } else {
-            // Single file download (original logic)
-            const blob = new Blob([exportData.content], { type: exportData.mimetype });
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.style.display = 'none';
-            a.href = url;
-            a.download = exportData.filename;
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-            document.body.removeChild(a);
-
-            showNotification(`Export complete: ${exportData.filename}`, 'success');
-        }
+        const fileWord = downloads.length === 1 ? 'file' : 'files';
+        showNotification('Exporting ' + downloads.length + ' ' + fileWord + '...', 'success');
 
     } catch (error) {
         console.error('Export error:', error);
