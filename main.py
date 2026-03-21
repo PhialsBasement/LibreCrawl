@@ -1067,19 +1067,36 @@ def load_crawl_into_session(crawl_id):
             crawler.base_url = crawl['base_url']
             crawler.base_domain = crawl['base_domain']
 
+
+      
+        # Initialize link manager if needed (it's None until a crawl starts)
+        if not crawler.link_manager:
+            from src.core.link_manager import LinkManager
+            crawler.link_manager = LinkManager(crawl['base_domain'])
+
         # Load links into link manager
-        if crawler.link_manager:
-            crawler.link_manager.all_links = links
-            # Rebuild links_set
-            crawler.link_manager.links_set.clear()
-            for link in links:
-                link_key = f"{link['source_url']}|{link['target_url']}"
-                crawler.link_manager.links_set.add(link_key)
+        crawler.link_manager.all_links = links
+        # Rebuild links_set
+        crawler.link_manager.links_set.clear()
+        for link in links:
+            link_key = f"{link['source_url']}|{link['target_url']}"
+            crawler.link_manager.links_set.add(link_key)
+
+        # Populate discovered/visited URL sets so get_stats() returns correct counts
+        crawler.link_manager.all_discovered_urls = set(u['url'] for u in urls)
+        crawler.link_manager.visited_urls = set(u['url'] for u in urls)
+
+        # Initialize issue detector if needed (it's None until a crawl starts)
+        if not crawler.issue_detector:
+            from src.core.issue_detector import IssueDetector
+            crawler.issue_detector = IssueDetector()
 
         # Load issues into issue detector
-        if crawler.issue_detector:
-            crawler.issue_detector.detected_issues = issues
+        crawler.issue_detector.detected_issues = issues
 
+
+
+      
         # Set Flask session flag for force full refresh
         session['force_full_refresh'] = True
 
