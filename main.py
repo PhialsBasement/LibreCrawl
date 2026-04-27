@@ -40,7 +40,7 @@ parser.add_argument('--dangerously-skip-auth', '-dsa', action='store_true',
 args = parser.parse_args()
 
 LOCAL_MODE = args.local
-DISABLE_REGISTER = args.disable_register
+DISABLE_REGISTER = args.disable_register or os.getenv('REGISTRATION_DISABLED', '').lower() in ('true', '1', 'yes')
 DISABLE_GUEST = args.disable_guest or os.getenv('DISABLE_GUEST', '').lower() in ('true', '1', 'yes')
 DEMO_MODE = args.demo or os.getenv('DEMO_MODE', '').lower() in ('true', '1', 'yes')
 SKIP_AUTH = args.dangerously_skip_auth or os.getenv('DANGEROUSLY_SKIP_AUTH', '').lower() in ('true', '1', 'yes')
