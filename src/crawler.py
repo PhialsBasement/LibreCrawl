@@ -441,7 +441,7 @@ class WebCrawler:
             if not crawl_data:
                 return False, "Cannot resume this crawl - not found"
 
-            if crawl_data['status'] not in ['paused', 'failed', 'running']:
+            if crawl_data['status'] not in ['paused', 'failed', 'running', 'stopped']:
                 return False, f"Cannot resume crawl with status: {crawl_data['status']}"
 
             # Verify user owns this crawl (if not guest)
