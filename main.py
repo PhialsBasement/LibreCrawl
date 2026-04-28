@@ -1278,6 +1278,266 @@ def crawl_stats():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/api/export_stream')
+@login_required
+def export_stream():
+    """Stream export data directly as a file download — avoids loading full export into memory"""
+    from flask import Response
+
+    try:
+        export_format = request.args.get('format', 'csv')
+        fields_param = request.args.get('fields', 'url,status_code,title')
+        export_fields = [f.strip() for f in fields_param.split(',') if f.strip()]
+        data_type = request.args.get('type', 'urls')  # urls, links, issues
+
+        # Get data from current crawler (already in memory from active or loaded crawl)
+        crawler = get_or_create_crawler()
+        timestamp = int(time.time())
+
+        if data_type == 'links':
+            links = crawler.link_manager.all_links if crawler.link_manager else []
+            # Update link statuses from crawled URLs
+            if links and crawler.crawl_results:
+                status_lookup = {u['url']: u.get('status_code') for u in crawler.crawl_results}
+                for link in links:
+                    target = link.get('target_url')
+                    if target in status_lookup:
+                        link['target_status'] = status_lookup[target]
+
+            if export_format == 'json':
+                return Response(
+                    _stream_links_json(links),
+                    mimetype='application/json',
+                    headers={'Content-Disposition': f'attachment; filename=librecrawl_links_{timestamp}.json'}
+                )
+            else:
+                return Response(
+                    _stream_links_csv(links),
+                    mimetype='text/csv',
+                    headers={'Content-Disposition': f'attachment; filename=librecrawl_links_{timestamp}.csv'}
+                )
+
+        elif data_type == 'issues':
+            issues = crawler.issue_detector.get_issues() if crawler.issue_detector else []
+            # Apply exclusion patterns
+            settings_manager = get_session_settings()
+            current_settings = settings_manager.get_settings()
+            exclusion_text = current_settings.get('issueExclusionPatterns', '')
+            exclusion_patterns = [p.strip() for p in exclusion_text.split('\n') if p.strip()]
+            issues = filter_issues_by_exclusion_patterns(issues, exclusion_patterns)
+
+            if export_format == 'json':
+                return Response(
+                    _stream_issues_json(issues),
+                    mimetype='application/json',
+                    headers={'Content-Disposition': f'attachment; filename=librecrawl_issues_{timestamp}.json'}
+                )
+            else:
+                return Response(
+                    _stream_issues_csv(issues),
+                    mimetype='text/csv',
+                    headers={'Content-Disposition': f'attachment; filename=librecrawl_issues_{timestamp}.csv'}
+                )
+
+        else:
+            # URLs export
+            urls = crawler.crawl_results
+            if not urls:
+                return jsonify({'success': False, 'error': 'No data to export'}), 404
+
+            # Remove special fields from regular export
+            regular_fields = [f for f in export_fields if f not in ['issues_detected', 'links_detailed']]
+            if not regular_fields:
+                return jsonify({'success': False, 'error': 'No fields selected'}), 400
+
+            if export_format == 'json':
+                return Response(
+                    _stream_urls_json(urls, regular_fields),
+                    mimetype='application/json',
+                    headers={'Content-Disposition': f'attachment; filename=librecrawl_export_{timestamp}.json'}
+                )
+            elif export_format == 'xml':
+                return Response(
+                    _stream_urls_xml(urls, regular_fields),
+                    mimetype='application/xml',
+                    headers={'Content-Disposition': f'attachment; filename=librecrawl_export_{timestamp}.xml'}
+                )
+            else:
+                return Response(
+                    _stream_urls_csv(urls, regular_fields),
+                    mimetype='text/csv',
+                    headers={'Content-Disposition': f'attachment; filename=librecrawl_export_{timestamp}.csv'}
+                )
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _format_csv_value(value, field):
+    """Format a value for CSV export (same logic as generate_csv_export)"""
+    if field == 'analytics' and isinstance(value, dict):
+        parts = []
+        if value.get('gtag') or value.get('ga4_id'): parts.append('GA4')
+        if value.get('google_analytics'): parts.append('GA')
+        if value.get('gtm_id'): parts.append('GTM')
+        if value.get('facebook_pixel'): parts.append('FB')
+        if value.get('hotjar'): parts.append('HJ')
+        if value.get('mixpanel'): parts.append('MP')
+        return ', '.join(parts)
+    elif field in ('og_tags', 'twitter_tags') and isinstance(value, dict):
+        return f"{len(value)} tags" if value else ''
+    elif field == 'json_ld' and isinstance(value, list):
+        return f"{len(value)} scripts" if value else ''
+    elif field == 'images' and isinstance(value, list):
+        return f"{len(value)} images" if value else ''
+    elif field == 'internal_links' and isinstance(value, (int, float)):
+        return f"{int(value)} internal links" if value else '0 internal links'
+    elif field == 'external_links' and isinstance(value, (int, float)):
+        return f"{int(value)} external links" if value else '0 external links'
+    elif field in ('h2', 'h3') and isinstance(value, list):
+        return ', '.join(value[:3]) + ('...' if len(value) > 3 else '')
+    elif isinstance(value, (dict, list)):
+        return str(value)
+    return value
+
+
+def _stream_urls_csv(urls, fields):
+    """Generator that yields CSV rows one at a time"""
+    output = StringIO()
+    writer = csv.DictWriter(output, fieldnames=fields)
+    writer.writeheader()
+    yield output.getvalue()
+    output.truncate(0)
+    output.seek(0)
+
+    for url_data in urls:
+        row = {}
+        for field in fields:
+            value = url_data.get(field, '')
+            row[field] = _format_csv_value(value, field)
+        writer.writerow(row)
+        yield output.getvalue()
+        output.truncate(0)
+        output.seek(0)
+
+
+def _stream_urls_json(urls, fields):
+    """Generator that yields JSON array items one at a time"""
+    yield '{\n  "export_date": "' + time.strftime('%Y-%m-%d %H:%M:%S') + '",\n'
+    yield '  "total_urls": ' + str(len(urls)) + ',\n'
+    yield '  "fields": ' + json.dumps(fields) + ',\n'
+    yield '  "data": [\n'
+    for i, url_data in enumerate(urls):
+        filtered = {f: url_data.get(f, '') for f in fields}
+        prefix = ',\n' if i > 0 else ''
+        yield prefix + '    ' + json.dumps(filtered, default=str)
+    yield '\n  ]\n}\n'
+
+
+def _stream_urls_xml(urls, fields):
+    """Generator that yields XML elements one at a time"""
+    yield '<?xml version="1.0" encoding="UTF-8"?>\n'
+    yield '<librecrawl_export export_date="' + time.strftime('%Y-%m-%d %H:%M:%S') + '" total_urls="' + str(len(urls)) + '">\n'
+    yield '  <urls>\n'
+    for url_data in urls:
+        yield '    <url>\n'
+        for field in fields:
+            escaped = str(url_data.get(field, '')).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            yield '      <' + field + '>' + escaped + '</' + field + '>\n'
+        yield '    </url>\n'
+    yield '  </urls>\n'
+    yield '</librecrawl_export>\n'
+
+
+def _stream_links_csv(links):
+    """Generator that yields link CSV rows one at a time"""
+    fieldnames = ['source_url', 'target_url', 'anchor_text', 'is_internal', 'target_domain', 'target_status', 'placement']
+    output = StringIO()
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    yield output.getvalue()
+    output.truncate(0)
+    output.seek(0)
+
+    for link in links:
+        writer.writerow({
+            'source_url': link.get('source_url', ''),
+            'target_url': link.get('target_url', ''),
+            'anchor_text': link.get('anchor_text', ''),
+            'is_internal': 'Yes' if link.get('is_internal') else 'No',
+            'target_domain': link.get('target_domain', ''),
+            'target_status': link.get('target_status', 'Not crawled'),
+            'placement': link.get('placement', 'body')
+        })
+        yield output.getvalue()
+        output.truncate(0)
+        output.seek(0)
+
+
+def _stream_links_json(links):
+    """Generator that yields link JSON array items one at a time"""
+    yield '{\n  "export_date": "' + time.strftime('%Y-%m-%d %H:%M:%S') + '",\n'
+    yield '  "total_links": ' + str(len(links)) + ',\n'
+    yield '  "data": [\n'
+    for i, link in enumerate(links):
+        entry = {
+            'source_url': link.get('source_url', ''),
+            'target_url': link.get('target_url', ''),
+            'anchor_text': link.get('anchor_text', ''),
+            'is_internal': link.get('is_internal', False),
+            'target_domain': link.get('target_domain', ''),
+            'target_status': link.get('target_status', 'Not crawled'),
+            'placement': link.get('placement', 'body')
+        }
+        prefix = ',\n' if i > 0 else ''
+        yield prefix + '    ' + json.dumps(entry, default=str)
+    yield '\n  ]\n}\n'
+
+
+def _stream_issues_csv(issues):
+    """Generator that yields issue CSV rows one at a time"""
+    fieldnames = ['url', 'issue_type', 'severity', 'description', 'details']
+    output = StringIO()
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    yield output.getvalue()
+    output.truncate(0)
+    output.seek(0)
+
+    for issue in issues:
+        writer.writerow({
+            'url': issue.get('url', ''),
+            'issue_type': issue.get('issue_type', ''),
+            'severity': issue.get('severity', ''),
+            'description': issue.get('description', ''),
+            'details': str(issue.get('details', ''))
+        })
+        yield output.getvalue()
+        output.truncate(0)
+        output.seek(0)
+
+
+def _stream_issues_json(issues):
+    """Generator that yields issue JSON array items one at a time"""
+    yield '{\n  "export_date": "' + time.strftime('%Y-%m-%d %H:%M:%S') + '",\n'
+    yield '  "total_issues": ' + str(len(issues)) + ',\n'
+    yield '  "data": [\n'
+    for i, issue in enumerate(issues):
+        entry = {
+            'url': issue.get('url', ''),
+            'issue_type': issue.get('issue_type', ''),
+            'severity': issue.get('severity', ''),
+            'description': issue.get('description', ''),
+            'details': issue.get('details', '')
+        }
+        prefix = ',\n' if i > 0 else ''
+        yield prefix + '    ' + json.dumps(entry, default=str)
+    yield '\n  ]\n}\n'
+
+
+
 @app.route('/api/export_data', methods=['POST'])
 @login_required
 def export_data():
