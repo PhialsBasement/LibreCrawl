@@ -46,7 +46,7 @@ DEMO_MODE = args.demo or os.getenv('DEMO_MODE', '').lower() in ('true', '1', 'ye
 SKIP_AUTH = args.dangerously_skip_auth or os.getenv('DANGEROUSLY_SKIP_AUTH', '').lower() in ('true', '1', 'yes')
 
 app = Flask(__name__, template_folder='web/templates', static_folder='web/static')
-app.secret_key = 'librecrawl-secret-key-change-in-production'  # TODO: Use environment variable in production
+app.secret_key = os.getenv('SECRET_KEY', 'change-me-in-prod')
 
 # Enable compression for all responses
 Compress(app)
