@@ -386,8 +386,11 @@ class WebCrawler:
         # Save final data to database
         if self.db_save_enabled and self.crawl_id:
             self._save_batch_to_db(force=True)
-            from src.crawl_db import set_crawl_status
-            set_crawl_status(self.crawl_id, 'stopped')
+            from src.crawl_db import get_crawl_by_id, set_crawl_status
+            crawl = get_crawl_by_id(self.crawl_id)
+            # Don't overwrite 'completed' status (e.g. from cleanup thread)
+            if crawl and crawl['status'] != 'completed':
+                set_crawl_status(self.crawl_id, 'stopped')
 
         # Clean up JavaScript resources if enabled
         if self.js_renderer:
