@@ -5,7 +5,7 @@ services:
     ports:
       # In local mode: only localhost (127.0.0.1:5000)
       # In production mode: all interfaces (0.0.0.0:5000) for LAN/WAN access
-      - "${HOST_BINDING:-127.0.0.1}:5000:5000"
+      - "${HOST_BINDING:-127.0.0.1}:${EXTERNAL_PORT:-5000}:5000"
     volumes:
       # Persist the user database and settings
       - ./data:/app/data
