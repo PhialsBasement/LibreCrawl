@@ -10,3 +10,4 @@ psutil
 bcrypt==4.1.2
 markdown
 python-dotenv
+openai>=1.0.0
