@@ -188,6 +188,20 @@ def init_crawl_tables():
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_crawl_issues_category ON crawl_issues(crawl_id, category)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_crawl_queue_crawl ON crawl_queue(crawl_id)')
 
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS devops_tickets (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                url        TEXT NOT NULL,
+                issue      TEXT NOT NULL,
+                category   TEXT,
+                ticket_id  INTEGER NOT NULL,
+                ticket_url TEXT NOT NULL,
+                user_id    INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_devops_tickets_lookup ON devops_tickets (url, issue)')
+
         print("Crawl persistence tables initialized successfully")
 
 def create_crawl(user_id, session_id, base_url, base_domain, config_snapshot):
@@ -656,3 +670,50 @@ def get_database_size_mb():
     except Exception as e:
         print(f"Error getting database size: {e}")
         return 0
+
+def save_devops_ticket(url, issue, category, ticket_id, ticket_url, user_id=None):
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO devops_tickets (url, issue, category, ticket_id, ticket_url, user_id)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (url, issue, category, ticket_id, ticket_url, user_id))
+        return True
+    except Exception as e:
+        print(f"Error saving devops ticket: {e}")
+        return False
+
+def get_tickets_for_issues(pairs):
+    if not pairs:
+        return {}
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            placeholders = ' OR '.join(['(url = ? AND issue = ?)'] * len(pairs))
+            params = []
+            for p in pairs:
+                params.extend([p['url'], p['issue']])
+            cursor.execute(
+                f'SELECT url, issue, ticket_id, ticket_url FROM devops_tickets WHERE {placeholders}',
+                params
+            )
+            rows = cursor.fetchall()
+
+        db_lookup = {}
+        for row in rows:
+            db_lookup[f"{row['url']}|{row['issue']}"] = row
+
+        result = {}
+        for p in pairs:
+            key = f"{p['url']}|{p['issue']}"
+            if key in db_lookup:
+                row = db_lookup[key]
+                result[p['cache_key']] = {
+                    'ticket_id': row['ticket_id'],
+                    'ticket_url': row['ticket_url']
+                }
+        return result
+    except Exception as e:
+        print(f"Error getting tickets for issues: {e}")
+        return {}

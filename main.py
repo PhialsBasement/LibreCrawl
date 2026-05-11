@@ -9,6 +9,7 @@ import argparse
 import secrets
 import string
 import os
+import requests
 from io import StringIO
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
@@ -16,12 +17,20 @@ from flask_compress import Compress
 from functools import wraps
 from src.crawler import WebCrawler
 from src.settings_manager import SettingsManager
-from src.auth_db import init_db, create_user, authenticate_user, get_user_by_id, log_guest_crawl, get_guest_crawls_last_24h, verify_user, set_user_tier, create_verification_token, verify_token, get_user_by_email
-from src.email_service import send_verification_email, send_welcome_email
+from src.auth_db import init_db, create_user, authenticate_user, get_user_by_id, log_guest_crawl, get_guest_crawls_last_24h, verify_user, set_user_tier, create_verification_token, verify_token, get_user_by_email, create_magic_link, verify_magic_link
+from src.email_service import send_verification_email, send_welcome_email, send_magic_link_email
 
 # Load environment variables from .env file
 from dotenv import load_dotenv
 load_dotenv()
+
+# OpenAI client for AI-powered issue explanations
+try:
+    from openai import OpenAI
+    openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+except ImportError:
+    openai_client = None
+    print("Warning: openai package not installed. AI explanations will be unavailable.")
 
 # Parse command line arguments
 parser = argparse.ArgumentParser(description='LibreCrawl - SEO Spider Tool')
@@ -44,6 +53,8 @@ DISABLE_REGISTER = args.disable_register
 DISABLE_GUEST = args.disable_guest or os.getenv('DISABLE_GUEST', '').lower() in ('true', '1', 'yes')
 DEMO_MODE = args.demo or os.getenv('DEMO_MODE', '').lower() in ('true', '1', 'yes')
 SKIP_AUTH = args.dangerously_skip_auth or os.getenv('DANGEROUSLY_SKIP_AUTH', '').lower() in ('true', '1', 'yes')
+ALLOWED_EMAIL_DOMAIN = os.getenv('ALLOWED_EMAIL_DOMAIN', '')
+MAIN_APP_URL = os.getenv('MAIN_APP_URL', 'http://localhost:5000').rstrip('/')
 
 app = Flask(__name__, template_folder='web/templates', static_folder='web/static')
 app.secret_key = 'librecrawl-secret-key-change-in-production'  # TODO: Use environment variable in production
@@ -499,7 +510,7 @@ def login_page():
     # Redirect to app if already logged in
     if 'user_id' in session:
         return redirect(url_for('index'))
-    return render_template('login.html', registration_disabled=DISABLE_REGISTER, guest_disabled=DISABLE_GUEST, skip_auth=SKIP_AUTH)
+    return render_template('login.html', registration_disabled=DISABLE_REGISTER, guest_disabled=DISABLE_GUEST, skip_auth=SKIP_AUTH, allowed_domain=ALLOWED_EMAIL_DOMAIN)
 
 @app.route('/register')
 def register_page():
@@ -545,66 +556,48 @@ def verify_email():
                          app_source=app_source or 'main',
                          redirect_url=redirect_url)
 
+@app.route('/api/request-magic-link', methods=['POST'])
+def request_magic_link():
+    data = request.get_json() or {}
+    email = (data.get('email') or '').strip().lower()
+
+    if not email or '@' not in email:
+        return jsonify({'success': False, 'message': 'A valid email address is required.'})
+
+    if ALLOWED_EMAIL_DOMAIN and not email.endswith(f'@{ALLOWED_EMAIL_DOMAIN}'):
+        return jsonify({'success': False, 'message': f'Only @{ALLOWED_EMAIL_DOMAIN} addresses are allowed.'})
+
+    token = create_magic_link(email)
+    if not token:
+        return jsonify({'success': False, 'message': 'Failed to generate login link. Please try again.'})
+
+    magic_url = f"{MAIN_APP_URL}/auth/magic?token={token}"
+    send_magic_link_email(email, magic_url)
+    return jsonify({'success': True, 'message': 'Check your email for a login link.'})
+
+
+@app.route('/auth/magic', methods=['GET'])
+def magic_link_auth():
+    token = request.args.get('token', '').strip()
+    if not token:
+        return redirect(url_for('login_page', error='invalid'))
+
+    success, user_id, message = verify_magic_link(token)
+
+    if not success:
+        return redirect(url_for('login_page', error='invalid'))
+
+    user = get_user_by_id(user_id)
+    session['user_id'] = user_id
+    session['username'] = user['username']
+    session['tier'] = 'admin' if LOCAL_MODE else user['tier']
+    session.permanent = True
+    return redirect(url_for('index'))
+
+
 @app.route('/api/register', methods=['POST'])
 def register():
-    # Check if registration is disabled
-    if DISABLE_REGISTER:
-        return jsonify({'success': False, 'message': 'Registration is currently disabled'})
-
-    data = request.get_json()
-    username = data.get('username')
-    email = data.get('email')
-    password = data.get('password')
-
-    success, message, user_id = create_user(username, email, password)
-
-    # In local mode, auto-verify and set to admin tier
-    if success and LOCAL_MODE:
-        try:
-            from src.auth_db import verify_user, set_user_tier
-            # Get the user that was just created
-            import sqlite3
-            conn = sqlite3.connect(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'users.db'))
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cursor.execute('SELECT id FROM users WHERE username = ?', (username,))
-            user = cursor.fetchone()
-            conn.close()
-
-            if user:
-                verify_user(user['id'])
-                set_user_tier(user['id'], 'admin')
-                message = 'Account created and verified! You have admin access in local mode.'
-        except Exception as e:
-            print(f"Error during local mode auto-verification: {e}")
-            # Don't fail the registration, just log the error
-            # The account is still created successfully
-    elif success:
-        # Not in local mode - send verification email
-        is_resend = (message == 'resend')
-        try:
-            # Create verification token
-            token = create_verification_token(user_id, app_source='main')
-            if token:
-                # Send verification email
-                email_success, email_message = send_verification_email(
-                    email, username, token, app_source='main', is_resend=is_resend
-                )
-                if email_success:
-                    if is_resend:
-                        message = 'A verification email was already sent to this address. We\'ve updated your account details and sent a new verification link.'
-                    else:
-                        message = 'Registration successful! Please check your email to verify your account.'
-                else:
-                    message = 'Account created, but we could not send the verification email. Please contact support.'
-                    print(f"Email error: {email_message}")
-            else:
-                message = 'Account created, but verification token generation failed. Please contact support.'
-        except Exception as e:
-            print(f"Error sending verification email: {e}")
-            message = 'Account created, but we could not send the verification email. Please contact support.'
-
-    return jsonify({'success': success, 'message': message})
+    return jsonify({'success': False, 'message': 'Registration is not available. Use magic link login.'}), 410
 
 @app.route('/api/login', methods=['POST'])
 def login():
@@ -613,7 +606,6 @@ def login():
     password = data.get('password') or ''
 
     # Dangerously skip auth: accept any username with no password.
-    # Username is only used to separate per-user sessions.
     if SKIP_AUTH:
         if not username:
             return jsonify({'success': False, 'message': 'Username required'})
@@ -622,16 +614,7 @@ def login():
         success, message = skip_auth_login(username)
         return jsonify({'success': success, 'message': message})
 
-    success, message, user_data = authenticate_user(username, password)
-
-    if success:
-        session['user_id'] = user_data['id']
-        session['username'] = user_data['username']
-        # In local mode, always give admin tier
-        session['tier'] = 'admin' if LOCAL_MODE else user_data['tier']
-        session.permanent = True  # Remember login
-
-    return jsonify({'success': success, 'message': message})
+    return jsonify({'success': False, 'message': 'Password login is not available. Use OTP login.'}), 410
 
 @app.route('/api/guest-login', methods=['POST'])
 def guest_login():
@@ -1481,6 +1464,302 @@ def graceful_shutdown(signum, frame):
     print("Goodbye!")
     import sys
     sys.exit(0)
+
+CATEGORY_ROLE_MAP = {
+    'Technical':        'Web Developer',
+    'Performance':      'Web Developer',
+    'SEO':              'Webmaster',
+    'Content':          'Copywriter / Content Editor',
+    'Accessibility':    'Web Developer / Designer',
+    'Mobile':           'Web Developer / Designer',
+    'Social':           'Copywriter / Content Editor',
+    'Structured Data':  'Webmaster',
+    'Indexability':     'Webmaster',
+}
+
+@app.route('/api/explain_issue', methods=['POST'])
+@login_required
+def explain_issue():
+    """Generate AI-powered explanation and fix for a crawl issue using OpenAI"""
+    try:
+        # Check if OpenAI client is available
+        if openai_client is None:
+            return jsonify({
+                'success': False,
+                'error': 'OpenAI package not installed. Run: pip install openai>=1.0.0'
+            }), 400
+
+        # Check if API key is configured
+        api_key = os.getenv('OPENAI_API_KEY')
+        if not api_key:
+            return jsonify({
+                'success': False,
+                'error': 'OPENAI_API_KEY not configured in .env file'
+            }), 400
+
+        data = request.get_json()
+        url = data.get('url', '')
+        issue = data.get('issue', '')
+        category = data.get('category', '')
+        details = data.get('details', '')
+        page_context = data.get('page_context', {})
+
+        # Build context string from page data
+        context_parts = []
+        if page_context.get('title'):
+            context_parts.append(f"Page title: {page_context['title']}")
+        if page_context.get('word_count'):
+            context_parts.append(f"Word count: {page_context['word_count']}")
+        if page_context.get('meta_description'):
+            context_parts.append(f"Meta description: {page_context['meta_description'][:100]}")
+        if page_context.get('h1'):
+            context_parts.append(f"H1: {page_context['h1']}")
+
+        context_str = '\n'.join(context_parts) if context_parts else 'No additional context available'
+
+        # Build the prompt for OpenAI
+        prompt = f"""You are an SEO expert providing actionable advice. Analyze this specific issue:
+
+URL: {url}
+Issue: {issue}
+Category: {category}
+Details: {details}
+
+Page Context:
+{context_str}
+
+Provide a JSON response with exactly this structure:
+{{
+    "explanation": "2-3 sentence explanation of why this issue matters for SEO and user experience",
+    "how_to_fix": "Step-by-step fix instructions (3-5 bullet points, use markdown formatting with • for bullets)",
+    "priority": "high/medium/low based on SEO impact",
+    "role": "Most suitable role from this list only: Webmaster (SEO config, robots.txt, sitemaps, schema markup, indexability), Copywriter / Content Editor (written content, meta descriptions, social tags, OG metadata), Web Developer (code, performance, accessibility implementation, responsive design, ARIA), Designer (visual design, color contrast, typography, layout, UX)"
+}}
+
+Keep the explanation concise but specific to this URL. Use SEMRush-style actionable language."""
+
+        # Call OpenAI API
+        response = openai_client.chat.completions.create(
+            model='gpt-3.5-turbo',
+            messages=[
+                {'role': 'system', 'content': 'You are an SEO expert. Always respond with valid JSON.'},
+                {'role': 'user', 'content': prompt}
+            ],
+            max_tokens=500,
+            temperature=0.3,
+            response_format={'type': 'json_object'}
+        )
+
+        # Parse response
+        ai_response = json.loads(response.choices[0].message.content)
+
+        # Log token usage (optional, for cost tracking)
+        usage = response.usage
+        print(f"AI Explain - Tokens used: {usage.total_tokens} (in: {usage.prompt_tokens}, out: {usage.completion_tokens})")
+
+        return jsonify({
+            'success': True,
+            'explanation': ai_response.get('explanation', ''),
+            'how_to_fix': ai_response.get('how_to_fix', ''),
+            'priority': ai_response.get('priority', 'medium'),
+            'role': ai_response.get('role', ''),
+            'tokens_used': usage.total_tokens,
+            'model': 'gpt-3.5-turbo'
+        })
+
+    except Exception as e:
+        print(f"AI Explain Error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/create_devops_ticket', methods=['POST'])
+@login_required
+def create_devops_ticket():
+    """Create an Azure DevOps Product Backlog Item from a Page Diagnostics issue"""
+    import base64
+    from urllib.parse import urlparse, quote
+
+    org      = os.getenv('AZURE_DEVOPS_ORG')
+    pat      = os.getenv('AZURE_DEVOPS_PAT')
+    sm_email = os.getenv('AZURE_DEVOPS_SM_EMAIL')
+
+    missing = [k for k, v in {
+        'AZURE_DEVOPS_ORG':      org,
+        'AZURE_DEVOPS_PAT':      pat,
+        'AZURE_DEVOPS_SM_EMAIL': sm_email,
+    }.items() if not v]
+    if missing:
+        return jsonify({'success': False, 'error': f'Missing .env variables: {", ".join(missing)}'}), 400
+
+    data        = request.get_json()
+    url         = data.get('url', '')
+    issue       = data.get('issue', '')
+    category    = data.get('category', '')
+    issue_type  = data.get('issue_type', 'warning')
+    ai_exp      = data.get('ai_explanation', '')
+    ai_fix      = data.get('ai_how_to_fix', '')
+    ai_priority = data.get('ai_priority', 'medium')
+
+    project   = data.get('project_override') or os.getenv('AZURE_DEVOPS_PROJECT', '')
+    parent_id = data.get('parent_id_override') or os.getenv('AZURE_DEVOPS_PARENT_ID', '')
+
+    if not project:
+        return jsonify({'success': False, 'error': 'No Azure project selected. Use the Project dropdown next to the Clear button.'}), 400
+    if not parent_id:
+        return jsonify({'success': False, 'error': 'No Feature selected. Use the Feature dropdown next to the Clear button.'}), 400
+
+    if issue_type == 'error':
+        az_priority, sup_label, moscow = (1, 'Critical', 'Must') if ai_priority == 'high' else (2, 'High', 'Should')
+    elif issue_type == 'warning':
+        az_priority, sup_label, moscow = 3, 'Warning', 'Could'
+    else:
+        az_priority, sup_label, moscow = 4, 'Informational', "Won't"
+
+    valid_roles = {'Webmaster', 'Copywriter / Content Editor', 'Web Developer', 'Designer'}
+    ai_role = data.get('ai_role', '')
+    role = ai_role if ai_role in valid_roles else CATEGORY_ROLE_MAP.get(category, 'Web Developer')
+    fix_items = [p.strip() for p in ai_fix.split('•') if p.strip()]
+    fix_html  = '<ul>' + ''.join(f'<li>{item}</li>' for item in fix_items) + '</ul>' \
+                if fix_items else f'<p>{ai_fix}</p>'
+
+    parsed    = urlparse(url)
+    short_url = (parsed.path.rstrip('/') or parsed.netloc)[-60:]
+
+    description_html = (
+        f'<h3>🧩 Summary</h3>'
+        f'<p>{ai_exp} This issue was detected by LibreCrawl on '
+        f'<a href="{url}">{url}</a>. '
+        f'Category: {category}. Severity: {sup_label} — Priority {az_priority} ({moscow}).</p>'
+        f'<h3>👥 Responsibility</h3>'
+        f'<ul><li>{role} — required</li>'
+        f'<li>Scrum Master to review and delegate based on role above</li></ul>'
+        f'<h3>⚙️ Implementation Direction</h3>'
+        f'{fix_html}'
+    )
+
+    ac_html = (
+        f'<ul>'
+        f'<li>Issue "{issue}" should no longer be detected by LibreCrawl on {url}</li>'
+        f'<li>Page should pass {category} validation in the next scheduled crawl</li>'
+        f'<li>Verified and closed within sprint by Scrum Master</li>'
+        f'</ul>'
+    )
+
+    title     = f'[{category}] {issue} — {short_url}'
+    token     = base64.b64encode(f':{pat}'.encode()).decode()
+    work_type = quote('Product Backlog Item')
+    api_url   = f'https://dev.azure.com/{org}/{quote(project)}/_apis/wit/workitems/${work_type}?api-version=7.1'
+
+    headers = {
+        'Content-Type': 'application/json-patch+json',
+        'Authorization': f'Basic {token}',
+    }
+    body = [
+        {'op': 'add', 'path': '/fields/System.Title',                             'value': title},
+        {'op': 'add', 'path': '/fields/System.Description',                       'value': description_html},
+        {'op': 'add', 'path': '/fields/Microsoft.VSTS.Common.Priority',           'value': az_priority},
+        {'op': 'add', 'path': '/fields/System.AssignedTo',                        'value': sm_email},
+        {'op': 'add', 'path': '/fields/Microsoft.VSTS.Common.AcceptanceCriteria', 'value': ac_html},
+        {'op': 'add', 'path': '/relations/-', 'value': {
+            'rel': 'System.LinkTypes.Hierarchy-Reverse',
+            'url': f'https://dev.azure.com/{org}/_apis/wit/workitems/{parent_id}',
+            'attributes': {'comment': 'Created by LibreCrawl Page Diagnostics'}
+        }},
+    ]
+
+    try:
+        resp = requests.post(api_url, headers=headers, json=body, timeout=10)
+        resp.raise_for_status()
+        ticket_id  = resp.json()['id']
+        ticket_url = f'https://dev.azure.com/{org}/{quote(project)}/_workitems/edit/{ticket_id}'
+        from src.crawl_db import save_devops_ticket
+        save_devops_ticket(url, issue, category, ticket_id, ticket_url, user_id=session.get('user_id'))
+        return jsonify({'success': True, 'ticket_id': ticket_id, 'ticket_url': ticket_url, 'title': title})
+    except requests.exceptions.HTTPError:
+        return jsonify({'success': False, 'error': f'Azure DevOps {resp.status_code}: {resp.text}'}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/devops_tickets/check', methods=['POST'])
+@login_required
+def check_devops_tickets():
+    try:
+        from src.crawl_db import get_tickets_for_issues
+        data = request.get_json()
+        pairs = data.get('pairs', [])
+        tickets = get_tickets_for_issues(pairs)
+        return jsonify({'success': True, 'tickets': tickets})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/devops/projects', methods=['GET'])
+@login_required
+def devops_projects():
+    import base64
+    from urllib.parse import quote
+    org = os.getenv('AZURE_DEVOPS_ORG')
+    pat = os.getenv('AZURE_DEVOPS_PAT')
+    if not org or not pat:
+        return jsonify({'success': False, 'error': 'AZURE_DEVOPS_ORG or AZURE_DEVOPS_PAT not configured'}), 400
+    token   = base64.b64encode(f':{pat}'.encode()).decode()
+    api_url = f'https://dev.azure.com/{org}/_apis/projects?api-version=7.1&$top=100'
+    try:
+        resp = requests.get(api_url, headers={'Authorization': f'Basic {token}'}, timeout=10)
+        resp.raise_for_status()
+        projects = [{'id': p['id'], 'name': p['name']} for p in resp.json().get('value', [])]
+        return jsonify({'success': True, 'projects': projects})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/devops/features', methods=['GET'])
+@login_required
+def devops_features():
+    import base64
+    from urllib.parse import quote
+    org     = os.getenv('AZURE_DEVOPS_ORG')
+    pat     = os.getenv('AZURE_DEVOPS_PAT')
+    project = request.args.get('project', '')
+    if not org or not pat:
+        return jsonify({'success': False, 'error': 'AZURE_DEVOPS_ORG or AZURE_DEVOPS_PAT not configured'}), 400
+    if not project:
+        return jsonify({'success': False, 'error': 'project query param required'}), 400
+    token    = base64.b64encode(f':{pat}'.encode()).decode()
+    headers  = {'Authorization': f'Basic {token}', 'Content-Type': 'application/json'}
+    wiql_url = f'https://dev.azure.com/{org}/{quote(project)}/_apis/wit/wiql?api-version=7.1&$top=200'
+    wiql_body = {'query': (
+        "SELECT [System.Id] FROM WorkItems "
+        "WHERE [System.WorkItemType] IN ('Epic', 'Feature') "
+        "AND [System.TeamProject] = @project "
+        "AND [System.State] <> 'Removed' "
+        "ORDER BY [System.Title]"
+    )}
+    try:
+        wiql_resp = requests.post(wiql_url, headers=headers, json=wiql_body, timeout=10)
+        wiql_resp.raise_for_status()
+        ids = [str(item['id']) for item in wiql_resp.json().get('workItems', [])][:200]
+        if not ids:
+            return jsonify({'success': True, 'features': []})
+        batch_url  = (
+            f'https://dev.azure.com/{org}/{quote(project)}/_apis/wit/workitems'
+            f'?ids={",".join(ids)}&fields=System.Id,System.Title,System.WorkItemType&api-version=7.1'
+        )
+        batch_resp = requests.get(batch_url, headers=headers, timeout=10)
+        batch_resp.raise_for_status()
+        features = [
+            {
+                'id':   item['id'],
+                'name': item['fields']['System.Title'],
+                'type': item['fields'].get('System.WorkItemType', '')
+            }
+            for item in batch_resp.json().get('value', [])
+        ]
+        return jsonify({'success': True, 'features': features})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 def main():
     import signal

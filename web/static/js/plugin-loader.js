@@ -46,6 +46,7 @@ class PluginLoader {
         const manualPlugins = [
             // Add your plugin files here, e.g.:
             'e-e-a-t.js',
+            'page-diagnostics.js',
             // 'content-quality.js',
         ];
 
@@ -225,6 +226,13 @@ class PluginLoader {
         const tabHeader = document.querySelector('.tab-header');
         const tabContent = document.querySelector('.tab-content');
 
+        // Fix tab header overflow on small screens
+        if (tabHeader) {
+            tabHeader.style.overflowX = 'auto';
+            tabHeader.style.flexWrap = 'nowrap';
+            tabHeader.style.scrollbarWidth = 'thin';
+        }
+
         if (!tabHeader || !tabContent) {
             console.error('Tab containers not found');
             return;
@@ -234,6 +242,7 @@ class PluginLoader {
         const tabBtn = document.createElement('button');
         tabBtn.className = 'tab-btn';
         tabBtn.setAttribute('data-plugin-id', plugin.id);
+        tabBtn.style.flexShrink = '0';
 
         const icon = plugin.tab.icon ? `${plugin.tab.icon} ` : '';
         tabBtn.textContent = `${icon}${plugin.tab.label}`;

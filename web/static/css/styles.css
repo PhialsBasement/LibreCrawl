@@ -200,6 +200,22 @@ body {
     background: rgba(255, 255, 255, 0.15);
 }
 
+.devops-dropdown {
+    background: #1f2937;
+    color: #e5e7eb;
+    border: 1px solid #374151;
+    padding: 8px 10px;
+    border-radius: 8px;
+    font-size: 13px;
+    cursor: pointer;
+    width: 180px;
+}
+
+.devops-dropdown:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
 .btn-success {
     background: linear-gradient(135deg, #10b981, #059669);
     color: #ffffff;
@@ -364,6 +380,9 @@ body {
     backdrop-filter: blur(10px);
     border-bottom: 1px solid #3a4063;
     padding: 0 20px;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: thin;
 }
 
 .tab-btn {
@@ -377,6 +396,7 @@ body {
     border-bottom: 3px solid transparent;
     transition: all 0.2s ease;
     letter-spacing: 0.025em;
+    flex-shrink: 0;
 }
 
 .tab-btn:hover {

@@ -59,6 +59,9 @@ async function initializeApp() {
     // Load user info
     loadUserInfo();
 
+    // Load Azure DevOps project/board selectors if configured
+    loadDevopsProjects();
+
     // DEBUG: Check sessionStorage
     console.log('DEBUG: Checking sessionStorage force_ui_refresh:', sessionStorage.getItem('force_ui_refresh'));
 
@@ -2295,3 +2298,91 @@ function renderIssueRow(row, issue, index) {
         <td style="word-break: break-word;" title="${issue.details}">${issue.details}</td>
     `;
 }
+
+// ── Azure DevOps project / feature selectors ────────────────────────────────
+
+window.devopsContext  = { project: '', parentId: '', parentName: '' };
+window.devopsFeatures = [];
+
+async function loadDevopsProjects() {
+    const selectors  = document.getElementById('devops-selectors');
+    const projectSel = document.getElementById('devops-project-select');
+    try {
+        const resp = await fetch('/api/devops/projects');
+        const data = await resp.json();
+        if (!data.success || !data.projects.length) return;
+
+        selectors.style.display = 'flex';
+        projectSel.innerHTML = '<option value="">Azure Project…</option>' +
+            data.projects.map(p => `<option value="${p.name}">${p.name}</option>`).join('');
+
+        const saved = localStorage.getItem('devops_project');
+        if (saved && data.projects.some(p => p.name === saved)) {
+            projectSel.value = saved;
+            await loadDevopsFeatures(saved);
+        }
+    } catch (_) {}
+}
+
+async function loadDevopsFeatures(project) {
+    const boardInput = document.getElementById('devops-board-input');
+    const datalist   = document.getElementById('devops-feature-list');
+    boardInput.disabled    = true;
+    boardInput.placeholder = 'Loading…';
+    datalist.innerHTML     = '';
+    window.devopsFeatures  = [];
+    try {
+        const resp = await fetch(`/api/devops/features?project=${encodeURIComponent(project)}`);
+        const data = await resp.json();
+        boardInput.placeholder = 'Feature…';
+        if (!data.success) return;
+
+        window.devopsFeatures = data.features;
+        datalist.innerHTML = data.features
+            .map(f => `<option value="${f.name}">${f.name} (${f.type}) #${f.id}</option>`)
+            .join('');
+        boardInput.disabled = false;
+
+        const savedId = localStorage.getItem('devops_parent_id');
+        const saved   = data.features.find(f => String(f.id) === savedId);
+        if (saved) {
+            boardInput.value = saved.name;
+            window.devopsContext = { project, parentId: String(saved.id), parentName: saved.name };
+        }
+    } catch (_) { boardInput.placeholder = 'Feature…'; }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const projectSel = document.getElementById('devops-project-select');
+    const boardInput = document.getElementById('devops-board-input');
+    const refreshBtn = document.getElementById('devops-refresh');
+
+    if (projectSel) {
+        projectSel.addEventListener('change', async () => {
+            const project = projectSel.value;
+            localStorage.setItem('devops_project', project);
+            window.devopsContext = { project, parentId: '', parentName: '' };
+            if (boardInput) { boardInput.value = ''; boardInput.disabled = true; }
+            if (project) await loadDevopsFeatures(project);
+        });
+    }
+
+    if (boardInput) {
+        boardInput.addEventListener('input', () => {
+            const name = boardInput.value.trim();
+            const feat = window.devopsFeatures.find(f => f.name === name);
+            if (feat) {
+                localStorage.setItem('devops_parent_id', String(feat.id));
+                window.devopsContext.parentId   = String(feat.id);
+                window.devopsContext.parentName = feat.name;
+            } else {
+                window.devopsContext.parentId   = '';
+                window.devopsContext.parentName = '';
+            }
+        });
+    }
+
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', () => loadDevopsProjects());
+    }
+});
