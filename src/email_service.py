@@ -196,6 +196,59 @@ The LibreCrawl Team
         print(f"Error sending email: {e}")
         return False, f"Failed to send email: {str(e)}"
 
+def send_magic_link_email(to_email: str, magic_url: str) -> Tuple[bool, str]:
+    """Send a magic login link to the given email address."""
+    if not SMTP_USER or not SMTP_PASSWORD:
+        print(f"Magic link for {to_email}: {magic_url}")
+        return False, "Email service not configured"
+
+    try:
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = 'Your LibreCrawl login link'
+        msg['From'] = f'{SMTP_FROM_NAME} <{SMTP_FROM}>'
+        msg['To'] = to_email
+
+        text = f"Click the link below to log in to LibreCrawl:\n\n{magic_url}\n\nThis link expires in 30 minutes and can only be used once."
+
+        html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #333; max-width: 480px; margin: 0 auto; padding: 20px; }}
+        .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 24px; text-align: center; border-radius: 10px 10px 0 0; }}
+        .content {{ background: #f9fafb; padding: 32px; border-radius: 0 0 10px 10px; text-align: center; }}
+        .button {{ display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white !important; padding: 16px 40px; text-decoration: none !important; border-radius: 8px; font-weight: 700; font-size: 16px; margin: 20px 0; }}
+        .url {{ color: #6b7280; font-size: 12px; word-break: break-all; margin-top: 16px; }}
+        .note {{ color: #9ca3af; font-size: 13px; margin-top: 16px; }}
+    </style>
+</head>
+<body>
+    <div class="header"><h1>LibreCrawl</h1></div>
+    <div class="content">
+        <p>Click the button below to sign in:</p>
+        <a href="{magic_url}" class="button">Log In to LibreCrawl</a>
+        <p class="url">{magic_url}</p>
+        <p class="note">Expires in 30 minutes. Single use only.</p>
+    </div>
+</body>
+</html>"""
+
+        msg.attach(MIMEText(text, 'plain'))
+        msg.attach(MIMEText(html, 'html'))
+
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            if SMTP_PORT != 25 and SMTP_USER and SMTP_PASSWORD:
+                server.starttls()
+                server.login(SMTP_USER, SMTP_PASSWORD)
+            server.send_message(msg)
+
+        return True, "Magic link sent"
+
+    except Exception as e:
+        print(f"Error sending magic link email: {e}")
+        return False, f"Failed to send email: {str(e)}"
+
+
 def send_welcome_email(to_email: str, username: str, app_source: str = 'main') -> Tuple[bool, str]:
     """
     Send welcome email after verification

@@ -21,6 +21,8 @@ services:
       # DANGEROUS: Set to "true" to allow login as any username with no password
       # (username only used to separate sessions). Do NOT use in production.
       - DANGEROUSLY_SKIP_AUTH=${DANGEROUSLY_SKIP_AUTH:-false}
+      # Email domain allowed to log in
+      - ALLOWED_EMAIL_DOMAIN=${ALLOWED_EMAIL_DOMAIN}
       # Uncomment these for SMTP sending
       # - SMTP_HOST=${SMTP_HOST}
       # - SMTP_PORT=${SMTP_PORT}

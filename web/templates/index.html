@@ -57,6 +57,14 @@
                         </svg>
                         Clear
                     </button>
+                    <div id="devops-selectors" style="display:none; align-items:center; gap:6px;">
+                        <select id="devops-project-select" class="devops-dropdown" title="Azure Project">
+                            <option value="">Azure Project…</option>
+                        </select>
+                        <input id="devops-board-input" list="devops-feature-list" class="devops-dropdown" placeholder="Feature…" autocomplete="off" disabled title="Type to search — pick the Feature PBIs will be added under">
+                        <datalist id="devops-feature-list"></datalist>
+                        <button id="devops-refresh" class="btn btn-secondary" style="padding:8px 10px;" title="Refresh Azure projects and features">↻</button>
+                    </div>
                 </div>
             </div>
             <div class="progress-container" id="progressContainer" style="display: none;">

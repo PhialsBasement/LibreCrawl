@@ -61,6 +61,7 @@
         }
 
         input[type="text"],
+        input[type="email"],
         input[type="password"] {
             width: 100%;
             padding: 12px 16px;
@@ -72,10 +73,18 @@
         }
 
         input[type="text"]:focus,
+        input[type="email"]:focus,
         input[type="password"]:focus {
             outline: none;
             border-color: #667eea;
             box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        input#code {
+            font-size: 28px;
+            font-weight: 600;
+            letter-spacing: 10px;
+            text-align: center;
         }
 
         .btn {
@@ -107,6 +116,21 @@
             transform: none;
         }
 
+        .btn-secondary {
+            background: none;
+            border: 2px solid #e5e7eb;
+            color: #6b7280;
+            margin-top: 12px;
+            font-size: 14px;
+        }
+
+        .btn-secondary:hover {
+            background: #f9fafb;
+            box-shadow: none;
+            transform: none;
+            border-color: #d1d5db;
+        }
+
         .btn-guest {
             background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
             margin-top: 12px;
@@ -116,28 +140,15 @@
             box-shadow: 0 8px 16px rgba(107, 114, 128, 0.3);
         }
 
-        .divider {
+        .email-sent-hint {
             text-align: center;
-            margin: 24px 0;
-            color: #9ca3af;
-            font-size: 14px;
-        }
-
-        .register-link {
-            text-align: center;
-            margin-top: 24px;
             color: #6b7280;
-            font-size: 14px;
+            font-size: 13px;
+            margin-bottom: 20px;
         }
 
-        .register-link a {
-            color: #667eea;
-            text-decoration: none;
-            font-weight: 600;
-        }
-
-        .register-link a:hover {
-            text-decoration: underline;
+        .email-sent-hint strong {
+            color: #374151;
         }
 
         .alert {
@@ -163,6 +174,30 @@
         .alert.show {
             display: block;
         }
+
+        .divider {
+            text-align: center;
+            margin: 24px 0;
+            color: #9ca3af;
+            font-size: 14px;
+        }
+
+        .register-link {
+            text-align: center;
+            margin-top: 24px;
+            color: #6b7280;
+            font-size: 14px;
+        }
+
+        .register-link a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .register-link a:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
@@ -178,25 +213,56 @@
         <div class="alert alert-error show" style="text-align: left;">
             <strong>⚠️ Authentication is disabled.</strong>
             Anyone can log in as any username with no password.
-            The username is only used to separate sessions.
         </div>
-        {% endif %}
 
+        <form id="skipAuthForm">
+            <div class="form-group">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" required autofocus maxlength="50">
+            </div>
+            <button type="submit" class="btn" id="skipAuthBtn">Continue</button>
+        </form>
+
+        {% else %}
+
+        <!-- Normal login -->
         <form id="loginForm">
             <div class="form-group">
                 <label for="username">Username</label>
                 <input type="text" id="username" name="username" required autofocus maxlength="50">
             </div>
-
-            {% if not skip_auth %}
             <div class="form-group">
                 <label for="password">Password</label>
                 <input type="password" id="password" name="password" required>
             </div>
-            {% endif %}
-
-            <button type="submit" class="btn" id="loginBtn">{{ 'Continue' if skip_auth else 'Login' }}</button>
+            <button type="submit" class="btn" id="loginBtn">Login</button>
         </form>
+
+        <div class="divider">or sign in with email</div>
+
+        <!-- Step 1: Email -->
+        <div id="stepEmail">
+            <form id="emailForm">
+                <div class="form-group">
+                    <label for="email">Work Email</label>
+                    <input type="email" id="email" name="email" required autofocus
+                        placeholder="you@{{ allowed_domain or 'yourcompany.com' }}">
+                </div>
+                <button type="submit" class="btn" id="sendLinkBtn">Send Login Link</button>
+            </form>
+        </div>
+
+        <!-- Step 2: Check inbox (shown after link is sent) -->
+        <div id="stepSent" style="display:none;">
+            <p class="email-sent-hint">
+                A login link has been sent to <strong id="emailHint"></strong>.<br>
+                Click it to sign in — it expires in 30 minutes.
+            </p>
+            <button type="button" class="btn btn-secondary" id="resendBtn">Resend Link</button>
+            <button type="button" class="btn btn-secondary" id="backBtn" style="margin-top:8px;">Use a different email</button>
+        </div>
+
+        {% endif %}
 
         {% if not guest_disabled and not skip_auth %}
         <button class="btn btn-guest" id="guestBtn">Continue as Guest (3 crawls/24h)</button>
@@ -210,59 +276,165 @@
     </div>
 
     <script>
-        const form = document.getElementById('loginForm');
-        const loginBtn = document.getElementById('loginBtn');
-        const alert = document.getElementById('alert');
-        const skipAuth = {{ 'true' if skip_auth else 'false' }};
-        const defaultLoginText = loginBtn.textContent;
+        const alertEl = document.getElementById('alert');
 
         function showAlert(message, type) {
-            alert.textContent = message;
-            alert.className = `alert alert-${type} show`;
+            alertEl.textContent = message;
+            alertEl.className = `alert alert-${type} show`;
         }
 
         function hideAlert() {
-            alert.className = 'alert';
+            alertEl.className = 'alert';
         }
 
-        form.addEventListener('submit', async (e) => {
+        {% if skip_auth %}
+        document.getElementById('skipAuthForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             hideAlert();
-
-            const username = document.getElementById('username').value;
-            const passwordEl = document.getElementById('password');
-            const password = passwordEl ? passwordEl.value : '';
-
-            loginBtn.disabled = true;
-            loginBtn.textContent = skipAuth ? 'Continuing...' : 'Logging in...';
+            const btn = document.getElementById('skipAuthBtn');
+            btn.disabled = true;
+            btn.textContent = 'Continuing...';
 
             try {
-                const response = await fetch('/api/login', {
+                const res = await fetch('/api/login', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: document.getElementById('username').value, password: '' })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    window.location.href = '/';
+                } else {
+                    showAlert(data.message, 'error');
+                    btn.disabled = false;
+                    btn.textContent = 'Continue';
+                }
+            } catch {
+                showAlert('An error occurred. Please try again.', 'error');
+                btn.disabled = false;
+                btn.textContent = 'Continue';
+            }
+        });
+
+        {% else %}
+
+        let pendingEmail = '';
+
+        async function requestLink(email) {
+            const res = await fetch('/api/request-magic-link', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email })
+            });
+            return res.json();
+        }
+
+        document.getElementById('emailForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            hideAlert();
+            const email = document.getElementById('email').value.trim();
+            const btn = document.getElementById('sendLinkBtn');
+            btn.disabled = true;
+            btn.textContent = 'Sending...';
+
+            try {
+                const data = await requestLink(email);
+                if (data.success) {
+                    pendingEmail = email;
+                    document.getElementById('emailHint').textContent = email;
+                    document.getElementById('stepEmail').style.display = 'none';
+                    document.getElementById('stepSent').style.display = 'block';
+                } else {
+                    showAlert(data.message, 'error');
+                    btn.disabled = false;
+                    btn.textContent = 'Send Login Link';
+                }
+            } catch {
+                showAlert('An error occurred. Please try again.', 'error');
+                btn.disabled = false;
+                btn.textContent = 'Send Login Link';
+            }
+        });
+
+        document.getElementById('resendBtn').addEventListener('click', async () => {
+            hideAlert();
+            const btn = document.getElementById('resendBtn');
+            btn.disabled = true;
+            btn.textContent = 'Sending...';
+
+            try {
+                const data = await requestLink(pendingEmail);
+                if (data.success) {
+                    showAlert('New link sent.', 'success');
+                } else {
+                    showAlert(data.message, 'error');
+                }
+            } catch {
+                showAlert('An error occurred. Please try again.', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Resend Link';
+            }
+        });
+
+        document.getElementById('backBtn').addEventListener('click', () => {
+            hideAlert();
+            pendingEmail = '';
+            document.getElementById('stepSent').style.display = 'none';
+            document.getElementById('stepEmail').style.display = 'block';
+            document.getElementById('sendLinkBtn').disabled = false;
+            document.getElementById('sendLinkBtn').textContent = 'Send Login Link';
+            document.getElementById('email').value = '';
+            document.getElementById('email').focus();
+        });
+
+        const loginBtn = document.getElementById('loginBtn');
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            hideAlert();
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            loginBtn.disabled = true;
+            loginBtn.textContent = 'Logging in...';
+
+            try {
+                const res = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ username, password })
                 });
-
-                const data = await response.json();
-
+                const data = await res.json();
                 if (data.success) {
                     showAlert(data.message, 'success');
-                    setTimeout(() => {
-                        window.location.href = '/';
-                    }, 500);
+                    setTimeout(() => { window.location.href = '/'; }, 500);
                 } else {
                     showAlert(data.message, 'error');
                     loginBtn.disabled = false;
-                    loginBtn.textContent = defaultLoginText;
+                    loginBtn.textContent = 'Login';
                 }
-            } catch (error) {
+            } catch {
                 showAlert('An error occurred. Please try again.', 'error');
                 loginBtn.disabled = false;
-                loginBtn.textContent = defaultLoginText;
+                loginBtn.textContent = 'Login';
             }
         });
+
+        const registrationDisabled = {{ 'true' if registration_disabled else 'false' }};
+        const registerLink = document.getElementById('registerLink');
+        if (registrationDisabled && registerLink) {
+            registerLink.addEventListener('click', (e) => {
+                e.preventDefault();
+                window.alert('Registrations are disabled');
+            });
+        }
+
+        {% endif %}
+
+        // Show error from magic link redirect (e.g. expired or invalid token)
+        const urlError = new URLSearchParams(window.location.search).get('error');
+        if (urlError === 'invalid') {
+            showAlert('This login link is invalid or has expired. Please request a new one.', 'error');
+        }
 
         // Guest login
         const guestBtn = document.getElementById('guestBtn');
@@ -272,42 +444,24 @@
             guestBtn.textContent = 'Entering as guest...';
 
             try {
-                const response = await fetch('/api/guest-login', {
+                const res = await fetch('/api/guest-login', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
+                    headers: { 'Content-Type': 'application/json' }
                 });
-
-                const data = await response.json();
-
+                const data = await res.json();
                 if (data.success) {
-                    showAlert('Entering as guest...', 'success');
-                    setTimeout(() => {
-                        window.location.href = '/';
-                    }, 500);
+                    window.location.href = '/';
                 } else {
                     showAlert(data.message || 'Failed to enter as guest', 'error');
                     guestBtn.disabled = false;
                     guestBtn.textContent = 'Continue as Guest (3 crawls/24h)';
                 }
-            } catch (error) {
+            } catch {
                 showAlert('An error occurred. Please try again.', 'error');
                 guestBtn.disabled = false;
                 guestBtn.textContent = 'Continue as Guest (3 crawls/24h)';
             }
         });
-
-        // Check if registration is disabled
-        const registrationDisabled = {{ 'true' if registration_disabled else 'false' }};
-        const registerLink = document.getElementById('registerLink');
-
-        if (registrationDisabled && registerLink) {
-            registerLink.addEventListener('click', (e) => {
-                e.preventDefault();
-                window.alert('Registrations are disabled');
-            });
-        }
     </script>
 </body>
 </html>
