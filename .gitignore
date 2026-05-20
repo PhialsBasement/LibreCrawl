@@ -3,3 +3,5 @@
 .claude/settings.local.json
 users.db
 data/*.db
+
+.env
