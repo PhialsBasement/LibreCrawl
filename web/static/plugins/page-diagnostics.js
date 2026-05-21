@@ -216,25 +216,107 @@ LibreCrawlPlugin.register({
             </div>
         `;
 
-        // Attach filter event listeners (category + URL search)
-        const filterSelect = container.querySelector('#pd-category-filter');
+        // Attach filter event listeners (category + type + URL search)
+        const categoryFilterSelect = container.querySelector('#pd-category-filter');
+        const typeFilterSelect = container.querySelector('#pd-type-filter');
         const urlSearchInput = container.querySelector('#pd-url-search');
 
+        const HTTP_ERROR_PATTERNS = ['Client Error', 'Server Error', 'Redirect', 'DNS Not Found', 'Connection Refused', 'Request Timeout', 'SSL/TLS Error', 'Broken Image', '404 Error'];
+
         const applyFilters = () => {
-            const selected = filterSelect ? filterSelect.value : 'All';
+            const selectedCategory = categoryFilterSelect ? categoryFilterSelect.value : 'All';
+            const selectedType = typeFilterSelect ? typeFilterSelect.value : 'All';
             const urlQuery = urlSearchInput ? urlSearchInput.value.trim().toLowerCase() : '';
             const table = container.querySelector('#pd-issues-table');
             if (!table) return;
             table.querySelectorAll('tbody tr').forEach(row => {
-                const categoryMatch = selected === 'All' || row.dataset.category === selected;
+                const categoryMatch = selectedCategory === 'All' || row.dataset.category === selectedCategory;
+                let typeMatch;
+                if (selectedType === 'All') {
+                    typeMatch = true;
+                } else if (selectedType === 'http_error') {
+                    typeMatch = HTTP_ERROR_PATTERNS.some(pattern => (row.dataset.issueName || '').includes(pattern));
+                } else {
+                    typeMatch = row.dataset.type === selectedType;
+                }
                 const urlAnchor = row.querySelector('a');
                 const urlMatch = !urlQuery || (urlAnchor && urlAnchor.getAttribute('href').toLowerCase().includes(urlQuery));
-                row.style.display = (categoryMatch && urlMatch) ? '' : 'none';
+                row.style.display = (categoryMatch && typeMatch && urlMatch) ? '' : 'none';
             });
         };
 
-        if (filterSelect) filterSelect.addEventListener('change', applyFilters);
+        if (categoryFilterSelect) categoryFilterSelect.addEventListener('change', applyFilters);
+        if (typeFilterSelect) typeFilterSelect.addEventListener('change', applyFilters);
         if (urlSearchInput) urlSearchInput.addEventListener('input', applyFilters);
+
+        const exportBtn = container.querySelector('#pd-export-csv');
+        if (exportBtn) {
+            exportBtn.addEventListener('click', async () => {
+                const selectedCategory = categoryFilterSelect ? categoryFilterSelect.value : 'All';
+                const selectedType = typeFilterSelect ? typeFilterSelect.value : 'All';
+
+                const filteredIssues = (issues || []).filter(issue => {
+                    const categoryMatch = selectedCategory === 'All' || issue.category === selectedCategory;
+                    let typeMatch;
+                    if (selectedType === 'All') {
+                        typeMatch = true;
+                    } else if (selectedType === 'http_error') {
+                        typeMatch = HTTP_ERROR_PATTERNS.some(p => (issue.issue || '').includes(p));
+                    } else {
+                        typeMatch = issue.type === selectedType;
+                    }
+                    return categoryMatch && typeMatch;
+                });
+
+                exportBtn.disabled = true;
+                exportBtn.textContent = 'Verifying...';
+
+                let cleanedIssues = filteredIssues;
+                try {
+                    const probeResponse = await fetch('/api/probe_http_issues', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ issues: filteredIssues })
+                    });
+                    const probeData = await probeResponse.json();
+                    if (probeData.success && probeData.resolved_urls?.length > 0) {
+                        const resolvedKeys = new Set(
+                            probeData.resolved_urls.map(u => u.url + '|' + u.issue)
+                        );
+                        cleanedIssues = filteredIssues.filter(issue => !resolvedKeys.has(issue.url + '|' + issue.issue));
+                    }
+                } catch (error) {
+                    console.error('Error occurred while probing HTTP issues:', error);
+                }
+
+                exportBtn.disabled = false;
+                exportBtn.textContent = 'Verified CSV';
+
+                const response = await fetch('/api/export_data', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        format: 'csv',
+                        fields: ['issues_detected'],
+                        localData: { urls: data.urls, links: data.links, issues: cleanedIssues }
+                    })
+                });
+                const exportData = await response.json();
+
+                if (!exportData.success) return;
+
+                const blob = new Blob([exportData.content], { type: exportData.mimetype });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = exportData.filename;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+            });
+        }
 
         // Attach "Ask AI" button event listeners with localStorage caching
         const aiButtons = container.querySelectorAll('.ai-btn');
@@ -614,6 +696,15 @@ LibreCrawlPlugin.register({
                     <select id="pd-category-filter" style="background: #0f172a; color: #e5e7eb; border: 1px solid #374151; padding: 6px 12px; border-radius: 6px; font-size: 13px;">
                         ${categoryOptions}
                     </select>
+                    <label style="font-size: 13px; color: #9ca3af; margin-left: 20px;"> Type: </label>
+                    <select id = "pd-type-filter" style="background: #0f172a; color: #e5e7eb; border: 1px solid #374151; padding: 6px 12px; border-radius: 6px; font-size: 13px;">
+                        <option value="All">All types</option>
+                        <option value="http_error">Error</option>
+                        <option value="warning">Warning</option>
+                    </select>
+                    <button id = "pd-export-csv" style="background: #0f172a; color: #e5e7eb; border: 1px solid #374151; padding: 6px 12px; border-radius: 6px; font-size: 13px; margin-left: 20px; cursor: pointer;">
+                        Export CSV
+                    </button>
                     <input
                         id="pd-url-search"
                         type="text"
@@ -656,7 +747,7 @@ LibreCrawlPlugin.register({
         const cacheKey = 'ai_' + btoa(unescape(encodeURIComponent(issue.url + '|' + issue.issue))).replace(/[=+/]/g, '');
 
         return `
-            <tr style="border-bottom: 1px solid #374151;" data-category="${category}" data-cache-key="${cacheKey}">
+            <tr style="border-bottom: 1px solid #374151;" data-category="${category}" data-type = "${issue.type || 'info'}" data-issue-name="${this.utils.escapeHtml(issue.issue || '')}" data-cache-key="${cacheKey}">
                 <td style="padding: 12px; color: #cbd5e1; font-size: 13px; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                     <a href="${url}" target="_blank" style="color: #3b82f6; text-decoration: none;">${shortUrl}</a>
                 </td>

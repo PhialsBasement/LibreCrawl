@@ -690,12 +690,10 @@ def get_tickets_for_issues(pairs):
     try:
         with get_db() as conn:
             cursor = conn.cursor()
-            placeholders = ' OR '.join(['(url = ? AND issue = ?)'] * len(pairs))
-            params = []
-            for p in pairs:
-                params.extend([p['url'], p['issue']])
+            placeholders = ','.join(['?'] * len(pairs))
+            params = [p['url'] + '|' + p['issue'] for p in pairs]
             cursor.execute(
-                f'SELECT url, issue, ticket_id, ticket_url FROM devops_tickets WHERE {placeholders}',
+                f"SELECT url, issue, ticket_id, ticket_url FROM devops_tickets WHERE url || '|' || issue IN ({placeholders})",
                 params
             )
             rows = cursor.fetchall()
@@ -716,4 +714,33 @@ def get_tickets_for_issues(pairs):
         return result
     except Exception as e:
         print(f"Error getting tickets for issues: {e}")
+        return {}
+
+def get_issue_first_detected_bulk(pairs, user_id):
+    if not pairs:
+        return {}
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            placeholders = ','.join(['?'] * len(pairs))
+            params = [p['url'] + '|' + p['issue'] for p in pairs]
+            cursor.execute(
+                f"SELECT url, issue, MIN(detected_at) as first_detected FROM crawl_issues ci JOIN crawls c on ci.crawl_id = c.id WHERE c.user_id = ? AND (ci.url || '|' || ci.issue) IN ({placeholders}) GROUP BY ci.url, ci.issue",
+                [user_id] + params
+            )
+            rows = cursor.fetchall()
+
+        db_lookup = {}
+        for row in rows:
+            key = f"{row['url']}|{row['issue']}"
+            if key not in db_lookup:  # Only take the first detected date
+                db_lookup[key] = row['first_detected']
+
+        result = {}
+        for p in pairs:
+            key = f"{p['url']}|{p['issue']}"
+            if key in db_lookup:
+                result[key] = db_lookup[key]
+        return result
+    except Exception as e:
         return {}

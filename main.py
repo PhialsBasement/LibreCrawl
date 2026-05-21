@@ -10,6 +10,7 @@ import secrets
 import string
 import os
 import requests
+import re
 from io import StringIO
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
@@ -459,20 +460,49 @@ def filter_issues_by_exclusion_patterns(issues, exclusion_patterns):
 
     return filtered_issues
 
-def generate_issues_csv_export(issues):
+def _extract_asset_url(details): 
+    match = re.search(r'(?:Image returned \d+|Image does not respond):\s*(.+)', details or '')
+    return match.group(1).strip() if match else '' 
+
+def generate_issues_csv_export(issues, crawl_id=None, user_id=None):
     """Generate CSV export for issues data"""
+
+    from src.crawl_db import get_crawl_by_id, get_issue_first_detected_bulk
+
+    crawl = get_crawl_by_id(crawl_id) if crawl_id else {}
+    crawl_date = crawl.get('completed_at', '') if crawl else ''
+    started_at = crawl.get('started_at', '') if crawl else ''
+
+    pairs = [{'url': issue.get('url', ''), 'issue': issue.get('issue', '')} for issue in issues]
+    date_lookup = get_issue_first_detected_bulk(pairs, user_id) if user_id else {}
+
     output = StringIO()
-    fieldnames = ['url', 'type', 'category', 'issue', 'details']
+    fieldnames = ['url', 'type', 'category', 'issue', 'details', 'affected_asset_url', 'crawl_date', 'first_detected', 'is_new']
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
 
+    seen = set()
+    deduped = []
+
     for issue in issues:
+        key = issue.get('url', '') + '|' + issue.get('issue', '')
+        if key not in seen:
+            seen.add(key)
+            deduped.append(issue)
+
+    for issue in deduped:
+        key = issue.get('url', '') + '|' + issue.get('issue', '')
+        first_detected = date_lookup.get(key, '')
         row = {
             'url': issue.get('url', ''),
             'type': issue.get('type', ''),
             'category': issue.get('category', ''),
             'issue': issue.get('issue', ''),
-            'details': issue.get('details', '')
+            'details': issue.get('details', ''),
+            'affected_asset_url': _extract_asset_url(issue.get('details', '')),
+            'crawl_date': crawl_date,
+            'first_detected': first_detected,
+            'is_new': 'Yes' if first_detected and started_at and first_detected >= started_at else 'No'
         }
         writer.writerow(row)
 
@@ -500,6 +530,34 @@ def generate_issues_json_export(issues):
         'issues_by_url': issues_by_url,
         'all_issues': issues
     }, indent=2)
+
+@app.route('/api/probe_http_errors', methods=['POST'])
+@login_required
+def probe_http_errors():
+    """API endpoint to probe HTTP errors for a list of URLs"""
+    data = request.get_json()
+    issues = data.get('issues', [])
+
+    resolved_urls = []
+    BROKEN_IMAGE_PATTERNS = ['Broken Image']
+    headers = {'User-Agent': 'LibreCrawlBot/1.0 (+https://librecrawl.com)'}
+
+    for issue in issues:
+        issue_name = issue.get('issue', '')
+        is_image = any(pattern in issue_name for pattern in BROKEN_IMAGE_PATTERNS)
+        probe_url = _extract_asset_url(issue.get('details', '')) if is_image else issue.get('url', '')
+
+        if not probe_url:
+            continue
+        try:    
+            response = requests.head(probe_url, allow_redirects=True, timeout=10, headers=headers)
+            status_code = response.status_code
+            if status_code < 400:
+                resolved_urls.append({'url': issue.get('url', ''), 'issue': issue_name})
+        except Exception as e:
+            pass
+
+    return jsonify({'success': True, 'resolved_urls': resolved_urls})
 
 @app.route('/login')
 def login_page():
@@ -1301,7 +1359,6 @@ def export_data():
             exclusion_patterns_text = current_settings.get('issueExclusionPatterns', '')
             exclusion_patterns = [p.strip() for p in exclusion_patterns_text.split('\n') if p.strip()]
             issues = filter_issues_by_exclusion_patterns(issues, exclusion_patterns)
-            print(f"DEBUG: After exclusion filter, {len(issues)} issues remain")
 
         # Collect files to export based on special field selections
         files_to_export = []
@@ -1313,19 +1370,10 @@ def export_data():
         # Remove special fields from regular export fields
         regular_fields = [f for f in export_fields if f not in ['issues_detected', 'links_detailed']]
 
-        # Debug logging
-        print(f"DEBUG: export_fields = {export_fields}")
-        print(f"DEBUG: has_issues_export = {has_issues_export}")
-        print(f"DEBUG: has_links_export = {has_links_export}")
-        print(f"DEBUG: regular_fields = {regular_fields}")
-        print(f"DEBUG: len(urls) = {len(urls)}")
-        print(f"DEBUG: len(links) = {len(links)}")
-        print(f"DEBUG: len(issues) = {len(issues)}")
-
         # Generate issues export if requested
         if has_issues_export:
             if export_format == 'csv':
-                issues_content = generate_issues_csv_export(issues)
+                issues_content = generate_issues_csv_export(issues, crawl_id = session.get('current_crawl_id'), user_id = session.get('user_id'))
                 issues_mimetype = 'text/csv'
                 issues_filename = f'librecrawl_issues_{int(time.time())}.csv'
             elif export_format == 'json':
@@ -1333,7 +1381,7 @@ def export_data():
                 issues_mimetype = 'application/json'
                 issues_filename = f'librecrawl_issues_{int(time.time())}.json'
             else:
-                issues_content = generate_issues_csv_export(issues)
+                issues_content = generate_issues_csv_export(issues, crawl_id = session.get('current_crawl_id'), user_id = session.get('user_id'))
                 issues_mimetype = 'text/csv'
                 issues_filename = f'librecrawl_issues_{int(time.time())}.csv'
 
