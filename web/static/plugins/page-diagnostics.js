@@ -216,24 +216,25 @@ LibreCrawlPlugin.register({
             </div>
         `;
 
-        // Attach category filter event listener
+        // Attach filter event listeners (category + URL search)
         const filterSelect = container.querySelector('#pd-category-filter');
-        if (filterSelect) {
-            filterSelect.addEventListener('change', () => {
-                const selected = filterSelect.value;
-                const table = container.querySelector('#pd-issues-table');
-                if (!table) return;
-                const rows = table.querySelectorAll('tbody tr');
-                rows.forEach(row => {
-                    const category = row.dataset.category;
-                    if (selected === 'All' || category === selected) {
-                        row.style.display = '';
-                    } else {
-                        row.style.display = 'none';
-                    }
-                });
+        const urlSearchInput = container.querySelector('#pd-url-search');
+
+        const applyFilters = () => {
+            const selected = filterSelect ? filterSelect.value : 'All';
+            const urlQuery = urlSearchInput ? urlSearchInput.value.trim().toLowerCase() : '';
+            const table = container.querySelector('#pd-issues-table');
+            if (!table) return;
+            table.querySelectorAll('tbody tr').forEach(row => {
+                const categoryMatch = selected === 'All' || row.dataset.category === selected;
+                const urlAnchor = row.querySelector('a');
+                const urlMatch = !urlQuery || (urlAnchor && urlAnchor.getAttribute('href').toLowerCase().includes(urlQuery));
+                row.style.display = (categoryMatch && urlMatch) ? '' : 'none';
             });
-        }
+        };
+
+        if (filterSelect) filterSelect.addEventListener('change', applyFilters);
+        if (urlSearchInput) urlSearchInput.addEventListener('input', applyFilters);
 
         // Attach "Ask AI" button event listeners with localStorage caching
         const aiButtons = container.querySelectorAll('.ai-btn');
@@ -608,11 +609,17 @@ LibreCrawlPlugin.register({
                 <h3 style="font-size: 18px; font-weight: 600; margin-bottom: 20px; color: #e5e7eb;">
                     Issues Table
                 </h3>
-                <div style="margin-bottom: 16px;">
-                    <label style="font-size: 13px; color: #9ca3af; margin-right: 8px;">Filter by category:</label>
+                <div style="margin-bottom: 16px; display: flex; align-items: center; flex-wrap: wrap; gap: 8px;">
+                    <label style="font-size: 13px; color: #9ca3af; margin-right: 4px;">Filter by category:</label>
                     <select id="pd-category-filter" style="background: #0f172a; color: #e5e7eb; border: 1px solid #374151; padding: 6px 12px; border-radius: 6px; font-size: 13px;">
                         ${categoryOptions}
                     </select>
+                    <input
+                        id="pd-url-search"
+                        type="text"
+                        placeholder="Search URL…"
+                        style="background: #0f172a; color: #e5e7eb; border: 1px solid #374151; padding: 6px 12px; border-radius: 6px; font-size: 13px; margin-left: auto; width: 260px;"
+                    />
                 </div>
                 <div style="overflow-x: auto;">
                     <table class="data-table" style="width: 100%; border-collapse: collapse;" id="pd-issues-table">
