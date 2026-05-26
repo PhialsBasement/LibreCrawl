@@ -1,13 +1,14 @@
 name: "CodeQL Security Scan"
 
+ 
 on:
   push:
-    branches: ["main", "master", "develop"]
+    branches: ["**"]  # Run on ALL branches, including feature branches
   pull_request:
-    branches: ["main", "master", "develop"]
-  schedule:
-    # Runs at 03:00 UTC every Monday — catches newly disclosed CVEs
-    - cron: "0 3 * * 1"
+    branches: ["**"]  # Run on PRs targeting any branch
+  # schedule:
+  #   # Runs at 03:00 UTC every Monday — catches newly disclosed CVEs
+  #   - cron: "0 3 * * 1"
   workflow_dispatch: # Allows manual trigger from the Actions tab
 
 jobs:
