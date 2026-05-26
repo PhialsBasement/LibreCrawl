@@ -1,0 +1,83 @@
+name: "CodeQL Security Scan"
+
+on:
+  push:
+    branches: ["main", "master", "develop"]
+  pull_request:
+    branches: ["main", "master", "develop"]
+  schedule:
+    # Runs at 03:00 UTC every Monday — catches newly disclosed CVEs
+    - cron: "0 3 * * 1"
+  workflow_dispatch: # Allows manual trigger from the Actions tab
+
+jobs:
+  # ── Job 1: CodeQL — Python static analysis ────────────────────────────
+  codeql:
+    name: CodeQL (Python)
+    runs-on: ubuntu-latest
+
+    permissions:
+      security-events: write   # Required to upload SARIF results
+      actions: read
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          # LibreCrawl backend is Python/Flask only.
+          # The frontend is plain vanilla JS with no Node/npm project,
+          # so the javascript-typescript extractor is intentionally omitted.
+          languages: python
+
+          # security-extended = all security-and-quality queries
+          # + high-precision experimental security queries.
+          queries: security-extended
+
+      # For interpreted languages (Python) autobuild is a no-op —
+      # CodeQL analyses the source directly without compiling.
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:python"
+          upload: true
+
+  # ── Job 2: Hadolint — Dockerfile linting ──────────────────────────────
+  # LibreCrawl ships a Dockerfile; this catches security misconfigs
+  # (running as root, unpinned base images, ADD instead of COPY, etc.)
+  # without executing the container.
+  hadolint:
+    name: Hadolint (Dockerfile)
+    runs-on: ubuntu-latest
+
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          # Upload results to Security tab as SARIF
+          format: sarif
+          output-file: hadolint-results.sarif
+          # Don't fail the build — report as warnings so you can review first.
+          # Change to 'error' once you've triaged existing findings.
+          no-fail: true
+
+      - name: Upload Hadolint SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: hadolint-results.sarif
+          category: dockerfile
