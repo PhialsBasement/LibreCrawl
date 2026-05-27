@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Register - LibreCrawl</title>
+    <title data-i18n="register.title">Register - LibreCrawl</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * {
@@ -29,7 +29,23 @@
             width: 100%;
             max-width: 420px;
             padding: 48px 40px;
+            position: relative;
         }
+
+        .lang-toggle {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            background: none;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 4px 10px;
+            font-size: 13px;
+            cursor: pointer;
+            color: #6b7280;
+            font-family: 'Inter', sans-serif;
+        }
+        .lang-toggle:hover { background: #f9fafb; }
 
         .logo {
             text-align: center;
@@ -165,75 +181,76 @@
 </head>
 <body>
     <div class="register-container">
+        <button class="lang-toggle i18n-toggle" onclick="i18n.toggle()">🇩🇪 DE</button>
+
         <div class="logo">
             <h1>LibreCrawl</h1>
-            <p>Create your account</p>
+            <p data-i18n="register.subtitle">Create your account</p>
         </div>
 
         <div id="alert" class="alert"></div>
 
         {% if registration_disabled %}
-        <div class="alert alert-error show">
+        <div class="alert alert-error show" data-i18n="register.disabled_msg">
             Registrations are currently disabled. Please contact the administrator.
         </div>
         {% endif %}
 
         <form id="registerForm">
             <div class="form-group">
-                <label for="username">Username</label>
+                <label for="username" data-i18n="register.username">Username</label>
                 <input type="text" id="username" name="username" required autofocus>
-                <div class="input-hint">At least 3 characters</div>
+                <div class="input-hint" data-i18n="register.username_hint">At least 3 characters</div>
             </div>
 
             <div class="form-group">
-                <label for="email">Email</label>
+                <label for="email" data-i18n="register.email">Email</label>
                 <input type="email" id="email" name="email" required>
             </div>
 
             <div class="form-group">
-                <label for="password">Password</label>
+                <label for="password" data-i18n="register.password">Password</label>
                 <input type="password" id="password" name="password" required>
-                <div class="input-hint">At least 8 characters</div>
+                <div class="input-hint" data-i18n="register.password_hint">At least 8 characters</div>
             </div>
 
             <div class="form-group">
-                <label for="confirmPassword">Confirm Password</label>
+                <label for="confirmPassword" data-i18n="register.confirm_password">Confirm Password</label>
                 <input type="password" id="confirmPassword" name="confirmPassword" required>
             </div>
 
-            <button type="submit" class="btn" id="registerBtn">Register</button>
+            <button type="submit" class="btn" id="registerBtn" data-i18n="register.btn_register">Register</button>
         </form>
 
         <div class="login-link">
-            Already have an account? <a href="/login">Login here</a>
+            <span data-i18n="register.have_account">Already have an account?</span>
+            <a href="/login" data-i18n="register.login_here">Login here</a>
         </div>
     </div>
 
+    <script src="/static/js/i18n.js"></script>
     <script>
         const form = document.getElementById('registerForm');
         const registerBtn = document.getElementById('registerBtn');
-        const alert = document.getElementById('alert');
-
-        // Check if registration is disabled
+        const alertEl = document.getElementById('alert');
         const registrationDisabled = {{ 'true' if registration_disabled else 'false' }};
 
         if (registrationDisabled) {
-            // Disable form submission
             form.addEventListener('submit', (e) => {
                 e.preventDefault();
-                window.alert('Registrations are disabled');
+                window.alert(i18n.t('login.registrations_disabled'));
             });
             registerBtn.disabled = true;
-            registerBtn.textContent = 'Registration Disabled';
+            registerBtn.setAttribute('data-i18n', 'register.btn_disabled');
         }
 
         function showAlert(message, type) {
-            alert.textContent = message;
-            alert.className = `alert alert-${type} show`;
+            alertEl.textContent = message;
+            alertEl.className = `alert alert-${type} show`;
         }
 
         function hideAlert() {
-            alert.className = 'alert';
+            alertEl.className = 'alert';
         }
 
         form.addEventListener('submit', async (e) => {
@@ -245,31 +262,28 @@
             const password = document.getElementById('password').value;
             const confirmPassword = document.getElementById('confirmPassword').value;
 
-            // Client-side validation
             if (password !== confirmPassword) {
-                showAlert('Passwords do not match', 'error');
+                showAlert(i18n.t('register.error_passwords'), 'error');
                 return;
             }
 
             if (password.length < 8) {
-                showAlert('Password must be at least 8 characters', 'error');
+                showAlert(i18n.t('register.error_password_length'), 'error');
                 return;
             }
 
             if (username.length < 3) {
-                showAlert('Username must be at least 3 characters', 'error');
+                showAlert(i18n.t('register.error_username_length'), 'error');
                 return;
             }
 
             registerBtn.disabled = true;
-            registerBtn.textContent = 'Registering...';
+            registerBtn.textContent = i18n.t('register.btn_registering');
 
             try {
                 const response = await fetch('/api/register', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ username, email, password })
                 });
 
@@ -278,18 +292,16 @@
                 if (data.success) {
                     showAlert(data.message, 'success');
                     form.reset();
-                    setTimeout(() => {
-                        window.location.href = '/login';
-                    }, 2000);
+                    setTimeout(() => { window.location.href = '/login'; }, 2000);
                 } else {
                     showAlert(data.message, 'error');
                     registerBtn.disabled = false;
-                    registerBtn.textContent = 'Register';
+                    registerBtn.textContent = i18n.t('register.btn_register');
                 }
             } catch (error) {
-                showAlert('An error occurred. Please try again.', 'error');
+                showAlert(i18n.t('register.error_generic'), 'error');
                 registerBtn.disabled = false;
-                registerBtn.textContent = 'Register';
+                registerBtn.textContent = i18n.t('register.btn_register');
             }
         });
     </script>

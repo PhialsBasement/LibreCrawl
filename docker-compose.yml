@@ -9,6 +9,9 @@ services:
       - "${HOST_BINDING:-127.0.0.1}:5000:5000"
     volumes:
       # Persist the user database and settings
+      # Use a named volume so Docker preserves the /app/data ownership from
+      # the image. A root-owned bind mount can prevent SQLite from creating
+      # users.db when the app runs as the non-root librecrawl user.
       - librecrawl-data:/app/data
     environment:
       - FLASK_APP=main.py

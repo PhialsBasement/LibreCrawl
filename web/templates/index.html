@@ -15,12 +15,13 @@
                 <h1 class="app-title">LibreCrawl</h1>
                 <div class="header-actions">
                     <span id="userInfo" style="margin-right: 15px; color: #6b7280; font-size: 14px;"></span>
-                    <button class="btn btn-secondary" onclick="openDashboard()">Dashboard</button>
-                    <button class="btn btn-secondary" onclick="openSettings()">Settings</button>
-                    <button class="btn btn-secondary" onclick="exportData()">Export</button>
-                    <button class="btn btn-success" id="saveCrawlBtn" onclick="saveCrawl()" disabled>Save Crawl</button>
-                    <button class="btn btn-primary" id="loadCrawlBtn" onclick="loadCrawl()">Load Crawl</button>
-                    <button class="btn btn-danger" onclick="logout()" style="margin-left: 10px;">Logout</button>
+                    <button class="btn btn-secondary i18n-toggle" onclick="i18n.toggle()" style="margin-right: 6px;">🇩🇪 DE</button>
+                    <button class="btn btn-secondary" onclick="openDashboard()" data-i18n="app.btn_dashboard">Dashboard</button>
+                    <button class="btn btn-secondary" onclick="openSettings()" data-i18n="app.btn_settings">Settings</button>
+                    <button class="btn btn-secondary" onclick="exportData()" data-i18n="app.btn_export">Export</button>
+                    <button class="btn btn-success" id="saveCrawlBtn" onclick="saveCrawl()" disabled data-i18n="app.btn_save_crawl">Save Crawl</button>
+                    <button class="btn btn-primary" id="loadCrawlBtn" onclick="loadCrawl()" data-i18n="app.btn_load_crawl">Load Crawl</button>
+                    <button class="btn btn-danger" onclick="logout()" style="margin-left: 10px;" data-i18n="app.btn_logout">Logout</button>
                 </div>
             </div>
         </header>
@@ -29,7 +30,7 @@
         <section class="url-section">
             <div class="url-container">
                 <div class="input-group">
-                    <label for="urlInput" class="input-label">URL to Crawl</label>
+                    <label for="urlInput" class="input-label" data-i18n="app.url_label">URL to Crawl</label>
                     <input
                         type="url"
                         id="urlInput"
@@ -43,19 +44,19 @@
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M8 5v14l11-7z"/>
                         </svg>
-                        Start
+                        <span data-i18n="app.btn_start">Start</span>
                     </button>
                     <button id="stopBtn" class="btn btn-danger" onclick="stopCrawl()" disabled>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                             <rect x="6" y="6" width="12" height="12"/>
                         </svg>
-                        Stop
+                        <span data-i18n="app.btn_stop">Stop</span>
                     </button>
                     <button id="clearBtn" class="btn btn-secondary" onclick="clearCrawlData()">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
                         </svg>
-                        Clear
+                        <span data-i18n="app.btn_clear">Clear</span>
                     </button>
                 </div>
             </div>
@@ -63,7 +64,7 @@
                 <div class="progress-bar">
                     <div class="progress-fill" id="progressFill"></div>
                 </div>
-                <span class="progress-text" id="progressText">Initializing...</span>
+                <span class="progress-text" id="progressText" data-i18n="app.status_initializing">Initializing...</span>
             </div>
         </section>
 
@@ -72,47 +73,47 @@
             <!-- Sidebar -->
             <aside class="sidebar">
                 <div class="sidebar-section">
-                    <h3 class="sidebar-title">Filters</h3>
+                    <h3 class="sidebar-title" data-i18n="app.sidebar_filters">Filters</h3>
                     <div class="filter-tree">
                         <div class="filter-group">
                             <div class="filter-item" onclick="toggleFilter('internal')">
-                                <span class="filter-name">Internal</span>
+                                <span class="filter-name" data-i18n="app.filter_internal">Internal</span>
                                 <span class="filter-count" id="internal-count">0</span>
                             </div>
                             <div class="filter-item" onclick="toggleFilter('external')">
-                                <span class="filter-name">External</span>
+                                <span class="filter-name" data-i18n="app.filter_external">External</span>
                                 <span class="filter-count" id="external-count">0</span>
                             </div>
                         </div>
 
                         <div class="filter-group">
-                            <div class="filter-header">Response Codes</div>
+                            <div class="filter-header" data-i18n="app.filter_response_codes">Response Codes</div>
                             <div class="filter-subgroup">
                                 <div class="filter-item" onclick="toggleFilter('2xx')">
-                                    <span class="filter-name">2xx Success</span>
+                                    <span class="filter-name" data-i18n="app.filter_2xx">2xx Success</span>
                                     <span class="filter-count" id="2xx-count">0</span>
                                 </div>
                                 <div class="filter-item" onclick="toggleFilter('3xx')">
-                                    <span class="filter-name">3xx Redirect</span>
+                                    <span class="filter-name" data-i18n="app.filter_3xx">3xx Redirect</span>
                                     <span class="filter-count" id="3xx-count">0</span>
                                 </div>
                                 <div class="filter-item" onclick="toggleFilter('4xx')">
-                                    <span class="filter-name">4xx Client Error</span>
+                                    <span class="filter-name" data-i18n="app.filter_4xx">4xx Client Error</span>
                                     <span class="filter-count" id="4xx-count">0</span>
                                 </div>
                                 <div class="filter-item" onclick="toggleFilter('5xx')">
-                                    <span class="filter-name">5xx Server Error</span>
+                                    <span class="filter-name" data-i18n="app.filter_5xx">5xx Server Error</span>
                                     <span class="filter-count" id="5xx-count">0</span>
                                 </div>
-                                <div class="filter-item" onclick="toggleFilter('no_response')" title="DNS failure, connection refused, timeout, SSL error, etc. — useful for finding expired domains.">
-                                    <span class="filter-name">No Response</span>
+                                <div class="filter-item" onclick="toggleFilter('no_response')" data-i18n-title="app.filter_no_response_title" title="DNS failure, connection refused, timeout, SSL error, etc. — useful for finding expired domains.">
+                                    <span class="filter-name" data-i18n="app.filter_no_response">No Response</span>
                                     <span class="filter-count" id="no_response-count">0</span>
                                 </div>
                             </div>
                         </div>
 
                         <div class="filter-group">
-                            <div class="filter-header">Content Type</div>
+                            <div class="filter-header" data-i18n="app.filter_content_type">Content Type</div>
                             <div class="filter-subgroup">
                                 <div class="filter-item" onclick="toggleFilter('html')">
                                     <span class="filter-name">HTML</span>
@@ -127,7 +128,7 @@
                                     <span class="filter-count" id="js-count">0</span>
                                 </div>
                                 <div class="filter-item" onclick="toggleFilter('images')">
-                                    <span class="filter-name">Images</span>
+                                    <span class="filter-name" data-i18n="app.filter_images">Images</span>
                                     <span class="filter-count" id="images-count">0</span>
                                 </div>
                             </div>
@@ -136,44 +137,44 @@
                 </div>
 
                 <div class="sidebar-section">
-                    <h3 class="sidebar-title">Statistics</h3>
+                    <h3 class="sidebar-title" data-i18n="app.sidebar_statistics">Statistics</h3>
                     <div class="stats-container">
                         <div class="stat-item">
-                            <span class="stat-label">URLs Discovered</span>
+                            <span class="stat-label" data-i18n="app.stat_discovered">URLs Discovered</span>
                             <span class="stat-value" id="discoveredCount">0</span>
                         </div>
                         <div class="stat-item">
-                            <span class="stat-label">URLs Crawled</span>
+                            <span class="stat-label" data-i18n="app.stat_crawled">URLs Crawled</span>
                             <span class="stat-value" id="crawledCount">0</span>
                         </div>
                         <div class="stat-item">
-                            <span class="stat-label">Crawl Depth</span>
+                            <span class="stat-label" data-i18n="app.stat_depth">Crawl Depth</span>
                             <span class="stat-value" id="crawlDepth">0</span>
                         </div>
                         <div class="stat-item">
-                            <span class="stat-label">Speed</span>
+                            <span class="stat-label" data-i18n="app.stat_speed">Speed</span>
                             <span class="stat-value" id="crawlSpeed">0 URLs/sec</span>
                         </div>
                     </div>
                 </div>
 
                 <div class="sidebar-section">
-                    <h3 class="sidebar-title">Data Size</h3>
+                    <h3 class="sidebar-title" data-i18n="app.sidebar_datasize">Data Size</h3>
                     <div class="stats-container">
                         <div class="stat-item">
-                            <span class="stat-label">Crawl Data</span>
+                            <span class="stat-label" data-i18n="app.stat_crawl_data">Crawl Data</span>
                             <span class="stat-value" id="memCurrent">0 MB</span>
                         </div>
                         <div class="stat-item">
-                            <span class="stat-label">Per URL</span>
+                            <span class="stat-label" data-i18n="app.stat_per_url">Per URL</span>
                             <span class="stat-value" id="memPeak">0 KB/URL</span>
                         </div>
                         <div class="stat-item">
-                            <span class="stat-label">Est. for 1M URLs</span>
+                            <span class="stat-label" data-i18n="app.stat_est_1m">Est. for 1M URLs</span>
                             <span class="stat-value" id="memEstimate1M">0 MB</span>
                         </div>
                         <div class="stat-item">
-                            <span class="stat-label">System Available</span>
+                            <span class="stat-label" data-i18n="app.stat_system">System Available</span>
                             <span class="stat-value" id="memAvailable">0 MB</span>
                         </div>
                     </div>
@@ -184,14 +185,14 @@
             <div class="content-area">
                 <div class="tab-container">
                     <div class="tab-header">
-                        <button class="tab-btn active" onclick="switchTab('overview')">Overview</button>
-                        <button class="tab-btn" onclick="switchTab('internal')">Internal</button>
-                        <button class="tab-btn" onclick="switchTab('external')">External</button>
-                        <button class="tab-btn" onclick="switchTab('status-codes')">Status Codes</button>
-                        <button class="tab-btn" onclick="switchTab('links')">Links</button>
-                        <button class="tab-btn" onclick="switchTab('issues')">Issues</button>
-                        <button class="tab-btn" onclick="switchTab('pagespeed')">PageSpeed</button>
-                        <button class="tab-btn" onclick="switchTab('visualization')">Visualization</button>
+                        <button class="tab-btn active" onclick="switchTab('overview')" data-i18n="app.tab_overview">Overview</button>
+                        <button class="tab-btn" onclick="switchTab('internal')" data-i18n="app.tab_internal">Internal</button>
+                        <button class="tab-btn" onclick="switchTab('external')" data-i18n="app.tab_external">External</button>
+                        <button class="tab-btn" onclick="switchTab('status-codes')" data-i18n="app.tab_status_codes">Status Codes</button>
+                        <button class="tab-btn" onclick="switchTab('links')" data-i18n="app.tab_links">Links</button>
+                        <button class="tab-btn" onclick="switchTab('issues')" data-i18n="app.tab_issues">Issues</button>
+                        <button class="tab-btn" onclick="switchTab('pagespeed')" data-i18n="app.tab_pagespeed">PageSpeed</button>
+                        <button class="tab-btn" onclick="switchTab('visualization')" data-i18n="app.tab_visualization">Visualization</button>
                     </div>
 
                     <div class="tab-content">
@@ -200,20 +201,20 @@
                                 <table class="data-table" id="overviewTable">
                                     <thead>
                                         <tr>
-                                            <th>Address</th>
-                                            <th>Status</th>
-                                            <th>Title</th>
-                                            <th>Meta Desc</th>
-                                            <th>H1</th>
-                                            <th>Words</th>
-                                            <th>Response (ms)</th>
-                                            <th>Analytics</th>
-                                            <th>OG Tags</th>
-                                            <th>JSON-LD</th>
-                                            <th>Links (Int/Ext)</th>
-                                            <th>Images</th>
-                                            <th>JS</th>
-                                            <th>Details</th>
+                                            <th data-i18n="app.th_address">Address</th>
+                                            <th data-i18n="app.th_status">Status</th>
+                                            <th data-i18n="app.th_title">Title</th>
+                                            <th data-i18n="app.th_meta_desc">Meta Desc</th>
+                                            <th data-i18n="app.th_h1">H1</th>
+                                            <th data-i18n="app.th_words">Words</th>
+                                            <th data-i18n="app.th_response">Response (ms)</th>
+                                            <th data-i18n="app.th_analytics">Analytics</th>
+                                            <th data-i18n="app.th_og_tags">OG Tags</th>
+                                            <th data-i18n="app.th_json_ld">JSON-LD</th>
+                                            <th data-i18n="app.th_links_int_ext">Links (Int/Ext)</th>
+                                            <th data-i18n="app.th_images">Images</th>
+                                            <th data-i18n="app.th_js">JS</th>
+                                            <th data-i18n="app.th_details">Details</th>
                                         </tr>
                                     </thead>
                                     <tbody id="overviewTableBody">
@@ -229,9 +230,9 @@
                                     <thead>
                                         <tr>
                                             <th>Address</th>
-                                            <th>Status</th>
-                                            <th>Content Type</th>
-                                            <th>Size</th>
+                                            <th data-i18n="app.th_status">Status</th>
+                                            <th data-i18n="app.th_content_type">Content Type</th>
+                                            <th data-i18n="app.th_size">Size</th>
                                             <th>Title</th>
                                         </tr>
                                     </thead>
@@ -266,10 +267,10 @@
                                 <table class="data-table" id="statusCodesTable">
                                     <thead>
                                         <tr>
-                                            <th>Status Code</th>
+                                            <th data-i18n="app.th_status_code">Status Code</th>
                                             <th>Status</th>
-                                            <th>Count</th>
-                                            <th>Percentage</th>
+                                            <th data-i18n="app.th_count">Count</th>
+                                            <th data-i18n="app.th_percentage">Percentage</th>
                                         </tr>
                                     </thead>
                                     <tbody id="statusCodesTableBody">
@@ -284,27 +285,27 @@
                                 <div class="links-sections">
                                     <div class="links-section">
                                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                                            <h3 class="links-section-title">🔗 Internal Links</h3>
+                                            <h3 class="links-section-title" data-i18n="app.links_internal">🔗 Internal Links</h3>
                                             <div style="display: flex; gap: 10px; align-items: center;">
                                                 <select onchange="filterInternalLinks(this.value)" style="padding: 6px 12px; border-radius: 6px; border: 1px solid #4b5563; background: #1f2937; color: white; font-size: 13px;">
-                                                    <option value="all">All Status Codes</option>
-                                                    <option value="2xx">2xx Success</option>
+                                                    <option value="all" data-i18n="app.links_all_status">All Status Codes</option>
+                                                    <option value="2xx" data-i18n="app.filter_2xx">2xx Success</option>
                                                     <option value="3xx">3xx Redirect</option>
                                                     <option value="4xx">4xx Client Error</option>
                                                     <option value="5xx">5xx Server Error</option>
                                                 </select>
-                                                <input type="text" placeholder="Search..." oninput="searchInternalLinks(this.value)" style="padding: 6px 12px; border-radius: 6px; border: 1px solid #4b5563; background: #1f2937; color: white; font-size: 13px; width: 200px;">
+                                                <input type="text" placeholder="Search..." data-i18n-placeholder="app.links_search" oninput="searchInternalLinks(this.value)" style="padding: 6px 12px; border-radius: 6px; border: 1px solid #4b5563; background: #1f2937; color: white; font-size: 13px; width: 200px;">
                                             </div>
                                         </div>
                                         <div class="table-container internal-links-container">
                                             <table class="data-table" id="internalLinksTable">
                                                 <thead>
                                                     <tr>
-                                                        <th>Source URL</th>
-                                                        <th>Target URL</th>
+                                                        <th data-i18n="app.th_source_url">Source URL</th>
+                                                        <th data-i18n="app.th_target_url">Target URL</th>
                                                         <th>Status</th>
-                                                        <th>Anchor Text</th>
-                                                        <th>Placement</th>
+                                                        <th data-i18n="app.th_anchor_text">Anchor Text</th>
+                                                        <th data-i18n="app.th_placement">Placement</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody id="internalLinksTableBody">
@@ -316,7 +317,7 @@
 
                                     <div class="links-section">
                                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                                            <h3 class="links-section-title">🌐 External Links</h3>
+                                            <h3 class="links-section-title" data-i18n="app.links_external">🌐 External Links</h3>
                                             <div style="display: flex; gap: 10px; align-items: center;">
                                                 <select onchange="filterExternalLinks(this.value)" style="padding: 6px 12px; border-radius: 6px; border: 1px solid #4b5563; background: #1f2937; color: white; font-size: 13px;">
                                                     <option value="all">All Status Codes</option>
@@ -335,7 +336,7 @@
                                                         <th>Source URL</th>
                                                         <th>Target URL</th>
                                                         <th>Status</th>
-                                                        <th>Domain</th>
+                                                        <th data-i18n="app.th_domain">Domain</th>
                                                         <th>Placement</th>
                                                     </tr>
                                                 </thead>
@@ -356,13 +357,13 @@
                                     All Issues <span id="issues-all-count" style="opacity: 0.7;">(0)</span>
                                 </button>
                                 <button class="filter-item" onclick="filterIssues('error')" data-filter="error" style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: #ef4444; padding: 8px 16px; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-size: 14px; font-weight: 500; min-width: 100px;">
-                                    <span>❌</span> Errors <span id="issues-error-count" style="opacity: 0.7;">(0)</span>
+                                    <span>❌</span data-i18n="app.issues_errors"> Errors <span id="issues-error-count" style="opacity: 0.7;">(0)</span>
                                 </button>
                                 <button class="filter-item" onclick="filterIssues('warning')" data-filter="warning" style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); color: #f59e0b; padding: 8px 16px; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-size: 14px; font-weight: 500; min-width: 120px;">
-                                    <span>⚠️</span> Warnings <span id="issues-warning-count" style="opacity: 0.7;">(0)</span>
+                                    <span>⚠️</span data-i18n="app.issues_warnings"> Warnings <span id="issues-warning-count" style="opacity: 0.7;">(0)</span>
                                 </button>
                                 <button class="filter-item" onclick="filterIssues('info')" data-filter="info" style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); color: #3b82f6; padding: 8px 16px; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-size: 14px; font-weight: 500; min-width: 90px;">
-                                    <span>ℹ️</span> Info <span id="issues-info-count" style="opacity: 0.7;">(0)</span>
+                                    <span>ℹ️</span data-i18n="app.issues_info"> Info <span id="issues-info-count" style="opacity: 0.7;">(0)</span>
                                 </button>
                             </div>
 
@@ -371,10 +372,10 @@
                                     <thead>
                                         <tr>
                                             <th style="width: 35%;">URL</th>
-                                            <th style="width: 10%;">Type</th>
-                                            <th style="width: 15%;">Category</th>
-                                            <th style="width: 20%;">Issue</th>
-                                            <th style="width: 20%;">Details</th>
+                                            <th style="width: 10%;" data-i18n="app.th_type">Type</th>
+                                            <th style="width: 15%;" data-i18n="app.th_category">Category</th>
+                                            <th style="width: 20%;" data-i18n="app.th_issue">Issue</th>
+                                            <th style="width: 20%;" data-i18n="app.th_details">Details</th>
                                         </tr>
                                     </thead>
                                     <tbody id="issuesTableBody">
@@ -387,8 +388,8 @@
                                             <circle cx="12" cy="12" r="10"/>
                                             <path d="M12 8v4M12 16h0"/>
                                         </svg>
-                                        <h3>No Issues Found</h3>
-                                        <p>Start crawling to detect SEO issues and problems on your website.</p>
+                                        <h3 data-i18n="app.issues_empty_title">No Issues Found</h3>
+                                        <p data-i18n="app.issues_empty_desc">Start crawling to detect SEO issues and problems on your website.</p>
                                     </div>
                                 </div>
                             </div>
@@ -397,13 +398,13 @@
                         <div id="pagespeed-tab" class="tab-pane">
                             <div class="pagespeed-container">
                                 <div class="pagespeed-header">
-                                    <h3>PageSpeed Insights Results</h3>
-                                    <p class="pagespeed-description">Performance analysis for homepage and category pages (powered by Google PageSpeed Insights)</p>
+                                    <h3 data-i18n="app.pagespeed_title">PageSpeed Insights Results</h3>
+                                    <p class="pagespeed-description" data-i18n="app.pagespeed_desc">Performance analysis for homepage and category pages (powered by Google PageSpeed Insights)</p>
                                 </div>
                                 <div id="pagespeedResults" class="pagespeed-results">
                                     <div class="pagespeed-placeholder">
-                                        <p>🚀 PageSpeed analysis will appear here after crawl completion</p>
-                                        <p>Enable PageSpeed Analysis in settings to get Core Web Vitals and performance scores</p>
+                                        <p data-i18n="app.pagespeed_placeholder">🚀 PageSpeed analysis will appear here after crawl completion</p>
+                                        <p data-i18n="app.pagespeed_hint">Enable PageSpeed Analysis in settings to get Core Web Vitals and performance scores</p>
                                     </div>
                                 </div>
                             </div>
@@ -412,25 +413,25 @@
                         <div id="visualization-tab" class="tab-pane">
                             <div class="visualization-container">
                                 <div class="visualization-header">
-                                    <h3>Site Structure Visualization</h3>
+                                    <h3 data-i18n="app.viz_title">Site Structure Visualization</h3>
                                     <div class="visualization-controls">
                                         <select id="vizLayout" onchange="changeLayout(this.value)">
-                                            <option value="cose">Force-Directed</option>
-                                            <option value="breadthfirst">Hierarchical</option>
-                                            <option value="circle">Circle</option>
-                                            <option value="concentric">Concentric</option>
-                                            <option value="grid">Grid</option>
+                                            <option value="cose" data-i18n="app.viz_layout_force">Force-Directed</option>
+                                            <option value="breadthfirst" data-i18n="app.viz_layout_hierarchical">Hierarchical</option>
+                                            <option value="circle" data-i18n="app.viz_layout_circle">Circle</option>
+                                            <option value="concentric" data-i18n="app.viz_layout_concentric">Concentric</option>
+                                            <option value="grid" data-i18n="app.viz_layout_grid">Grid</option>
                                         </select>
                                         <select id="vizFilter" onchange="filterVisualization(this.value)">
-                                            <option value="all">All Pages</option>
-                                            <option value="html">HTML Only</option>
+                                            <option value="all" data-i18n="app.viz_filter_all">All Pages</option>
+                                            <option value="html" data-i18n="app.viz_filter_html">HTML Only</option>
                                             <option value="2xx">2xx Success</option>
-                                            <option value="3xx">3xx Redirects</option>
-                                            <option value="4xx">4xx Errors</option>
-                                            <option value="5xx">5xx Errors</option>
+                                            <option value="3xx" data-i18n="app.filter_3xx">3xx Redirects</option>
+                                            <option value="4xx" data-i18n="app.filter_4xx">4xx Errors</option>
+                                            <option value="5xx" data-i18n="app.filter_5xx">5xx Errors</option>
                                         </select>
-                                        <button class="btn btn-secondary" onclick="resetVisualization()">Reset View</button>
-                                        <button class="btn btn-secondary" onclick="exportVisualizationImage()">Export PNG</button>
+                                        <button class="btn btn-secondary" onclick="resetVisualization()" data-i18n="app.viz_btn_reset">Reset View</button>
+                                        <button class="btn btn-secondary" onclick="exportVisualizationImage()" data-i18n="app.viz_btn_export">Export PNG</button>
                                     </div>
                                 </div>
                                 <div id="cy" class="graph-container">
@@ -446,30 +447,30 @@
                                             <line x1="12" y1="12" x2="6" y2="18"/>
                                             <line x1="12" y1="12" x2="18" y2="18"/>
                                         </svg>
-                                        <h3>No Data Yet</h3>
-                                        <p>Start crawling to visualize your site structure</p>
+                                        <h3 data-i18n="app.viz_no_data">No Data Yet</h3>
+                                        <p data-i18n="app.viz_no_data_desc">Start crawling to visualize your site structure</p>
                                     </div>
                                 </div>
                                 <div class="visualization-legend">
                                     <div class="legend-item">
                                         <span class="legend-color" style="background: #10b981;"></span>
-                                        <span>2xx Success</span>
+                                        <span data-i18n="app.viz_legend_2xx">2xx Success</span>
                                     </div>
                                     <div class="legend-item">
                                         <span class="legend-color" style="background: #3b82f6;"></span>
-                                        <span>3xx Redirect</span>
+                                        <span data-i18n="app.viz_legend_3xx">3xx Redirect</span>
                                     </div>
                                     <div class="legend-item">
                                         <span class="legend-color" style="background: #f59e0b;"></span>
-                                        <span>4xx Error</span>
+                                        <span data-i18n="app.viz_legend_4xx">4xx Error</span>
                                     </div>
                                     <div class="legend-item">
                                         <span class="legend-color" style="background: #ef4444;"></span>
-                                        <span>5xx Error</span>
+                                        <span data-i18n="app.viz_legend_5xx">5xx Error</span>
                                     </div>
                                     <div class="legend-item">
                                         <span class="legend-color" style="background: #6b7280;"></span>
-                                        <span>Other</span>
+                                        <span data-i18n="app.viz_legend_other">Other</span>
                                     </div>
                                 </div>
                             </div>
@@ -481,7 +482,7 @@
 
         <!-- Status Bar -->
         <footer class="status-bar">
-            <span id="statusText">Ready</span>
+            <span id="statusText" data-i18n="app.status_ready">Ready</span>
             <span id="crawlTime">00:00</span>
         </footer>
     </div>
@@ -491,12 +492,12 @@
     <div id="dashboardModal" class="modal" style="display: none;">
         <div class="modal-content" style="max-width: 1200px;">
             <div class="modal-header">
-                <h2>Crawl History</h2>
+                <h2 data-i18n="app.modal_crawl_history">Crawl History</h2>
                 <button class="modal-close" onclick="closeDashboard()">&times;</button>
             </div>
             <div class="modal-body">
                 <div id="dashboardContent" style="padding: 20px;">
-                    <p style="text-align: center; color: #9ca3af;">Loading crawls...</p>
+                    <p style="text-align: center; color: #9ca3af;" data-i18n="app.modal_loading_crawls">Loading crawls...</p>
                 </div>
             </div>
         </div>
@@ -505,41 +506,41 @@
     <div id="settingsModal" class="modal" style="display: none;">
         <div class="modal-content">
             <div class="modal-header">
-                <h2>Settings</h2>
+                <h2 data-i18n="app.modal_settings">Settings</h2>
                 <button class="modal-close" onclick="closeSettings()">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="settings-tabs">
-                    <button class="settings-tab-btn active" onclick="switchSettingsTab('crawler')">Crawler</button>
-                    <button class="settings-tab-btn" onclick="switchSettingsTab('requests')">Requests</button>
-                    <button class="settings-tab-btn" onclick="switchSettingsTab('filters')">Filters</button>
-                    <button class="settings-tab-btn" onclick="switchSettingsTab('export')">Export</button>
-                    <button class="settings-tab-btn" onclick="switchSettingsTab('javascript')">JavaScript</button>
-                    <button class="settings-tab-btn" onclick="switchSettingsTab('issues')">Issue Exclusion</button>
-                    <button class="settings-tab-btn" onclick="switchSettingsTab('customcss')">Custom CSS</button>
-                    <button class="settings-tab-btn" onclick="switchSettingsTab('advanced')">Advanced</button>
+                    <button class="settings-tab-btn active" onclick="switchSettingsTab('crawler')" data-i18n="app.settings_tab_crawler">Crawler</button>
+                    <button class="settings-tab-btn" onclick="switchSettingsTab('requests')" data-i18n="app.settings_tab_requests">Requests</button>
+                    <button class="settings-tab-btn" onclick="switchSettingsTab('filters')" data-i18n="app.settings_tab_filters">Filters</button>
+                    <button class="settings-tab-btn" onclick="switchSettingsTab('export')" data-i18n="app.settings_tab_export">Export</button>
+                    <button class="settings-tab-btn" onclick="switchSettingsTab('javascript')" data-i18n="app.settings_tab_javascript">JavaScript</button>
+                    <button class="settings-tab-btn" onclick="switchSettingsTab('issues')" data-i18n="app.settings_tab_issues">Issue Exclusion</button>
+                    <button class="settings-tab-btn" onclick="switchSettingsTab('customcss')" data-i18n="app.settings_tab_customcss">Custom CSS</button>
+                    <button class="settings-tab-btn" onclick="switchSettingsTab('advanced')" data-i18n="app.settings_tab_advanced">Advanced</button>
                 </div>
 
                 <!-- Crawler Settings -->
                 <div id="crawler-settings" class="settings-tab-content active">
-                    <h3>Crawler Configuration</h3>
+                    <h3 data-i18n="app.settings_crawler_title">Crawler Configuration</h3>
 
                     <div class="setting-group">
-                        <label for="maxDepth">Maximum Crawl Depth</label>
+                        <label for="maxDepth" data-i18n="app.settings_max_depth">Maximum Crawl Depth</label>
                         <input type="number" id="maxDepth" value="3" min="1" max="10">
-                        <span class="setting-help">How deep to crawl from the starting URL</span>
+                        <span class="setting-help" data-i18n="app.settings_max_depth_help">How deep to crawl from the starting URL</span>
                     </div>
 
                     <div class="setting-group">
-                        <label for="maxUrls">Maximum URLs to Crawl</label>
+                        <label for="maxUrls" data-i18n="app.settings_max_urls">Maximum URLs to Crawl</label>
                         <input type="number" id="maxUrls" value="5000000" min="1" max="5000000">
-                        <span class="setting-help">Stop crawling after this many URLs</span>
+                        <span class="setting-help" data-i18n="app.settings_max_urls_help">Stop crawling after this many URLs</span>
                     </div>
 
                     <div class="setting-group">
-                        <label for="crawlDelay">Crawl Delay (seconds)</label>
+                        <label for="crawlDelay" data-i18n="app.settings_crawl_delay">Crawl Delay (seconds)</label>
                         <input type="number" id="crawlDelay" value="1" min="0" max="60" step="0.1">
-                        <span class="setting-help">Delay between requests to be respectful</span>
+                        <span class="setting-help" data-i18n="app.settings_crawl_delay_help">Delay between requests to be respectful</span>
                     </div>
 
                     <div class="setting-group">
@@ -547,7 +548,8 @@
                             <input type="checkbox" id="followRedirects" checked>
                             Follow Redirects
                         </label>
-                        <span class="setting-help">Follow 3xx redirects automatically</span>
+
+                        <span class="setting-help" data-i18n="app.settings_follow_redirects_help">Follow 3xx redirects automatically</span>
                     </div>
 
                     <div class="setting-group">
@@ -555,36 +557,36 @@
                             <input type="checkbox" id="crawlExternalLinks">
                             Crawl External Links
                         </label>
-                        <span class="setting-help">Include external domains in crawl</span>
+                        <span class="setting-help" data-i18n="app.settings_crawl_external_help">Include external domains in crawl</span>
                     </div>
                 </div>
 
                 <!-- Request Settings -->
                 <div id="requests-settings" class="settings-tab-content">
-                    <h3>HTTP Request Configuration</h3>
+                    <h3 data-i18n="app.settings_requests_title">HTTP Request Configuration</h3>
 
                     <div class="setting-group">
-                        <label for="userAgent">User Agent</label>
+                        <label for="userAgent" data-i18n="app.settings_user_agent">User Agent</label>
                         <input type="text" id="userAgent" value="LibreCrawl/1.0 (Web Crawler)">
-                        <span class="setting-help">User agent string sent with requests</span>
+                        <span class="setting-help" data-i18n="app.settings_user_agent_help">User agent string sent with requests</span>
                     </div>
 
                     <div class="setting-group">
-                        <label for="timeout">Request Timeout (seconds)</label>
+                        <label for="timeout" data-i18n="app.settings_timeout">Request Timeout (seconds)</label>
                         <input type="number" id="timeout" value="10" min="1" max="120">
-                        <span class="setting-help">How long to wait for a response</span>
+                        <span class="setting-help" data-i18n="app.settings_timeout_help">How long to wait for a response</span>
                     </div>
 
                     <div class="setting-group">
-                        <label for="retries">Retry Attempts</label>
+                        <label for="retries" data-i18n="app.settings_retries">Retry Attempts</label>
                         <input type="number" id="retries" value="3" min="0" max="10">
-                        <span class="setting-help">Number of retries for failed requests</span>
+                        <span class="setting-help" data-i18n="app.settings_retries_help">Number of retries for failed requests</span>
                     </div>
 
                     <div class="setting-group">
-                        <label for="acceptLanguage">Accept Language</label>
+                        <label for="acceptLanguage" data-i18n="app.settings_accept_lang">Accept Language</label>
                         <input type="text" id="acceptLanguage" value="en-US,en;q=0.9">
-                        <span class="setting-help">Preferred language for responses</span>
+                        <span class="setting-help" data-i18n="app.settings_accept_lang_help">Preferred language for responses</span>
                     </div>
 
                     <div class="setting-group">
@@ -592,7 +594,7 @@
                             <input type="checkbox" id="respectRobotsTxt" checked>
                             Respect robots.txt
                         </label>
-                        <span class="setting-help">Check robots.txt before crawling</span>
+                        <span class="setting-help" data-i18n="app.settings_robots_txt_help">Check robots.txt before crawling</span>
                     </div>
 
                     <div class="setting-group">
@@ -600,7 +602,7 @@
                             <input type="checkbox" id="allowCookies" checked>
                             Allow Cookies
                         </label>
-                        <span class="setting-help">Accept and send cookies</span>
+                        <span class="setting-help" data-i18n="app.settings_cookies_help">Accept and send cookies</span>
                     </div>
 
                     <div class="setting-group">
@@ -608,7 +610,7 @@
                             <input type="checkbox" id="discoverSitemaps" checked>
                             Discover Sitemaps
                         </label>
-                        <span class="setting-help">Automatically find and parse sitemap.xml files (including nested sitemaps)</span>
+                        <span class="setting-help" data-i18n="app.settings_sitemaps_help">Automatically find and parse sitemap.xml files (including nested sitemaps)</span>
                     </div>
 
                     <div class="setting-group">
@@ -616,11 +618,11 @@
                             <input type="checkbox" id="enablePageSpeed">
                             Enable PageSpeed Analysis
                         </label>
-                        <span class="setting-help">Run Google PageSpeed Insights on homepage and 2 category pages after crawl completes</span>
+                        <span class="setting-help" data-i18n="app.settings_pagespeed_enable_help">Run Google PageSpeed Insights on homepage and 2 category pages after crawl completes</span>
                     </div>
 
                     <div class="setting-group">
-                        <label for="googleApiKey">Google PageSpeed API Key</label>
+                        <label for="googleApiKey" data-i18n="app.settings_pagespeed_key">Google PageSpeed API Key</label>
                         <input type="password" id="googleApiKey" placeholder="Enter your Google PageSpeed Insights API key">
                         <span class="setting-help">
                             API key for higher rate limits (25k requests/day vs limited without key).
@@ -631,36 +633,36 @@
 
                 <!-- Filter Settings -->
                 <div id="filters-settings" class="settings-tab-content">
-                    <h3>Content Filters</h3>
+                    <h3 data-i18n="app.settings_filters_title">Content Filters</h3>
 
                     <div class="setting-group">
-                        <label for="includeExtensions">Include File Extensions</label>
+                        <label for="includeExtensions" data-i18n="app.settings_include_ext">Include File Extensions</label>
                         <input type="text" id="includeExtensions" value="html,htm,php,asp,aspx,jsp">
-                        <span class="setting-help">Comma-separated list of extensions to crawl</span>
+                        <span class="setting-help" data-i18n="app.settings_include_ext_help">Comma-separated list of extensions to crawl</span>
                     </div>
 
                     <div class="setting-group">
-                        <label for="excludeExtensions">Exclude File Extensions</label>
+                        <label for="excludeExtensions" data-i18n="app.settings_exclude_ext">Exclude File Extensions</label>
                         <input type="text" id="excludeExtensions" value="pdf,doc,docx,zip,exe,dmg">
-                        <span class="setting-help">Comma-separated list of extensions to skip</span>
+                        <span class="setting-help" data-i18n="app.settings_exclude_ext_help">Comma-separated list of extensions to skip</span>
                     </div>
 
                     <div class="setting-group">
-                        <label for="includePatterns">Include URL Patterns</label>
+                        <label for="includePatterns" data-i18n="app.settings_include_patterns">Include URL Patterns</label>
                         <textarea id="includePatterns" rows="3" placeholder="One pattern per line (regex supported)"></textarea>
-                        <span class="setting-help">Only crawl URLs matching these patterns</span>
+                        <span class="setting-help" data-i18n="app.settings_include_patterns_help">Only crawl URLs matching these patterns</span>
                     </div>
 
                     <div class="setting-group">
-                        <label for="excludePatterns">Exclude URL Patterns</label>
+                        <label for="excludePatterns" data-i18n="app.settings_exclude_patterns">Exclude URL Patterns</label>
                         <textarea id="excludePatterns" rows="3" placeholder="One pattern per line (regex supported)"></textarea>
-                        <span class="setting-help">Skip URLs matching these patterns</span>
+                        <span class="setting-help" data-i18n="app.settings_exclude_patterns_help">Skip URLs matching these patterns</span>
                     </div>
 
                     <div class="setting-group">
-                        <label for="maxFileSize">Maximum File Size (MB)</label>
+                        <label for="maxFileSize" data-i18n="app.settings_max_filesize">Maximum File Size (MB)</label>
                         <input type="number" id="maxFileSize" value="50" min="1" max="1000">
-                        <span class="setting-help">Skip files larger than this size</span>
+                        <span class="setting-help" data-i18n="app.settings_max_filesize_help">Skip files larger than this size</span>
                     </div>
 
                     <h3 style="margin-top: 30px;">Duplication Detection</h3>
@@ -670,11 +672,11 @@
                             <input type="checkbox" id="enableDuplicationCheck" checked>
                             Enable Duplication Check
                         </label>
-                        <span class="setting-help">Detect duplicate content across all crawled pages</span>
+                        <span class="setting-help" data-i18n="app.settings_duplication_enable_help">Detect duplicate content across all crawled pages</span>
                     </div>
 
                     <div class="setting-group">
-                        <label for="duplicationThreshold">Duplication Similarity Threshold</label>
+                        <label for="duplicationThreshold" data-i18n="app.settings_duplication_threshold">Duplication Similarity Threshold</label>
                         <input type="number" id="duplicationThreshold" value="0.85" min="0" max="1" step="0.05">
                         <span class="setting-help">Content similarity threshold (0.0-1.0). Higher values = stricter matching. Default: 0.85 (85% similar)</span>
                     </div>
@@ -682,21 +684,21 @@
 
                 <!-- Export Settings -->
                 <div id="export-settings" class="settings-tab-content">
-                    <h3>Export Configuration</h3>
+                    <h3 data-i18n="app.settings_export_title">Export Configuration</h3>
 
                     <div class="setting-group">
-                        <label for="exportFormat">Default Export Format</label>
+                        <label for="exportFormat" data-i18n="app.settings_export_format">Default Export Format</label>
                         <select id="exportFormat">
                             <option value="csv">CSV</option>
                             <option value="xlsx">Excel (XLSX)</option>
                             <option value="json">JSON</option>
                             <option value="xml">XML</option>
                         </select>
-                        <span class="setting-help">Default format for data exports</span>
+                        <span class="setting-help" data-i18n="app.settings_export_format_help">Default format for data exports</span>
                     </div>
 
                     <div class="setting-group">
-                        <label>Export Fields</label>
+                        <label data-i18n="app.settings_export_fields">Export Fields</label>
                         <div class="checkbox-grid">
                             <label class="checkbox-label">
                                 <input type="checkbox" name="exportFields" value="url" checked>
@@ -792,36 +794,36 @@
 
                 <!-- JavaScript Settings -->
                 <div id="javascript-settings" class="settings-tab-content">
-                    <h3>JavaScript Rendering Configuration</h3>
+                    <h3 data-i18n="app.settings_js_title">JavaScript Rendering Configuration</h3>
 
                     <div class="setting-group">
                         <label class="checkbox-label">
                             <input type="checkbox" id="enableJavaScript">
                             Enable JavaScript Rendering
                         </label>
-                        <span class="setting-help">Render pages with JavaScript for dynamic content (slower but more accurate)</span>
+                        <span class="setting-help" data-i18n="app.settings_js_enable_help">Render pages with JavaScript for dynamic content (slower but more accurate)</span>
                     </div>
 
                     <div class="setting-group" id="jsSettings" style="display: none;">
-                        <label for="jsWaitTime">JavaScript Wait Time (seconds)</label>
+                        <label for="jsWaitTime" data-i18n="app.settings_js_wait">JavaScript Wait Time (seconds)</label>
                         <input type="number" id="jsWaitTime" value="3" min="0" max="30" step="0.5">
-                        <span class="setting-help">Time to wait for JavaScript to render after page load</span>
+                        <span class="setting-help" data-i18n="app.settings_js_wait_help">Time to wait for JavaScript to render after page load</span>
                     </div>
 
                     <div class="setting-group" id="jsTimeoutGroup" style="display: none;">
-                        <label for="jsTimeout">Page Load Timeout (seconds)</label>
+                        <label for="jsTimeout" data-i18n="app.settings_js_page_timeout">Page Load Timeout (seconds)</label>
                         <input type="number" id="jsTimeout" value="30" min="5" max="120">
-                        <span class="setting-help">Maximum time to wait for page to load</span>
+                        <span class="setting-help" data-i18n="app.settings_js_page_timeout_help">Maximum time to wait for page to load</span>
                     </div>
 
                     <div class="setting-group" id="jsBrowserGroup" style="display: none;">
-                        <label for="jsBrowser">Browser Engine</label>
+                        <label for="jsBrowser" data-i18n="app.settings_js_browser">Browser Engine</label>
                         <select id="jsBrowser">
-                            <option value="chromium">Chromium (Recommended)</option>
-                            <option value="firefox">Firefox</option>
-                            <option value="webkit">WebKit (Safari)</option>
+                            <option value="chromium" data-i18n="app.settings_js_chromium">Chromium (Recommended)</option>
+                            <option value="firefox" data-i18n="app.settings_js_firefox">Firefox</option>
+                            <option value="webkit" data-i18n="app.settings_js_webkit">WebKit (Safari)</option>
                         </select>
-                        <span class="setting-help">Browser engine for JavaScript rendering</span>
+                        <span class="setting-help" data-i18n="app.settings_js_browser_help">Browser engine for JavaScript rendering</span>
                     </div>
 
                     <div class="setting-group" id="jsHeadlessGroup" style="display: none;">
@@ -829,29 +831,29 @@
                             <input type="checkbox" id="jsHeadless" checked>
                             Headless Mode
                         </label>
-                        <span class="setting-help">Run browser without visible window (recommended for performance)</span>
+                        <span class="setting-help" data-i18n="app.settings_js_headless_help">Run browser without visible window (recommended for performance)</span>
                     </div>
 
                     <div class="setting-group" id="jsUserAgentGroup" style="display: none;">
-                        <label for="jsUserAgent">JavaScript User Agent</label>
+                        <label for="jsUserAgent" data-i18n="app.settings_js_useragent">JavaScript User Agent</label>
                         <input type="text" id="jsUserAgent" value="LibreCrawl/1.0 (Web Crawler with JavaScript)">
-                        <span class="setting-help">User agent string for JavaScript-rendered pages</span>
+                        <span class="setting-help" data-i18n="app.settings_js_useragent_help">User agent string for JavaScript-rendered pages</span>
                     </div>
 
                     <div class="setting-group" id="jsViewportGroup" style="display: none;">
-                        <label>Browser Viewport Size</label>
+                        <label data-i18n="app.settings_js_viewport">Browser Viewport Size</label>
                         <div style="display: flex; gap: 10px; align-items: center;">
                             <input type="number" id="jsViewportWidth" value="1920" min="800" max="4000" placeholder="Width">
                             <span>×</span>
                             <input type="number" id="jsViewportHeight" value="1080" min="600" max="3000" placeholder="Height">
                         </div>
-                        <span class="setting-help">Browser window size for rendering (affects responsive layouts)</span>
+                        <span class="setting-help" data-i18n="app.settings_js_viewport_help">Browser window size for rendering (affects responsive layouts)</span>
                     </div>
 
                     <div class="setting-group" id="jsConcurrencyGroup" style="display: none;">
-                        <label for="jsMaxConcurrentPages">Max Concurrent Browser Pages</label>
+                        <label for="jsMaxConcurrentPages" data-i18n="app.settings_js_concurrency">Max Concurrent Browser Pages</label>
                         <input type="number" id="jsMaxConcurrentPages" value="3" min="1" max="10">
-                        <span class="setting-help">Number of browser pages for parallel JavaScript rendering (higher = faster but more memory)</span>
+                        <span class="setting-help" data-i18n="app.settings_js_concurrency_help">Number of browser pages for parallel JavaScript rendering (higher = faster but more memory)</span>
                     </div>
 
                     <div class="setting-group" id="jsWarning" style="display: none;">
@@ -864,15 +866,15 @@
 
                 <!-- Issue Exclusion Settings -->
                 <div id="issues-settings" class="settings-tab-content">
-                    <h3>Issue Exclusion Patterns</h3>
+                    <h3 data-i18n="app.settings_issues_title">Issue Exclusion Patterns</h3>
                     <p class="setting-help">URLs matching these patterns will be excluded from issue detection. These are typically admin areas, development files, and framework internals that should never be indexed by search engines.</p>
 
                     <div class="setting-group">
-                        <label for="issueExclusionPatterns">Exclusion Patterns (one per line)</label>
+                        <label for="issueExclusionPatterns" data-i18n="app.settings_issues_label">Exclusion Patterns (one per line)</label>
                         <textarea id="issueExclusionPatterns" rows="20" placeholder="/admin/*
 /wp-admin/*
 *.json"></textarea>
-                        <span class="setting-help">Use * for wildcards. Examples: /admin/*, *.json, /test/*</span>
+                        <span class="setting-help" data-i18n="app.settings_issues_help">Use * for wildcards. Examples: /admin/*, *.json, /test/*</span>
                         <div style="margin-top: 10px;">
                             <button type="button" onclick="resetIssueExclusions()" style="background: #6b7280; padding: 8px 16px; border-radius: 6px; border: none; color: white; cursor: pointer;">
                                 Reset to Defaults
@@ -896,17 +898,17 @@
 
                 <!-- Custom CSS Settings -->
                 <div id="customcss-settings" class="settings-tab-content">
-                    <h3>Custom CSS Styling</h3>
+                    <h3 data-i18n="app.settings_css_title">Custom CSS Styling</h3>
                     <p class="setting-help">Write custom CSS to personalize the look and feel of the LibreCrawl interface. Changes apply immediately after saving.</p>
 
                     <div class="setting-group">
-                        <label for="customCSS">Custom CSS Code</label>
+                        <label for="customCSS" data-i18n="app.settings_css_label">Custom CSS Code</label>
                         <textarea id="customCSS" rows="20" placeholder="/* Write your custom CSS here */
 /* Example: */
 /* .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); } */
 /* .data-table th { background-color: #4f46e5; } */
 /* .btn-primary { background: #10b981; } */"></textarea>
-                        <span class="setting-help">Enter valid CSS rules to customize the interface appearance</span>
+                        <span class="setting-help" data-i18n="app.settings_css_help">Enter valid CSS rules to customize the interface appearance</span>
                     </div>
 
                     <div class="setting-group">
@@ -938,29 +940,29 @@
 
                 <!-- Advanced Settings -->
                 <div id="advanced-settings" class="settings-tab-content">
-                    <h3>Advanced Configuration</h3>
+                    <h3 data-i18n="app.settings_advanced_title">Advanced Configuration</h3>
 
                     <div class="setting-group">
-                        <label for="concurrency">Concurrent Requests</label>
+                        <label for="concurrency" data-i18n="app.settings_concurrency">Concurrent Requests</label>
                         <input type="number" id="concurrency" value="5" min="1" max="50">
-                        <span class="setting-help">Number of simultaneous requests (higher = faster but more resource intensive)</span>
+                        <span class="setting-help" data-i18n="app.settings_concurrency_help">Number of simultaneous requests (higher = faster but more resource intensive)</span>
                     </div>
 
                     <div class="setting-group">
-                        <label for="memoryLimit">Memory Limit (MB)</label>
+                        <label for="memoryLimit" data-i18n="app.settings_memory">Memory Limit (MB)</label>
                         <input type="number" id="memoryLimit" value="512" min="64" max="4096">
-                        <span class="setting-help">Maximum memory usage for crawl data</span>
+                        <span class="setting-help" data-i18n="app.settings_memory_help">Maximum memory usage for crawl data</span>
                     </div>
 
                     <div class="setting-group">
-                        <label for="logLevel">Log Level</label>
+                        <label for="logLevel" data-i18n="app.settings_log_level">Log Level</label>
                         <select id="logLevel">
                             <option value="DEBUG">Debug</option>
                             <option value="INFO" selected>Info</option>
                             <option value="WARNING">Warning</option>
                             <option value="ERROR">Error</option>
                         </select>
-                        <span class="setting-help">Logging verbosity level</span>
+                        <span class="setting-help" data-i18n="app.settings_log_level_help">Logging verbosity level</span>
                     </div>
 
                     <div class="setting-group">
@@ -968,7 +970,7 @@
                             <input type="checkbox" id="saveSession">
                             Save Session Data
                         </label>
-                        <span class="setting-help">Automatically save crawl data between sessions</span>
+                        <span class="setting-help" data-i18n="app.settings_save_session_help">Automatically save crawl data between sessions</span>
                     </div>
 
                     <div class="setting-group">
@@ -976,30 +978,31 @@
                             <input type="checkbox" id="enableProxy">
                             Enable Proxy
                         </label>
-                        <span class="setting-help">Route requests through a proxy server</span>
+                        <span class="setting-help" data-i18n="app.settings_proxy_enable_help">Route requests through a proxy server</span>
                     </div>
 
                     <div class="setting-group" id="proxySettings" style="display: none;">
-                        <label for="proxyUrl">Proxy URL</label>
+                        <label for="proxyUrl" data-i18n="app.settings_proxy_url">Proxy URL</label>
                         <input type="text" id="proxyUrl" placeholder="http://proxy.example.com:8080">
-                        <span class="setting-help">Proxy server URL with port</span>
+                        <span class="setting-help" data-i18n="app.settings_proxy_url_help">Proxy server URL with port</span>
                     </div>
 
                     <div class="setting-group">
-                        <label for="customHeaders">Custom Headers</label>
+                        <label for="customHeaders" data-i18n="app.settings_custom_headers">Custom Headers</label>
                         <textarea id="customHeaders" rows="4" placeholder="Header-Name: Header-Value&#10;Another-Header: Another-Value"></textarea>
-                        <span class="setting-help">Additional HTTP headers to send (one per line)</span>
+                        <span class="setting-help" data-i18n="app.settings_custom_headers_help">Additional HTTP headers to send (one per line)</span>
                     </div>
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="resetSettings()">Reset to Defaults</button>
-                <button class="btn btn-secondary" onclick="closeSettings()">Cancel</button>
-                <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
+                <button class="btn btn-secondary" onclick="resetSettings()" data-i18n="app.btn_reset_defaults">Reset to Defaults</button>
+                <button class="btn btn-secondary" onclick="closeSettings()" data-i18n="app.btn_cancel">Cancel</button>
+                <button class="btn btn-primary" onclick="saveSettings()" data-i18n="app.btn_save_settings">Save Settings</button>
             </div>
         </div>
     </div>
 
+    <script src="/static/js/i18n.js"></script>
     <script src="/static/js/incremental_poller.js"></script>
     <script src="/static/js/virtual-scroller.js"></script>
     <script src="/static/js/column-resize.js"></script>
