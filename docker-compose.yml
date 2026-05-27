@@ -9,7 +9,7 @@ services:
       - "${HOST_BINDING:-127.0.0.1}:5000:5000"
     volumes:
       # Persist the user database and settings
-      - ./data:/app/data
+      - librecrawl-data:/app/data
     environment:
       - FLASK_APP=main.py
       - PYTHONUNBUFFERED=1
@@ -51,4 +51,7 @@ services:
 
     # Increase shared memory size for Chrome to prevent crashes
     shm_size: '2gb'
+
+volumes:
+  librecrawl-data:
 
