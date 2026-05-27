@@ -17,6 +17,8 @@ services:
       - LOCAL_MODE=${LOCAL_MODE:-true}
       # Set to "true" to disable new user registrations
       - REGISTRATION_DISABLED=${REGISTRATION_DISABLED:-false}
+      # Set to "true" to disable guest login
+      - DISABLE_GUEST=${DISABLE_GUEST:-false}
       # Set to "true" for demo mode (1.5GB per-user memory limit)
       - DEMO_MODE=${DEMO_MODE:-false}
       # DANGEROUS: Set to "true" to allow login as any username with no password
