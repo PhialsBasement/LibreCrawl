@@ -327,7 +327,8 @@ LibreCrawlPlugin.register({
             }
 
             // Check for author information (20 points)
-            if (url.meta_author || (url.og_tags && url.og_tags.author)) {
+            // Backend stores the field as 'author' (from <meta name="author"> or <link rel="author">)
+            if (url.author || (url.og_tags && url.og_tags.author)) {
                 score += 20;
                 pagesWithAuthor++;
                 urlData.hasAuthor = true;
