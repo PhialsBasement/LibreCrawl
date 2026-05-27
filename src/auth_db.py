@@ -516,9 +516,16 @@ def verify_token(token):
             if datetime.now() > expires_at:
                 return False, "This verification link has expired", None, None
 
-            # Mark user as verified
+            # Mark user as verified and promote registered accounts out of
+            # the guest tier so account-only features like settings unlock.
             cursor.execute('''
-                UPDATE users SET verified = 1 WHERE id = ?
+                UPDATE users
+                SET verified = 1,
+                    tier = CASE
+                        WHEN tier IS NULL OR tier = 'guest' THEN 'user'
+                        ELSE tier
+                    END
+                WHERE id = ?
             ''', (result['user_id'],))
 
             # Mark token as used
