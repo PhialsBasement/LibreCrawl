@@ -102,6 +102,11 @@ def init_crawl_tables():
                 external_links INTEGER,
                 internal_links INTEGER,
 
+                author TEXT,
+                keywords TEXT,
+                generator TEXT,
+                theme_color TEXT,
+
                 response_time REAL,
                 javascript_rendered BOOLEAN DEFAULT 0,
                 error_type TEXT,
@@ -117,6 +122,13 @@ def init_crawl_tables():
             cursor.execute('ALTER TABLE crawled_urls ADD COLUMN error_type TEXT')
         except sqlite3.OperationalError:
             pass  # Column already exists
+
+        # Migration: add author/keywords/generator/theme_color columns
+        for col in [('author', 'TEXT'), ('keywords', 'TEXT'), ('generator', 'TEXT'), ('theme_color', 'TEXT')]:
+            try:
+                cursor.execute(f'ALTER TABLE crawled_urls ADD COLUMN {col[0]} {col[1]}')
+            except sqlite3.OperationalError:
+                pass  # Column already exists
 
         # Links table
         cursor.execute('''
@@ -294,7 +306,11 @@ def save_url_batch(crawl_id, urls):
                     url_data.get('internal_links'),
                     url_data.get('response_time'),
                     url_data.get('javascript_rendered', False),
-                    url_data.get('error_type')
+                    url_data.get('error_type'),
+                    url_data.get('author'),
+                    url_data.get('keywords'),
+                    url_data.get('generator'),
+                    url_data.get('theme_color'),
                 )
                 rows.append(row)
 
@@ -306,8 +322,8 @@ def save_url_batch(crawl_id, urls):
                     meta_tags, og_tags, twitter_tags, json_ld, analytics, images,
                     hreflang, schema_org, redirects, linked_from,
                     external_links, internal_links, response_time, javascript_rendered,
-                    error_type
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    error_type, author, keywords, generator, theme_color
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', rows)
 
             print(f"Saved {len(urls)} URLs to database for crawl {crawl_id}")

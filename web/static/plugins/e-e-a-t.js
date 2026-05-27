@@ -327,8 +327,9 @@ LibreCrawlPlugin.register({
             }
 
             // Check for author information (20 points)
-            // Backend stores the field as 'author' (from <meta name="author"> or <link rel="author">)
-            if (url.author || (url.og_tags && url.og_tags.author)) {
+            // 'author' is the direct field; fall back to meta_tags.author (DB-loaded crawls)
+            // and og_tags.author (OpenGraph)
+            if (url.author || (url.meta_tags && url.meta_tags.author) || (url.og_tags && url.og_tags.author)) {
                 score += 20;
                 pagesWithAuthor++;
                 urlData.hasAuthor = true;
