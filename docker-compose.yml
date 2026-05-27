@@ -2,6 +2,7 @@ services:
   librecrawl:
     build: .
     container_name: librecrawl
+    user: "${UID:-1000}:${GID:-1000}"
     ports:
       # In local mode: only localhost (127.0.0.1:5000)
       # In production mode: all interfaces (0.0.0.0:5000) for LAN/WAN access
