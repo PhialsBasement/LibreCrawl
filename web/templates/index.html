@@ -678,7 +678,7 @@
                     <div class="setting-group">
                         <label for="duplicationThreshold" data-i18n="app.settings_duplication_threshold">Duplication Similarity Threshold</label>
                         <input type="number" id="duplicationThreshold" value="0.85" min="0" max="1" step="0.05">
-                        <span class="setting-help">Content similarity threshold (0.0-1.0). Higher values = stricter matching. Default: 0.85 (85% similar)</span>
+                        <span class="setting-help" data-i18n="app.settings_duplication_threshold_help">Content similarity threshold (0.0-1.0). Higher values = stricter matching. Default: 0.85 (85% similar)</span>
                     </div>
                 </div>
 
@@ -867,7 +867,7 @@
                 <!-- Issue Exclusion Settings -->
                 <div id="issues-settings" class="settings-tab-content">
                     <h3 data-i18n="app.settings_issues_title">Issue Exclusion Patterns</h3>
-                    <p class="setting-help">URLs matching these patterns will be excluded from issue detection. These are typically admin areas, development files, and framework internals that should never be indexed by search engines.</p>
+                    <p class="setting-help" data-i18n="app.settings_issues_desc">URLs matching these patterns will be excluded from issue detection. These are typically admin areas, development files, and framework internals that should never be indexed by search engines.</p>
 
                     <div class="setting-group">
                         <label for="issueExclusionPatterns" data-i18n="app.settings_issues_label">Exclusion Patterns (one per line)</label>
@@ -876,15 +876,15 @@
 *.json"></textarea>
                         <span class="setting-help" data-i18n="app.settings_issues_help">Use * for wildcards. Examples: /admin/*, *.json, /test/*</span>
                         <div style="margin-top: 10px;">
-                            <button type="button" onclick="resetIssueExclusions()" style="background: #6b7280; padding: 8px 16px; border-radius: 6px; border: none; color: white; cursor: pointer;">
+                            <button type="button" onclick="resetIssueExclusions()" style="background: #6b7280; padding: 8px 16px; border-radius: 6px; border: none; color: white; cursor: pointer;" data-i18n="app.settings_issues_reset">
                                 Reset to Defaults
                             </button>
-                            <span class="setting-help" style="margin-left: 10px;">Restore the default exclusion patterns</span>
+                            <span class="setting-help" style="margin-left: 10px;" data-i18n="app.settings_issues_reset_help">Restore the default exclusion patterns</span>
                         </div>
                     </div>
 
                     <div class="setting-group">
-                        <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 6px; padding: 12px;">
+                        <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 6px; padding: 12px;" data-i18n-html="app.settings_issues_defaults_html">
                             <strong>ℹ️ Default Exclusions Include:</strong><br>
                             • WordPress admin areas (/wp-admin/*, /wp-content/plugins/*)<br>
                             • Common admin panels (/admin/*, /administrator/*, /cpanel/*)<br>
@@ -899,7 +899,7 @@
                 <!-- Custom CSS Settings -->
                 <div id="customcss-settings" class="settings-tab-content">
                     <h3 data-i18n="app.settings_css_title">Custom CSS Styling</h3>
-                    <p class="setting-help">Write custom CSS to personalize the look and feel of the LibreCrawl interface. Changes apply immediately after saving.</p>
+                    <p class="setting-help" data-i18n="app.settings_css_desc">Write custom CSS to personalize the look and feel of the LibreCrawl interface. Changes apply immediately after saving.</p>
 
                     <div class="setting-group">
                         <label for="customCSS" data-i18n="app.settings_css_label">Custom CSS Code</label>
@@ -912,7 +912,7 @@
                     </div>
 
                     <div class="setting-group">
-                        <div style="background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 6px; padding: 12px;">
+                        <div style="background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 6px; padding: 12px;" data-i18n-html="app.settings_css_tips_html">
                             <strong>💡 CSS Tips:</strong><br>
                             • Target specific elements: <code>.header</code>, <code>.data-table</code>, <code>.sidebar</code><br>
                             • Change colors: <code>background-color</code>, <code>color</code>, <code>border-color</code><br>
