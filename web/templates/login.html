@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - LibreCrawl</title>
+    <title data-i18n="login.title">Login - LibreCrawl</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * {
@@ -29,7 +29,23 @@
             width: 100%;
             max-width: 420px;
             padding: 48px 40px;
+            position: relative;
         }
+
+        .lang-toggle {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            background: none;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 4px 10px;
+            font-size: 13px;
+            cursor: pointer;
+            color: #6b7280;
+            font-family: 'Inter', sans-serif;
+        }
+        .lang-toggle:hover { background: #f9fafb; }
 
         .logo {
             text-align: center;
@@ -167,9 +183,11 @@
 </head>
 <body>
     <div class="login-container">
+        <button class="lang-toggle i18n-toggle" onclick="i18n.toggle()">🇩🇪 DE</button>
+
         <div class="logo">
             <h1>LibreCrawl</h1>
-            <p>SEO Spider Tool</p>
+            <p data-i18n="login.subtitle">SEO Spider Tool</p>
         </div>
 
         <div id="alert" class="alert"></div>
@@ -184,13 +202,13 @@
 
         <form id="loginForm">
             <div class="form-group">
-                <label for="username">Username</label>
+                <label for="username" data-i18n="login.username">Username</label>
                 <input type="text" id="username" name="username" required autofocus maxlength="50">
             </div>
 
             {% if not skip_auth %}
             <div class="form-group">
-                <label for="password">Password</label>
+                <label for="password" data-i18n="login.password">Password</label>
                 <input type="password" id="password" name="password" required>
             </div>
             {% endif %}
@@ -199,30 +217,38 @@
         </form>
 
         {% if not guest_disabled and not skip_auth %}
-        <button class="btn btn-guest" id="guestBtn">Continue as Guest (3 crawls/24h)</button>
+        <button class="btn btn-guest" id="guestBtn" data-i18n="login.guest">Continue as Guest (3 crawls/24h)</button>
         {% endif %}
 
         {% if not skip_auth %}
         <div class="register-link">
-            Don't have an account? <a href="/register" id="registerLink">Register here</a>
+            <span data-i18n="login.no_account">Don't have an account?</span>
+            <a href="/register" id="registerLink" data-i18n="login.register_here">Register here</a>
         </div>
         {% endif %}
     </div>
 
+    <script src="/static/js/i18n.js"></script>
     <script>
+        const skipAuth = {{ 'true' if skip_auth else 'false' }};
+
+        // Set login button text from i18n after load
+        document.addEventListener('DOMContentLoaded', () => {
+            const loginBtn = document.getElementById('loginBtn');
+            loginBtn.textContent = skipAuth ? i18n.t('login.btn_continue') : i18n.t('login.btn_login');
+        });
+
         const form = document.getElementById('loginForm');
         const loginBtn = document.getElementById('loginBtn');
-        const alert = document.getElementById('alert');
-        const skipAuth = {{ 'true' if skip_auth else 'false' }};
-        const defaultLoginText = loginBtn.textContent;
+        const alertEl = document.getElementById('alert');
 
         function showAlert(message, type) {
-            alert.textContent = message;
-            alert.className = `alert alert-${type} show`;
+            alertEl.textContent = message;
+            alertEl.className = `alert alert-${type} show`;
         }
 
         function hideAlert() {
-            alert.className = 'alert';
+            alertEl.className = 'alert';
         }
 
         form.addEventListener('submit', async (e) => {
@@ -232,16 +258,15 @@
             const username = document.getElementById('username').value;
             const passwordEl = document.getElementById('password');
             const password = passwordEl ? passwordEl.value : '';
+            const defaultText = loginBtn.textContent;
 
             loginBtn.disabled = true;
-            loginBtn.textContent = skipAuth ? 'Continuing...' : 'Logging in...';
+            loginBtn.textContent = skipAuth ? i18n.t('login.btn_continuing') : i18n.t('login.btn_logging_in');
 
             try {
                 const response = await fetch('/api/login', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ username, password })
                 });
 
@@ -249,18 +274,16 @@
 
                 if (data.success) {
                     showAlert(data.message, 'success');
-                    setTimeout(() => {
-                        window.location.href = '/';
-                    }, 500);
+                    setTimeout(() => { window.location.href = '/'; }, 500);
                 } else {
                     showAlert(data.message, 'error');
                     loginBtn.disabled = false;
-                    loginBtn.textContent = defaultLoginText;
+                    loginBtn.textContent = defaultText;
                 }
             } catch (error) {
-                showAlert('An error occurred. Please try again.', 'error');
+                showAlert(i18n.t('login.error_generic'), 'error');
                 loginBtn.disabled = false;
-                loginBtn.textContent = defaultLoginText;
+                loginBtn.textContent = defaultText;
             }
         });
 
@@ -268,44 +291,40 @@
         const guestBtn = document.getElementById('guestBtn');
         if (guestBtn) guestBtn.addEventListener('click', async () => {
             hideAlert();
+            const defaultText = guestBtn.textContent;
             guestBtn.disabled = true;
-            guestBtn.textContent = 'Entering as guest...';
+            guestBtn.textContent = i18n.t('login.guest_entering');
 
             try {
                 const response = await fetch('/api/guest-login', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
+                    headers: { 'Content-Type': 'application/json' }
                 });
 
                 const data = await response.json();
 
                 if (data.success) {
-                    showAlert('Entering as guest...', 'success');
-                    setTimeout(() => {
-                        window.location.href = '/';
-                    }, 500);
+                    showAlert(i18n.t('login.guest_entering'), 'success');
+                    setTimeout(() => { window.location.href = '/'; }, 500);
                 } else {
-                    showAlert(data.message || 'Failed to enter as guest', 'error');
+                    showAlert(data.message || i18n.t('login.guest_error'), 'error');
                     guestBtn.disabled = false;
-                    guestBtn.textContent = 'Continue as Guest (3 crawls/24h)';
+                    guestBtn.textContent = defaultText;
                 }
             } catch (error) {
-                showAlert('An error occurred. Please try again.', 'error');
+                showAlert(i18n.t('login.error_generic'), 'error');
                 guestBtn.disabled = false;
-                guestBtn.textContent = 'Continue as Guest (3 crawls/24h)';
+                guestBtn.textContent = defaultText;
             }
         });
 
-        // Check if registration is disabled
         const registrationDisabled = {{ 'true' if registration_disabled else 'false' }};
         const registerLink = document.getElementById('registerLink');
 
         if (registrationDisabled && registerLink) {
             registerLink.addEventListener('click', (e) => {
                 e.preventDefault();
-                window.alert('Registrations are disabled');
+                window.alert(i18n.t('login.registrations_disabled'));
             });
         }
     </script>

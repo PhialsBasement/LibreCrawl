@@ -2,13 +2,17 @@ services:
   librecrawl:
     build: .
     container_name: librecrawl
+    user: "${UID:-1000}:${GID:-1000}"
     ports:
       # In local mode: only localhost (127.0.0.1:5000)
       # In production mode: all interfaces (0.0.0.0:5000) for LAN/WAN access
       - "${HOST_BINDING:-127.0.0.1}:5000:5000"
     volumes:
       # Persist the user database and settings
-      - ./data:/app/data
+      # Use a named volume so Docker preserves the /app/data ownership from
+      # the image. A root-owned bind mount can prevent SQLite from creating
+      # users.db when the app runs as the non-root librecrawl user.
+      - librecrawl-data:/app/data
     environment:
       - FLASK_APP=main.py
       - PYTHONUNBUFFERED=1
@@ -16,6 +20,8 @@ services:
       - LOCAL_MODE=${LOCAL_MODE:-true}
       # Set to "true" to disable new user registrations
       - REGISTRATION_DISABLED=${REGISTRATION_DISABLED:-false}
+      # Set to "true" to disable guest login
+      - DISABLE_GUEST=${DISABLE_GUEST:-false}
       # Set to "true" for demo mode (1.5GB per-user memory limit)
       - DEMO_MODE=${DEMO_MODE:-false}
       # DANGEROUS: Set to "true" to allow login as any username with no password
@@ -50,4 +56,7 @@ services:
 
     # Increase shared memory size for Chrome to prevent crashes
     shm_size: '2gb'
+
+volumes:
+  librecrawl-data:
 

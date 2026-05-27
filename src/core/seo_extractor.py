@@ -78,6 +78,13 @@ class SEOExtractor:
         canonical = soup.find('link', attrs={'rel': 'canonical'})
         result['canonical_url'] = canonical.get('href', '') if canonical else ''
 
+        # Extract author from <link rel="author"> if not already set via <meta name="author">
+        # BeautifulSoup treats rel as a list, so rel='author' also matches rel="nofollow author"
+        if not result.get('author'):
+            author_link = soup.find('link', rel='author')
+            if author_link:
+                result['author'] = author_link.get('href', '')
+
     @staticmethod
     def extract_opengraph_tags(soup, result):
         """Extract OpenGraph meta tags"""
