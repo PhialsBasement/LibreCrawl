@@ -90,6 +90,8 @@ For production deployment with user authentication, edit your `.env` file:
 LOCAL_MODE=false
 HOST_BINDING=0.0.0.0
 REGISTRATION_DISABLED=false
+# Generate with: python -c "import secrets; print(secrets.token_hex(32))"
+SECRET_KEY=replace-with-a-long-random-string
 ```
 
 

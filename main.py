@@ -39,14 +39,17 @@ parser.add_argument('--dangerously-skip-auth', '-dsa', action='store_true',
                          'Do NOT use on a public network or in production.')
 args = parser.parse_args()
 
-LOCAL_MODE = args.local
-DISABLE_REGISTER = args.disable_register
+LOCAL_MODE = args.local or os.getenv('LOCAL_MODE', '').lower() in ('true', '1', 'yes')
+DISABLE_REGISTER = args.disable_register or os.getenv('REGISTRATION_DISABLED', '').lower() in ('true', '1', 'yes')
 DISABLE_GUEST = args.disable_guest or os.getenv('DISABLE_GUEST', '').lower() in ('true', '1', 'yes')
 DEMO_MODE = args.demo or os.getenv('DEMO_MODE', '').lower() in ('true', '1', 'yes')
 SKIP_AUTH = args.dangerously_skip_auth or os.getenv('DANGEROUSLY_SKIP_AUTH', '').lower() in ('true', '1', 'yes')
 
 app = Flask(__name__, template_folder='web/templates', static_folder='web/static')
-app.secret_key = 'librecrawl-secret-key-change-in-production'  # TODO: Use environment variable in production
+app.secret_key = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
+if not os.environ.get('SECRET_KEY'):
+    print('⚠️  WARNING: SECRET_KEY not set — using an ephemeral random key. '
+          'Sessions will not persist across restarts. Set SECRET_KEY in production.', flush=True)
 
 # Enable compression for all responses
 Compress(app)

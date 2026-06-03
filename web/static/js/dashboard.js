@@ -55,7 +55,7 @@ async function openDashboard() {
                     <td><span style="color: ${statusColor};">${status}</span></td>
                     <td style="white-space: nowrap;">
                         <button class="btn btn-primary" style="margin-right: 5px; padding: 6px 12px; font-size: 13px;" onclick="loadCrawlFromDashboard(${crawl.id})">Load</button>
-                        <button class="btn btn-secondary" style="margin-right: 5px; padding: 6px 12px; font-size: 13px;" onclick="resumeCrawlFromDashboard(${crawl.id})">Resume</button>
+                        ${['paused', 'failed', 'running', 'stopped'].includes(status) ? `<button class="btn btn-secondary" style="margin-right: 5px; padding: 6px 12px; font-size: 13px;" onclick="resumeCrawlFromDashboard(${crawl.id})">Resume</button>` : ''}
                         <button class="btn btn-danger" style="padding: 6px 12px; font-size: 13px;" onclick="deleteCrawlFromDashboard(${crawl.id})">Delete</button>
                     </td>
                 </tr>
