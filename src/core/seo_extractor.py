@@ -306,5 +306,6 @@ class SEOExtractor:
             'hreflang': [],
             'schema_org': [],
             'linked_from': [],
+            'headers': {},
             'error': error
         }

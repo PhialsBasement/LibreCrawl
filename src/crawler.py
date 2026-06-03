@@ -1015,7 +1015,8 @@ class WebCrawler:
                 'redirects': [],
                 'hreflang': [],
                 'schema_org': [],
-                'linked_from': []
+                'linked_from': [],
+                'headers': {k.lower(): v for k, v in response.headers.items()} if response else {}
             }
 
             # Only parse HTML content
@@ -1096,7 +1097,7 @@ class WebCrawler:
 
         try:
             # Render page with JavaScript
-            html_content, status_code, error = await self.js_renderer.render_page(url)
+            html_content, status_code, headers, error = await self.js_renderer.render_page(url)
 
             if error:
                 return self.seo_extractor.create_empty_result(
@@ -1152,6 +1153,7 @@ class WebCrawler:
                 'hreflang': [],
                 'schema_org': [],
                 'linked_from': [],
+                'headers': {k.lower(): v for k, v in headers.items()} if headers else {},
                 'javascript_rendered': True
             }
 

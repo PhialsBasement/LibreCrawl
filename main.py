@@ -346,6 +346,8 @@ def generate_csv_export(urls, fields):
                 row[field] = ', '.join(value[:3]) + ('...' if len(value) > 3 else '')
             elif field == 'h3' and isinstance(value, list):
                 row[field] = ', '.join(value[:3]) + ('...' if len(value) > 3 else '')
+            elif field == 'headers' and isinstance(value, dict):
+                row[field] = '; '.join([f"{k}: {v}" for k, v in value.items()])
             elif isinstance(value, (dict, list)):
                 row[field] = str(value)
             else:

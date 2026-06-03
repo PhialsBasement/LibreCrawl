@@ -36,6 +36,7 @@ class IssueDetector:
         self._check_performance_issues(result, issues)
         self._check_indexability_issues(result, issues)
         self._check_broken_image_issues(result, issues)
+        self._check_security_headers(result, issues)
 
         # Add all detected issues
         with self.issues_lock:
@@ -541,6 +542,202 @@ class IssueDetector:
             505: 'HTTP Version Not Supported'
         }
         return messages.get(status_code, f'HTTP {status_code} Error')
+
+    def _check_security_headers(self, result, issues):
+        """Check for security-related HTTP headers"""
+        url = result.get('url', '')
+        # Only check successful or redirected pages, skip pages that failed to load completely
+        status_code = result.get('status_code', 0)
+        if status_code == 0 or status_code >= 400:
+            return
+
+        headers = result.get('headers', {})
+        if not isinstance(headers, dict):
+            headers = {}
+
+        # Content-Security-Policy (CSP)
+        csp = headers.get('content-security-policy', '')
+        if not csp:
+            issues.append({
+                'url': url,
+                'type': 'error',
+                'category': 'Security',
+                'issue': 'Missing Content-Security-Policy',
+                'details': 'Content-Security-Policy (CSP) header is not set. This exposes the site to Cross-Site Scripting (XSS) and code injection attacks.'
+            })
+        else:
+            # Check for unsafe directives in CSP
+            csp_lower = csp.lower()
+            unsafe_checks = []
+            if "'unsafe-inline'" in csp_lower:
+                unsafe_checks.append("'unsafe-inline'")
+            if "'unsafe-eval'" in csp_lower:
+                unsafe_checks.append("'unsafe-eval'")
+            if "script-src *" in csp_lower or "default-src *" in csp_lower:
+                unsafe_checks.append("wildcard '*' sources")
+
+            if unsafe_checks:
+                issues.append({
+                    'url': url,
+                    'type': 'warning',
+                    'category': 'Security',
+                    'issue': 'Insecure Content-Security-Policy',
+                    'details': f"CSP contains potentially insecure sources: {', '.join(unsafe_checks)}. Consider using nonces or hashes instead."
+                })
+
+        # Strict-Transport-Security (HSTS)
+        # HSTS is only valid for HTTPS sites
+        if url.startswith('https://'):
+            hsts = headers.get('strict-transport-security', '')
+            if not hsts:
+                issues.append({
+                    'url': url,
+                    'type': 'error',
+                    'category': 'Security',
+                    'issue': 'Missing Strict-Transport-Security',
+                    'details': 'HSTS header is missing. Secure connections are not enforced, making the site vulnerable to SSL stripping attacks.'
+                })
+            else:
+                hsts_lower = hsts.lower()
+                # Parse max-age
+                import re
+                max_age_match = re.search(r'max-age\s*=\s*(\d+)', hsts_lower)
+                if max_age_match:
+                    max_age = int(max_age_match.group(1))
+                    if max_age < 31536000:  # 1 year
+                        issues.append({
+                            'url': url,
+                            'type': 'warning',
+                            'category': 'Security',
+                            'issue': 'Low HSTS Max-Age',
+                            'details': f"HSTS max-age is set to {max_age} seconds. A minimum of 31536000 seconds (1 year) is recommended for production."
+                        })
+                else:
+                    issues.append({
+                        'url': url,
+                        'type': 'warning',
+                        'category': 'Security',
+                        'issue': 'Invalid HSTS Header',
+                        'details': f"HSTS header does not specify a valid max-age directive: '{hsts}'."
+                    })
+
+                if 'includesubdomains' not in hsts_lower:
+                    issues.append({
+                        'url': url,
+                        'type': 'warning',
+                        'category': 'Security',
+                        'issue': 'HSTS Subdomains Not Protected',
+                        'details': "HSTS header is missing 'includeSubDomains', leaving subdomains vulnerable to SSL stripping."
+                    })
+
+        # X-Frame-Options
+        xfo = headers.get('x-frame-options', '')
+        # Check if CSP has frame-ancestors, if so X-Frame-Options is optional
+        has_frame_ancestors = 'frame-ancestors' in csp.lower() if csp else False
+
+        if not xfo and not has_frame_ancestors:
+            issues.append({
+                'url': url,
+                'type': 'error',
+                'category': 'Security',
+                'issue': 'Missing Clickjacking Protection',
+                'details': 'Neither X-Frame-Options nor CSP frame-ancestors is set. The site is vulnerable to clickjacking attacks.'
+            })
+        elif xfo:
+            xfo_lower = xfo.lower().strip()
+            if xfo_lower not in ['deny', 'sameorigin']:
+                issues.append({
+                    'url': url,
+                    'type': 'warning',
+                    'category': 'Security',
+                    'issue': 'Insecure X-Frame-Options',
+                    'details': f"X-Frame-Options is set to '{xfo}', which is deprecated or insecure. Use 'DENY' or 'SAMEORIGIN'."
+                })
+
+        # X-Content-Type-Options
+        xcto = headers.get('x-content-type-options', '')
+        if not xcto:
+            issues.append({
+                'url': url,
+                'type': 'error',
+                'category': 'Security',
+                'issue': 'Missing X-Content-Type-Options',
+                'details': 'X-Content-Type-Options header is missing. This allows browsers to MIME-sniff response content, opening vectors for XSS.'
+            })
+        elif xcto.lower().strip() != 'nosniff':
+            issues.append({
+                'url': url,
+                'type': 'warning',
+                'category': 'Security',
+                'issue': 'Insecure X-Content-Type-Options',
+                'details': f"X-Content-Type-Options is set to '{xcto}' instead of 'nosniff'."
+            })
+
+        # Referrer-Policy
+        rp = headers.get('referrer-policy', '')
+        if not rp:
+            issues.append({
+                'url': url,
+                'type': 'warning',
+                'category': 'Security',
+                'issue': 'Missing Referrer-Policy',
+                'details': "Referrer-Policy header is missing. The browser's default policy will be used, which might leak sensitive URL data."
+            })
+        else:
+            rp_lower = rp.lower().strip()
+            if 'unsafe-url' in rp_lower:
+                issues.append({
+                    'url': url,
+                    'type': 'warning',
+                    'category': 'Security',
+                    'issue': 'Insecure Referrer-Policy',
+                    'details': f"Referrer-Policy is set to '{rp}', which leaks full URL path and query parameters to untrusted sites."
+                })
+
+        # Permissions-Policy
+        pp = headers.get('permissions-policy', '')
+        if not pp:
+            issues.append({
+                'url': url,
+                'type': 'info',
+                'category': 'Security',
+                'issue': 'Missing Permissions-Policy',
+                'details': 'Permissions-Policy header is missing. Restricting browser capabilities (like camera, microphone, geolocation) is recommended.'
+            })
+
+        # Information Disclosure (Server / X-Powered-By / X-AspNet-Version)
+        server = headers.get('server', '')
+        if server:
+            # Check if server header contains version numbers (e.g., Apache/2.4.41 or nginx/1.18.0)
+            import re
+            if re.search(r'/\d', server):
+                issues.append({
+                    'url': url,
+                    'type': 'info',
+                    'category': 'Security',
+                    'issue': 'Server Version Disclosure',
+                    'details': f"Server header discloses software version information: '{server}'. This can help attackers identify known vulnerabilities."
+                })
+
+        x_powered_by = headers.get('x-powered-by', '')
+        if x_powered_by:
+            issues.append({
+                'url': url,
+                'type': 'info',
+                'category': 'Security',
+                'issue': 'Technology Stack Disclosure',
+                'details': f"X-Powered-By header is present: '{x_powered_by}'. This discloses server technology details (e.g. PHP, ASP.NET)."
+            })
+
+        x_aspnet = headers.get('x-aspnet-version', '')
+        if x_aspnet:
+            issues.append({
+                'url': url,
+                'type': 'info',
+                'category': 'Security',
+                'issue': 'ASP.NET Version Disclosure',
+                'details': f"X-AspNet-Version header is present: '{x_aspnet}'."
+            })
 
     def get_issues(self):
         """Get all detected issues"""

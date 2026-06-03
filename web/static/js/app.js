@@ -1688,6 +1688,117 @@ function showUrlDetails(url) {
     const safeGa4Id = escapeHtml(urlData.analytics?.ga4_id) || 'N/A';
     const safeGtmId = escapeHtml(urlData.analytics?.gtm_id) || 'N/A';
 
+    // Analyze security headers
+    const headers = urlData.headers || {};
+    const csp = headers['content-security-policy'] || '';
+    const hsts = headers['strict-transport-security'] || '';
+    const xfo = headers['x-frame-options'] || '';
+    const xcto = headers['x-content-type-options'] || '';
+    const rp = headers['referrer-policy'] || '';
+    const pp = headers['permissions-policy'] || '';
+
+    let cspStatus = '<span style="color: #ef4444; font-weight: bold;">❌ Missing (High Risk)</span>';
+    let hstsStatus = '<span style="color: #ef4444; font-weight: bold;">❌ Missing (High Risk)</span>';
+    let xfoStatus = '<span style="color: #ef4444; font-weight: bold;">❌ Missing (Clickjacking Risk)</span>';
+    let xctoStatus = '<span style="color: #ef4444; font-weight: bold;">❌ Missing (MIME-sniffing Risk)</span>';
+    let referrerStatus = '<span style="color: #f59e0b; font-weight: bold;">⚠️ Missing</span>';
+    let permissionsStatus = '<span style="color: #3b82f6; font-weight: bold;">ℹ️ Missing</span>';
+    
+    const securityDetailsList = [];
+
+    // CSP check
+    if (csp) {
+        const cspLower = csp.toLowerCase();
+        const unsafe = [];
+        if (cspLower.includes("'unsafe-inline'")) unsafe.push("'unsafe-inline'");
+        if (cspLower.includes("'unsafe-eval'")) unsafe.push("'unsafe-eval'");
+        if (cspLower.includes("script-src *") || cspLower.includes("default-src *")) unsafe.push("wildcard '*' sources");
+        
+        if (unsafe.length > 0) {
+            cspStatus = '<span style="color: #f59e0b; font-weight: bold;">⚠️ Insecure</span>';
+            securityDetailsList.push(`⚠️ <strong>CSP</strong> allows potentially unsafe directives: ${unsafe.join(', ')}. Use nonces or hashes.`);
+        } else {
+            cspStatus = '<span style="color: #10b981; font-weight: bold;">✅ Secure</span>';
+        }
+    } else {
+        securityDetailsList.push('❌ <strong>CSP</strong> is missing. This exposes the page to XSS and code injection attacks.');
+    }
+
+    // HSTS check
+    if (url.startsWith('https://')) {
+        if (hsts) {
+            const hstsLower = hsts.toLowerCase();
+            const maxAgeMatch = hstsLower.match(/max-age\s*=\s*(\d+)/);
+            let isSecure = true;
+            if (maxAgeMatch) {
+                const maxAge = parseInt(maxAgeMatch[1]);
+                if (maxAge < 31536000) {
+                    isSecure = false;
+                    securityDetailsList.push(`⚠️ <strong>HSTS</strong> max-age is only ${maxAge} seconds. Recommended is at least 31536000 (1 year).`);
+                }
+            } else {
+                isSecure = false;
+                securityDetailsList.push(`⚠️ <strong>HSTS</strong> is missing a valid max-age directive.`);
+            }
+            if (!hstsLower.includes('includesubdomains')) {
+                isSecure = false;
+                securityDetailsList.push(`⚠️ <strong>HSTS</strong> is missing 'includeSubDomains', leaving subdomains vulnerable.`);
+            }
+            hstsStatus = isSecure ? '<span style="color: #10b981; font-weight: bold;">✅ Secure</span>' : '<span style="color: #f59e0b; font-weight: bold;">⚠️ Suboptimal</span>';
+        } else {
+            securityDetailsList.push('❌ <strong>HSTS</strong> is missing. Secure connections are not enforced.');
+        }
+    } else {
+        hstsStatus = '<span style="color: #9ca3af;">ℹ️ N/A (Not HTTPS)</span>';
+    }
+
+    // XFO check
+    const hasFrameAncestors = csp.toLowerCase().includes('frame-ancestors');
+    if (xfo) {
+        const xfoLower = xfo.toLowerCase().trim();
+        if (xfoLower === 'deny' || xfoLower === 'sameorigin') {
+            xfoStatus = '<span style="color: #10b981; font-weight: bold;">✅ Secure</span>';
+        } else {
+            xfoStatus = '<span style="color: #f59e0b; font-weight: bold;">⚠️ Insecure</span>';
+            securityDetailsList.push(`⚠️ <strong>X-Frame-Options</strong> is set to '${escapeHtml(xfo)}', which is deprecated or insecure. Use DENY or SAMEORIGIN.`);
+        }
+    } else if (hasFrameAncestors) {
+        xfoStatus = '<span style="color: #10b981; font-weight: bold;">✅ Secure (via CSP)</span>';
+    } else {
+        securityDetailsList.push('❌ <strong>X-Frame-Options</strong> (Clickjacking protection) is missing and not mitigated by CSP.');
+    }
+
+    // XCTO check
+    if (xcto) {
+        if (xcto.toLowerCase().trim() === 'nosniff') {
+            xctoStatus = '<span style="color: #10b981; font-weight: bold;">✅ Secure</span>';
+        } else {
+            xctoStatus = '<span style="color: #f59e0b; font-weight: bold;">⚠️ Insecure</span>';
+            securityDetailsList.push(`⚠️ <strong>X-Content-Type-Options</strong> is set to '${escapeHtml(xcto)}' instead of 'nosniff'.`);
+        }
+    } else {
+        securityDetailsList.push('❌ <strong>X-Content-Type-Options</strong> is missing, allowing browsers to MIME-sniff response content.');
+    }
+
+    // Referrer-Policy check
+    if (rp) {
+        if (rp.toLowerCase().includes('unsafe-url')) {
+            referrerStatus = '<span style="color: #f59e0b; font-weight: bold;">⚠️ Insecure</span>';
+            securityDetailsList.push(`⚠️ <strong>Referrer-Policy</strong> is set to 'unsafe-url', which leaks sensitive URL data.`);
+        } else {
+            referrerStatus = '<span style="color: #10b981; font-weight: bold;">✅ Secure</span>';
+        }
+    } else {
+        securityDetailsList.push('⚠️ <strong>Referrer-Policy</strong> is missing. Browser default policy will be used.');
+    }
+
+    // Permissions-Policy check
+    if (pp) {
+        permissionsStatus = '<span style="color: #10b981; font-weight: bold;">✅ Configured</span>';
+    } else {
+        securityDetailsList.push('ℹ️ <strong>Permissions-Policy</strong> is missing. Restricting browser capabilities (like camera, microphone) is recommended.');
+    }
+
     // Create modal content
     const modalContent = `
         <div class="details-modal-overlay" onclick="closeUrlDetails()">
@@ -1711,6 +1822,24 @@ function showUrlDetails(url) {
                                 <div><strong>Charset:</strong> ${safeCharset}</div>
                                 <div><strong>Canonical URL:</strong> ${safeCanonical}</div>
                                 <div><strong>Robots Meta:</strong> ${safeRobots}</div>
+                            </div>
+                        </div>
+
+                        <div class="details-section">
+                            <h4>🔒 HTTP Security Headers</h4>
+                            <div class="details-grid">
+                                <div><strong>Content-Security-Policy (CSP):</strong> ${cspStatus}</div>
+                                <div><strong>Strict-Transport-Security (HSTS):</strong> ${hstsStatus}</div>
+                                <div><strong>X-Frame-Options (XFO):</strong> ${xfoStatus}</div>
+                                <div><strong>X-Content-Type-Options:</strong> ${xctoStatus}</div>
+                                <div><strong>Referrer-Policy:</strong> ${referrerStatus}</div>
+                                <div><strong>Permissions-Policy:</strong> ${permissionsStatus}</div>
+                            </div>
+                            <div class="details-subsection" style="margin-top: 10px;">
+                                <h5>Details & Recommendations:</h5>
+                                <ul style="list-style: none; padding-left: 0; font-size: 13px; line-height: 1.5; margin: 5px 0 0 0;">
+                                    ${securityDetailsList.map(detail => `<li style="padding: 3px 0; border-bottom: 1px solid #1f2937;">${detail}</li>`).join('') || '<li style="color: #10b981;">✅ All core security headers are set properly for the best security possible!</li>'}
+                                </ul>
                             </div>
                         </div>
 
@@ -1804,6 +1933,17 @@ function showUrlDetails(url) {
                                 </div>
                             ` : ''}
                         </div>
+
+                        ${Object.keys(headers).length > 0 ? `
+                        <div class="details-section" style="grid-column: span 2;">
+                            <h4>📋 Raw HTTP Headers</h4>
+                            <div class="details-subsection" style="max-height: 250px; overflow-y: auto; background: #111827; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 12px;">
+                                ${Object.entries(headers).map(([key, value]) => 
+                                    `<div style="display: flex; border-bottom: 1px solid #1f2937; padding: 4px 0;"><span style="color: #a855f7; font-weight: bold; min-width: 200px; word-break: break-all;">${escapeHtml(key)}:</span> <span style="color: #d1d5db; word-break: break-all; margin-left: 10px;">${escapeHtml(value)}</span></div>`
+                                ).join('')}
+                            </div>
+                        </div>
+                        ` : ''}
                     </div>
                 </div>
             </div>

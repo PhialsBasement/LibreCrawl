@@ -105,6 +105,7 @@ def init_crawl_tables():
                 response_time REAL,
                 javascript_rendered BOOLEAN DEFAULT 0,
                 error_type TEXT,
+                headers TEXT,
 
                 crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
@@ -115,6 +116,12 @@ def init_crawl_tables():
         # Migration: add error_type column to existing crawled_urls tables
         try:
             cursor.execute('ALTER TABLE crawled_urls ADD COLUMN error_type TEXT')
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+        # Migration: add headers column to existing crawled_urls tables
+        try:
+            cursor.execute('ALTER TABLE crawled_urls ADD COLUMN headers TEXT')
         except sqlite3.OperationalError:
             pass  # Column already exists
 
@@ -294,7 +301,8 @@ def save_url_batch(crawl_id, urls):
                     url_data.get('internal_links'),
                     url_data.get('response_time'),
                     url_data.get('javascript_rendered', False),
-                    url_data.get('error_type')
+                    url_data.get('error_type'),
+                    json.dumps(url_data.get('headers', {}))
                 )
                 rows.append(row)
 
@@ -306,8 +314,8 @@ def save_url_batch(crawl_id, urls):
                     meta_tags, og_tags, twitter_tags, json_ld, analytics, images,
                     hreflang, schema_org, redirects, linked_from,
                     external_links, internal_links, response_time, javascript_rendered,
-                    error_type
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    error_type, headers
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', rows)
 
             print(f"Saved {len(urls)} URLs to database for crawl {crawl_id}")
@@ -511,11 +519,16 @@ def load_crawled_urls(crawl_id, limit=None, offset=0):
                 # Parse JSON fields
                 for field in ['h2', 'h3', 'meta_tags', 'og_tags', 'twitter_tags',
                              'json_ld', 'analytics', 'images', 'hreflang',
-                             'schema_org', 'redirects', 'linked_from']:
+                             'schema_org', 'redirects', 'linked_from', 'headers']:
                     if url_data.get(field):
                         try:
                             url_data[field] = json.loads(url_data[field])
                         except:
+                            url_data[field] = {} if field in ['headers', 'analytics', 'meta_tags', 'og_tags', 'twitter_tags'] else []
+                    else:
+                        if field in ['headers', 'analytics', 'meta_tags', 'og_tags', 'twitter_tags']:
+                            url_data[field] = {}
+                        else:
                             url_data[field] = []
 
                 urls.append(url_data)

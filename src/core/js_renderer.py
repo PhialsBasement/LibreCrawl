@@ -95,13 +95,13 @@ class JavaScriptRenderer:
         Render a page with JavaScript and return the HTML content
 
         Returns:
-            tuple: (html_content, status_code, error_message)
+            tuple: (html_content, status_code, headers, error_message)
         """
         page = None
         try:
             page = await self.get_page()
             if not page:
-                return None, 0, "No JavaScript page available"
+                return None, 0, {}, "No JavaScript page available"
 
             # Navigate to the page
             try:
@@ -117,16 +117,17 @@ class JavaScriptRenderer:
                 # Get the rendered HTML content
                 html_content = await page.content()
                 status_code = response.status if response else 200
+                headers = await response.all_headers() if response else {}
 
-                return html_content, status_code, None
+                return html_content, status_code, headers, None
 
             except PlaywrightTimeoutError:
-                return None, 0, "JavaScript rendering timeout"
+                return None, 0, {}, "JavaScript rendering timeout"
             except Exception as e:
-                return None, 0, f"Navigation error: {str(e)}"
+                return None, 0, {}, f"Navigation error: {str(e)}"
 
         except Exception as e:
-            return None, 0, f"JavaScript rendering error: {str(e)}"
+            return None, 0, {}, f"JavaScript rendering error: {str(e)}"
 
         finally:
             if page:
