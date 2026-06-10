@@ -37,6 +37,16 @@ parser.add_argument('--dangerously-skip-auth', '-dsa', action='store_true',
                     help='DANGEROUS: Allow anyone to log in as any username with no password. '
                          'The username is only used to separate per-user sessions. '
                          'Do NOT use on a public network or in production.')
+parser.add_argument('--port', '-p', type=int, default=None,
+                    help='Port to listen on (default: PORT env var or 5000)')
+parser.add_argument('--no-browser', action='store_true',
+                    help='Do not open a browser window on startup')
+parser.add_argument('--crawl', metavar='URL',
+                    help='Run a headless crawl of URL and exit (no web UI required, suitable for cron)')
+parser.add_argument('--output', '-o', default=None,
+                    help='Output file for --crawl results (default: stdout)')
+parser.add_argument('--crawl-format', choices=['json', 'csv'], default='json',
+                    help='Output format for --crawl (default: json)')
 args = parser.parse_args()
 
 LOCAL_MODE = args.local or os.getenv('LOCAL_MODE', '').lower() in ('true', '1', 'yes')
@@ -1436,6 +1446,58 @@ def export_data():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+def _run_headless(url, output_path, fmt):
+    """Run a single crawl without starting the web server. Suitable for cron jobs."""
+    import sys
+
+    print(f"[headless] crawling {url}", flush=True)
+
+    crawler = WebCrawler()
+
+    # Load default settings so user config (max_pages, depth, etc.) is respected
+    try:
+        sm = SettingsManager(session_id='headless', user_id=None, tier='admin')
+        crawler.update_config(sm.get_crawler_config())
+    except Exception as e:
+        print(f"[headless] warning: could not load settings ({e}), using defaults", flush=True)
+
+    success, message = crawler.start_crawl(url)
+    if not success:
+        print(f"[headless] error: {message}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        while crawler.is_running:
+            stats = crawler.get_status().get('stats', {})
+            print(f"[headless] crawled={stats.get('crawled', 0)} discovered={stats.get('discovered', 0)}", flush=True)
+            time.sleep(5)
+    except KeyboardInterrupt:
+        crawler.stop_crawl()
+        print("\n[headless] interrupted", file=sys.stderr)
+        sys.exit(130)
+
+    data = crawler.get_status()
+    urls = data.get('urls', [])
+    print(f"[headless] done — {len(urls)} URLs", flush=True)
+
+    if fmt == 'csv':
+        fields = ['url', 'status_code', 'title', 'meta_description', 'h1',
+                  'word_count', 'internal_links', 'external_links', 'depth']
+        content = generate_csv_export(urls, fields)
+    else:
+        fields = list(urls[0].keys()) if urls else ['url', 'status_code', 'title']
+        content = generate_json_export(urls, fields)
+
+    if output_path:
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        print(f"[headless] results saved to {output_path}", flush=True)
+    else:
+        sys.stdout.write(content)
+
+    sys.exit(0)
+
+
 def recover_crashed_crawls():
     """Check for and recover any crashed crawls on startup"""
     try:
@@ -1488,6 +1550,11 @@ def graceful_shutdown(signum, frame):
 def main():
     import signal
 
+    # Headless mode: crawl and exit without starting the web server
+    if args.crawl:
+        _run_headless(args.crawl, args.output, args.crawl_format)
+        return
+
     # Register signal handlers for graceful shutdown
     signal.signal(signal.SIGINT, graceful_shutdown)
     signal.signal(signal.SIGTERM, graceful_shutdown)
@@ -1498,30 +1565,33 @@ def main():
     # Start cleanup thread for old crawler instances
     start_cleanup_thread()
 
+    port = args.port or int(os.getenv('PORT', 5000))
+
     print("=" * 60)
     print("LibreCrawl - SEO Spider")
     print("=" * 60)
-    print(f"\n🚀 Server starting on http://0.0.0.0:5000")
-    print(f"🌐 Access from browser: http://localhost:5000")
-    print(f"📱 Access from network: http://<your-ip>:5000")
+    print(f"\n🚀 Server starting on http://0.0.0.0:{port}")
+    print(f"🌐 Access from browser: http://localhost:{port}")
+    print(f"📱 Access from network: http://<your-ip>:{port}")
     print(f"\n✨ Multi-tenancy enabled - each browser session is isolated")
     print(f"💾 Settings stored in browser localStorage")
     print(f"\nPress Ctrl+C to stop the server\n")
     print("=" * 60 + "\n")
 
-    # Open browser in a separate thread after short delay
-    def open_browser():
-        time.sleep(1.5)  # Wait for Flask to start
-        webbrowser.open('http://localhost:5000')
+    # Open browser in a separate thread after short delay (skip with --no-browser)
+    if not args.no_browser:
+        def open_browser():
+            time.sleep(1.5)  # Wait for Flask to start
+            webbrowser.open(f'http://localhost:{port}')
 
-    browser_thread = threading.Thread(target=open_browser, daemon=True)
-    browser_thread.start()
+        browser_thread = threading.Thread(target=open_browser, daemon=True)
+        browser_thread.start()
 
     # Run Flask server with Waitress (production-grade WSGI server)
     from waitress import serve
-    print("Starting LibreCrawl on http://localhost:5000")
+    print(f"Starting LibreCrawl on http://localhost:{port}")
     print("Using Waitress WSGI server with multi-threading support")
-    serve(app, host='0.0.0.0', port=5000, threads=8)
+    serve(app, host='0.0.0.0', port=port, threads=8)
 
 if __name__ == '__main__':
     main()
