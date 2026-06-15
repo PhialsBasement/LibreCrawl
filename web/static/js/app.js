@@ -1706,6 +1706,7 @@ function showUrlDetails(url) {
                                 <div><strong>Title:</strong> ${safeTitle}</div>
                                 <div><strong>H1:</strong> ${safeH1}</div>
                                 <div><strong>Meta Description:</strong> ${safeMetaDesc}</div>
+                                <div><strong>Keywords:</strong> ${escapeHtml(urlData.keywords) || 'N/A'}</div>
                                 <div><strong>Word Count:</strong> ${urlData.word_count || 0}</div>
                                 <div><strong>Language:</strong> ${safeLang}</div>
                                 <div><strong>Charset:</strong> ${safeCharset}</div>
@@ -2175,12 +2176,15 @@ function renderOverviewRow(row, urlData, index) {
     const imagesCount = (urlData.images || []).length;
     const jsRendered = urlData.javascript_rendered ? '✅ JS' : '';
 
+    const keywordsInfo = urlData.keywords || '';
+
     const cells = [
         urlData.url,
         urlData.status_code,
         urlData.title || '',
         (urlData.meta_description || '').substring(0, 50) + (urlData.meta_description && urlData.meta_description.length > 50 ? '...' : ''),
         urlData.h1 || '',
+        keywordsInfo,
         urlData.word_count || 0,
         urlData.response_time || 0,
         analyticsInfo,
