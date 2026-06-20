@@ -54,6 +54,9 @@ if not os.environ.get('SECRET_KEY'):
 # Enable compression for all responses
 Compress(app)
 
+# Ensure data directory exists before initializing the database
+os.makedirs("data", exist_ok=True)
+
 # Initialize database on startup
 init_db()
 
