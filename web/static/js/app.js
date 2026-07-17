@@ -1941,9 +1941,11 @@ async function saveCrawl() {
         let stats = crawlState.stats;
 
         // Try to get fresh data from backend if available
+        // Always fetch WITHOUT incremental params to get COMPLETE data
         try {
             const status = await fetch('/api/crawl_status');
             const crawlData = await status.json();
+            // Use backend data if it has URLs, otherwise fall back to local state
             if (crawlData.urls && crawlData.urls.length > 0) {
                 urls = crawlData.urls;
                 links = crawlData.links || links;
@@ -1952,6 +1954,9 @@ async function saveCrawl() {
                 if (crawlData.stats) {
                     stats = crawlData.stats;
                 }
+            } else if (crawlState.urls && crawlState.urls.length > 0) {
+                // Fallback to local state if backend has no URLs
+                console.log('Backend returned no URLs, using local state');
             }
         } catch (e) {
             console.log('Using local state for save:', e);
