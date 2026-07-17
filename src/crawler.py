@@ -82,9 +82,9 @@ class WebCrawler:
 
     def __init__(self, crawl_id=None, resume_from_db=False):
         # HTTP session
-        self.session = requests.Session()
+        self.session = curl_requests.Session(impersonate="chrome")
         self.session.headers.update({
-            'User-Agent': 'LibreCrawl/1.0 (Web Crawler)'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
         })
 
         # Base URL tracking
@@ -1510,7 +1510,7 @@ class WebCrawler:
 
             for attempt in range(retries + 1):
                 try:
-                    response = requests.get(api_url, params=params, timeout=60)
+                    response = curl_requests.get(api_url, params=params, timeout=60, impersonate="chrome")
 
                     if response.status_code == 200:
                         data = response.json()
