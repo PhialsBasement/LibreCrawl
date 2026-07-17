@@ -1361,6 +1361,7 @@ def export_data():
             has_links_export = False
             regular_fields = []
             urls = []  # Don't include URLs for issues-only export
+            print(f"DEBUG EXPORT: tab override for 'issues' - has_issues={has_issues_export}, has_links={has_links_export}, regular_fields={regular_fields}")
         elif tab == 'links':
             # Only export links, ignore everything else
             has_issues_export = False
