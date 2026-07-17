@@ -17,7 +17,20 @@
                     <span id="userInfo" style="margin-right: 15px; color: #6b7280; font-size: 14px;"></span>
                     <button class="btn btn-secondary" onclick="openDashboard()">Dashboard</button>
                     <button class="btn btn-secondary" onclick="openSettings()">Settings</button>
-                    <button class="btn btn-secondary" onclick="exportData()">Export</button>
+                    <div class="export-dropdown">
+                        <button class="btn btn-secondary export-dropdown-btn" onclick="toggleExportMenu()">Export ▾</button>
+                        <div class="export-dropdown-menu" id="exportDropdownMenu">
+                            <div class="export-dropdown-item" onclick="exportData('all')">Export All Data</div>
+                            <div class="export-dropdown-item" onclick="exportData('overview')">Export: Overview</div>
+                            <div class="export-dropdown-item" onclick="exportData('internal')">Export: Internal URLs</div>
+                            <div class="export-dropdown-item" onclick="exportData('external')">Export: External URLs</div>
+                            <div class="export-dropdown-item" onclick="exportData('links')">Export: Links</div>
+                            <div class="export-dropdown-item" onclick="exportData('issues')">Export: Issues</div>
+                            <div class="export-dropdown-divider"></div>
+                            <div class="export-dropdown-item" onclick="exportData('all_csv')">Export All (CSV)</div>
+                            <div class="export-dropdown-item" onclick="exportData('all_json')">Export All (JSON)</div>
+                        </div>
+                    </div>
                     <button class="btn btn-success" id="saveCrawlBtn" onclick="saveCrawl()" disabled>Save Crawl</button>
                     <button class="btn btn-primary" id="loadCrawlBtn" onclick="loadCrawl()">Load Crawl</button>
                     <button class="btn btn-danger" onclick="logout()" style="margin-left: 10px;">Logout</button>
