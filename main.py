@@ -1357,15 +1357,15 @@ def export_data():
             if export_format == 'csv':
                 issues_content = generate_issues_csv_export(issues)
                 issues_mimetype = 'text/csv'
-                issues_filename = f'librecrawl_issues_{int(time.time())}.csv'
+                issues_filename = f'librecrawl{filename_suffix}_{int(time.time())}.csv'
             elif export_format == 'json':
                 issues_content = generate_issues_json_export(issues)
                 issues_mimetype = 'application/json'
-                issues_filename = f'librecrawl_issues_{int(time.time())}.json'
+                issues_filename = f'librecrawl{filename_suffix}_{int(time.time())}.json'
             else:
                 issues_content = generate_issues_csv_export(issues)
                 issues_mimetype = 'text/csv'
-                issues_filename = f'librecrawl_issues_{int(time.time())}.csv'
+                issues_filename = f'librecrawl{filename_suffix}_{int(time.time())}.csv'
 
             files_to_export.append({
                 'content': issues_content,
@@ -1378,15 +1378,15 @@ def export_data():
             if export_format == 'csv':
                 links_content = generate_links_csv_export(links)
                 links_mimetype = 'text/csv'
-                links_filename = f'librecrawl_links_{int(time.time())}.csv'
+                links_filename = f'librecrawl{filename_suffix}_{int(time.time())}.csv'
             elif export_format == 'json':
                 links_content = generate_links_json_export(links)
                 links_mimetype = 'application/json'
-                links_filename = f'librecrawl_links_{int(time.time())}.json'
+                links_filename = f'librecrawl{filename_suffix}_{int(time.time())}.json'
             else:
                 links_content = generate_links_csv_export(links)
                 links_mimetype = 'text/csv'
-                links_filename = f'librecrawl_links_{int(time.time())}.csv'
+                links_filename = f'librecrawl{filename_suffix}_{int(time.time())}.csv'
 
             files_to_export.append({
                 'content': links_content,
@@ -1399,11 +1399,11 @@ def export_data():
             if export_format == 'csv':
                 regular_content = generate_csv_export(urls, regular_fields)
                 regular_mimetype = 'text/csv'
-                regular_filename = f'librecrawl_export_{int(time.time())}.csv'
+                regular_filename = f'librecrawl{filename_suffix}_{int(time.time())}.csv'
             elif export_format == 'json':
                 regular_content = generate_json_export(urls, regular_fields)
                 regular_mimetype = 'application/json'
-                regular_filename = f'librecrawl_export_{int(time.time())}.json'
+                regular_filename = f'librecrawl{filename_suffix}_{int(time.time())}.json'
             elif export_format == 'xml':
                 regular_content = generate_xml_export(urls, regular_fields)
                 regular_mimetype = 'application/xml'
