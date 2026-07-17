@@ -1449,6 +1449,7 @@ def export_data():
                 return jsonify({'success': False, 'error': 'No data to export'})
 
         # Return multiple files if we have more than one, otherwise single file
+        print(f"DEBUG EXPORT: files_to_export count = {len(files_to_export)}, files = {[f['filename'] for f in files_to_export]}")
         if len(files_to_export) > 1:
             return jsonify({
                 'success': True,
