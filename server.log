@@ -1,0 +1,1 @@
+⚠️  WARNING: SECRET_KEY not set — using an ephemeral random key. Sessions will not persist across restarts. Set SECRET_KEY in production.
