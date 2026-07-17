@@ -1519,7 +1519,7 @@ def main():
 
     # Run Flask server with Waitress (production-grade WSGI server)
     from waitress import serve
-    print("Starting LibreCrawl on http://localhost:5000")
+    print("Starting LibreCrawl on http://localhost:5001")
     print("Using Waitress WSGI server with multi-threading support")
     serve(app, host='127.0.0.1', port=5001, threads=8)
 
