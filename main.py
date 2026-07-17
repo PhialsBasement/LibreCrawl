@@ -1289,21 +1289,31 @@ def export_data():
         export_format = data.get('format', 'csv')
         export_fields = data.get('fields', ['url', 'status_code', 'title'])
         local_data = data.get('localData', {})
+        filename_suffix = data.get('filenameSuffix', '')
 
         # Use local data if provided (from loaded crawl), otherwise get from crawler
-        if local_data and local_data.get('urls'):
-            urls = local_data.get('urls', [])
-            links = local_data.get('links', [])
-            issues = local_data.get('issues', [])
-        else:
-            # Get current crawl results
+        urls = local_data.get('urls', []) if local_data else []
+        links = local_data.get('links', []) if local_data else []
+        issues = local_data.get('issues', []) if local_data else []
+
+        # If no local data, get from crawler
+        if not urls and not links and not issues:
             crawler = get_or_create_crawler()
             crawl_data = crawler.get_status()
             urls = crawl_data.get('urls', [])
             links = crawl_data.get('links', [])
             issues = crawl_data.get('issues', [])
 
-        if not urls:
+        # Allow exporting just links or issues even if urls is empty
+        tab = data.get('tab', 'all')
+        if tab in ['links', 'issues'] and not urls:
+            if tab == 'links' and links:
+                pass  # links data is valid
+            elif tab == 'issues' and issues:
+                pass  # issues data is valid
+            elif not urls:
+                return jsonify({'success': False, 'error': 'No data to export'})
+        elif not urls:
             return jsonify({'success': False, 'error': 'No data to export'})
 
         # Update link statuses from crawled URLs (fixes missing status codes in exports)
