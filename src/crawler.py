@@ -2,7 +2,7 @@
 Main web crawler orchestrator with smooth rate limiting and modular architecture.
 Refactored for better code practices and maintainability.
 """
-import requests
+from curl_cffi import requests as curl_requests
 import socket
 import ssl
 import threading
@@ -33,11 +33,11 @@ def classify_fetch_error(exc_or_msg):
             seen.add(id(cur))
             if isinstance(cur, socket.gaierror):
                 return 'dns_not_found'
-            if isinstance(cur, ssl.SSLError) or isinstance(cur, requests.exceptions.SSLError):
+            if isinstance(cur, ssl.SSLError) or isinstance(cur, curl_requests.exceptions.SSLError):
                 return 'ssl_error'
             if isinstance(cur, ConnectionRefusedError):
                 return 'connection_refused'
-            if isinstance(cur, (socket.timeout, requests.exceptions.Timeout)):
+            if isinstance(cur, (socket.timeout, curl_requests.exceptions.Timeout)):
                 return 'timeout'
             cur = getattr(cur, '__cause__', None) or getattr(cur, '__context__', None)
 
