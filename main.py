@@ -1407,7 +1407,7 @@ def export_data():
             elif export_format == 'xml':
                 regular_content = generate_xml_export(urls, regular_fields)
                 regular_mimetype = 'application/xml'
-                regular_filename = f'librecrawl_export_{int(time.time())}.xml'
+                regular_filename = f'librecrawl{filename_suffix}_{int(time.time())}.xml'
             else:
                 return jsonify({'success': False, 'error': 'Unsupported export format'})
 
