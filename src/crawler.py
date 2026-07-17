@@ -852,7 +852,7 @@ class WebCrawler:
 
             # Run duplication detection on all crawled content
             # Skip if crawl is large (>1000 URLs) to avoid O(n²) performance issues
-            if self.issue_detector and self.config.get('enable_duplication_check', True:
+            if self.issue_detector and self.config.get('enable_duplication_check', True):
                 if len(self.crawl_results) > 1000:
                     print(f"Skipping duplication detection for {len(self.crawl_results)} URLs (too large)")
                 else:
