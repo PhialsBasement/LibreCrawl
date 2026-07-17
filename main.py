@@ -1345,6 +1345,7 @@ def export_data():
 
         # Debug logging
         print(f"DEBUG: export_fields = {export_fields}")
+        print(f"DEBUG: tab = {tab}")
         print(f"DEBUG: has_issues_export = {has_issues_export}")
         print(f"DEBUG: has_links_export = {has_links_export}")
         print(f"DEBUG: regular_fields = {regular_fields}")
@@ -1352,8 +1353,27 @@ def export_data():
         print(f"DEBUG: len(links) = {len(links)}")
         print(f"DEBUG: len(issues) = {len(issues)}")
 
+        # Override export behavior based on tab selection
+        if tab == 'issues':
+            # Only export issues, ignore everything else
+            has_issues_export = True
+            has_links_export = False
+            regular_fields = []
+            urls = []  # Don't include URLs for issues-only export
+        elif tab == 'links':
+            # Only export links, ignore everything else
+            has_issues_export = False
+            has_links_export = True
+            regular_fields = []
+            urls = []  # Don't include URLs for links-only export
+        elif tab in ['internal', 'external']:
+            # Only export URLs (already filtered by frontend)
+            has_issues_export = False
+            has_links_export = False
+            # Keep regular_fields for URL export
+
         # Generate issues export if requested
-        if has_issues_export:
+        if has_issues_export and issues:
             if export_format == 'csv':
                 issues_content = generate_issues_csv_export(issues)
                 issues_mimetype = 'text/csv'
@@ -1374,7 +1394,7 @@ def export_data():
             })
 
         # Generate links export if requested
-        if has_links_export:
+        if has_links_export and links:
             if export_format == 'csv':
                 links_content = generate_links_csv_export(links)
                 links_mimetype = 'text/csv'
