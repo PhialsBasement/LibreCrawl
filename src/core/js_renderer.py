@@ -37,7 +37,7 @@ class JavaScriptRenderer:
             max_pages = self.config.get('js_max_concurrent_pages', 3)
             for i in range(max_pages):
                 context = await self.browser.new_context(
-                    user_agent=self.config.get('js_user_agent', 'LibreCrawl/1.0 (Web Crawler with JavaScript)'),
+                    user_agent=self.config.get('js_user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'),
                     viewport={
                         'width': self.config.get('js_viewport_width', 1920),
                         'height': self.config.get('js_viewport_height', 1080)
