@@ -1326,13 +1326,15 @@ def export_data():
                     link['target_status'] = status_lookup[target_url]
 
         # Apply current issue exclusion patterns (works for loaded crawls too)
+        print(f"DEBUG EXPORT: Before exclusion filter, {len(issues)} issues")
         if issues:
             settings_manager = get_session_settings()
             current_settings = settings_manager.get_settings()
             exclusion_patterns_text = current_settings.get('issueExclusionPatterns', '')
             exclusion_patterns = [p.strip() for p in exclusion_patterns_text.split('\n') if p.strip()]
+            print(f"DEBUG EXPORT: exclusion_patterns = {exclusion_patterns}")
             issues = filter_issues_by_exclusion_patterns(issues, exclusion_patterns)
-            print(f"DEBUG: After exclusion filter, {len(issues)} issues remain")
+            print(f"DEBUG EXPORT: After exclusion filter, {len(issues)} issues remain")
 
         # Collect files to export based on special field selections
         files_to_export = []
