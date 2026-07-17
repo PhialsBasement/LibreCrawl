@@ -1306,6 +1306,7 @@ def export_data():
 
         # Allow exporting just links or issues even if urls is empty
         tab = data.get('tab', 'all')
+        print(f"DEBUG EXPORT: tab={tab}, urls_len={len(urls)}, links_len={len(links)}, issues_len={len(issues)}, export_fields={export_fields}")
         if tab in ['links', 'issues'] and not urls:
             if tab == 'links' and links:
                 pass  # links data is valid
