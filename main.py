@@ -1376,6 +1376,23 @@ def export_data():
             has_links_export = False
             # Keep regular_fields for URL export
 
+        # STRICT SAFEGUARD: For issues tab, absolutely ensure ONLY issues file is generated
+        if tab == 'issues':
+            has_links_export = False
+            regular_fields = []
+            urls = []
+            print(f"DEBUG EXPORT: SAFEGUARD for issues - forced single file mode")
+            # Only export links, ignore everything else
+            has_issues_export = False
+            has_links_export = True
+            regular_fields = []
+            urls = []  # Don't include URLs for links-only export
+        elif tab in ['internal', 'external']:
+            # Only export URLs (already filtered by frontend)
+            has_issues_export = False
+            has_links_export = False
+            # Keep regular_fields for URL export
+
         # Generate issues export if requested
         if has_issues_export and issues:
             if export_format == 'csv':
