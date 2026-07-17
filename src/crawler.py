@@ -830,6 +830,16 @@ class WebCrawler:
 
         # Skip post-processing if demo limit was hit — no further memory use
         if not self._demo_limit_reached:
+            # Check if crawl was stopped - if so, skip expensive post-processing
+            if not self.is_running:
+                print("Crawl was stopped - skipping post-processing")
+                # Still save data if possible
+                if self.db_save_enabled and self.crawl_id:
+                    self._save_batch_to_db(force=True)
+                    from src.crawl_db import set_crawl_status
+                    set_crawl_status(self.crawl_id, 'stopped')
+                return
+
             # Run PageSpeed analysis if enabled
             if self.config.get('enable_pagespeed', False):
                 print("Running PageSpeed analysis...")
@@ -841,11 +851,15 @@ class WebCrawler:
             self._update_all_linked_from()
 
             # Run duplication detection on all crawled content
-            if self.issue_detector and self.config.get('enable_duplication_check', True):
-                print("Running duplication detection...")
-                duplication_threshold = self.config.get('duplication_threshold', 0.85)
-                self.issue_detector.detect_duplication_issues(self.crawl_results, duplication_threshold)
-                print(f"Duplication detection complete. Total issues: {len(self.issue_detector.get_issues())}")
+            # Skip if crawl is large (>1000 URLs) to avoid O(n²) performance issues
+            if self.issue_detector and self.config.get('enable_duplication_check', True:
+                if len(self.crawl_results) > 1000:
+                    print(f"Skipping duplication detection for {len(self.crawl_results)} URLs (too large)")
+                else:
+                    print("Running duplication detection...")
+                    duplication_threshold = self.config.get('duplication_threshold', 0.85)
+                    self.issue_detector.detect_duplication_issues(self.crawl_results, duplication_threshold)
+                    print(f"Duplication detection complete. Total issues: {len(self.issue_detector.get_issues())}")
 
         # Save final data and set appropriate status
         if self.db_save_enabled and self.crawl_id:
