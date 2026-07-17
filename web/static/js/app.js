@@ -1547,7 +1547,21 @@ async function loadUserInfo() {
     }
 }
 
-async function exportData() {
+function toggleExportMenu() {
+    const menu = document.getElementById('exportDropdownMenu');
+    menu.classList.toggle('show');
+}
+
+// Close dropdown when clicking outside
+document.addEventListener('click', function(event) {
+    const dropdown = document.querySelector('.export-dropdown');
+    const menu = document.getElementById('exportDropdownMenu');
+    if (dropdown && !dropdown.contains(event.target)) {
+        menu.classList.remove('show');
+    }
+});
+
+async function exportData(tab = 'all') {
     try {
         // Get current settings to determine export format and fields
         const settingsResponse = await fetch('/api/get_settings');
@@ -1559,8 +1573,17 @@ async function exportData() {
         }
 
         const settings = settingsData.settings;
-        const exportFormat = settings.exportFormat || 'csv';
-        const exportFields = settings.exportFields || ['url', 'status_code', 'title', 'meta_description', 'h1'];
+        let exportFormat = settings.exportFormat || 'csv';
+        let exportFields = settings.exportFields || ['url', 'status_code', 'title', 'meta_description', 'h1'];
+
+        // Check if user wants specific format (all_csv, all_json)
+        if (tab === 'all_csv') {
+            exportFormat = 'csv';
+            tab = 'all';
+        } else if (tab === 'all_json') {
+            exportFormat = 'json';
+            tab = 'all';
+        }
 
         // Check if there's data to export - always fetch fresh data from backend
         let hasData = false;
@@ -1591,9 +1614,42 @@ async function exportData() {
             return;
         }
 
+        // Filter data based on tab selection
+        let filteredUrls = exportUrls;
+        let filteredLinks = exportLinks;
+        let filteredIssues = exportIssues;
+        let filenameSuffix = '';
+
+        switch (tab) {
+            case 'overview':
+            case 'all':
+                // Use all data
+                filenameSuffix = '';
+                break;
+            case 'internal':
+                filteredUrls = exportUrls.filter(url => isInternalURL(url.url));
+                filenameSuffix = '_internal';
+                break;
+            case 'external':
+                filteredUrls = exportUrls.filter(url => !isInternalURL(url.url));
+                filenameSuffix = '_external';
+                break;
+            case 'links':
+                // Links don't need filtering by URL - use all links
+                filteredUrls = [];
+                filteredLinks = exportLinks;
+                filenameSuffix = '_links';
+                break;
+            case 'issues':
+                filteredUrls = [];
+                filteredIssues = exportIssues;
+                filenameSuffix = '_issues';
+                break;
+        }
+
         showNotification('Preparing export...', 'info');
 
-        // Request export from backend, including local data if available
+        // Request export from backend
         const exportResponse = await fetch('/api/export_data', {
             method: 'POST',
             headers: {
@@ -1602,26 +1658,28 @@ async function exportData() {
             body: JSON.stringify({
                 format: exportFormat,
                 fields: exportFields,
-                // Send local data if we have it (for loaded crawls)
+                tab: tab,
+                // Send filtered data
                 localData: {
-                    urls: exportUrls,
-                    links: exportLinks,
-                    issues: exportIssues
-                }
+                    urls: filteredUrls,
+                    links: filteredLinks,
+                    issues: filteredIssues
+                },
+                filenameSuffix: filenameSuffix
             })
         });
 
-        const exportData = await exportResponse.json();
+        const exportResult = await exportResponse.json();
 
-        if (!exportData.success) {
-            showNotification(exportData.error || 'Export failed', 'error');
+        if (!exportResult.success) {
+            showNotification(exportResult.error || 'Export failed', 'error');
             return;
         }
 
         // Check if we have multiple files to download
-        if (exportData.multiple_files && exportData.files) {
+        if (exportResult.multiple_files && exportResult.files) {
             // Download each file separately
-            exportData.files.forEach((file, index) => {
+            exportResult.files.forEach((file, index) => {
                 setTimeout(() => {
                     const blob = new Blob([file.content], { type: file.mimetype });
                     const url = window.URL.createObjectURL(blob);
@@ -1636,22 +1694,25 @@ async function exportData() {
                 }, index * 500); // Delay between downloads to avoid browser blocking
             });
 
-            showNotification(`Exporting ${exportData.files.length} files...`, 'success');
+            showNotification(`Exporting ${exportResult.files.length} files...`, 'success');
         } else {
-            // Single file download (original logic)
-            const blob = new Blob([exportData.content], { type: exportData.mimetype });
+            // Single file download
+            const blob = new Blob([exportResult.content], { type: exportResult.mimetype });
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.style.display = 'none';
             a.href = url;
-            a.download = exportData.filename;
+            a.download = exportResult.filename;
             document.body.appendChild(a);
             a.click();
             window.URL.revokeObjectURL(url);
             document.body.removeChild(a);
 
-            showNotification(`Export complete: ${exportData.filename}`, 'success');
+            showNotification(`Export complete: ${exportResult.filename}`, 'success');
         }
+
+        // Close dropdown after selection
+        document.getElementById('exportDropdownMenu').classList.remove('show');
 
     } catch (error) {
         console.error('Export error:', error);
