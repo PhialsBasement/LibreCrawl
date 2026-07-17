@@ -1521,7 +1521,7 @@ def main():
     from waitress import serve
     print("Starting LibreCrawl on http://localhost:5000")
     print("Using Waitress WSGI server with multi-threading support")
-    serve(app, host='0.0.0.0', port=5000, threads=8)
+    serve(app, host='127.0.0.1', port=5001, threads=8)
 
 if __name__ == '__main__':
     main()
