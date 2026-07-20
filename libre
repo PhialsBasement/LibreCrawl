@@ -1,0 +1,3 @@
+usage: main.py [-h] [--local] [--disable-register] [--disable-guest] [--demo]
+               [--dangerously-skip-auth]
+main.py: error: unrecognized arguments: crawl.log

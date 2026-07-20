@@ -1,1 +1,48 @@
 ⚠️  WARNING: SECRET_KEY not set — using an ephemeral random key. Sessions will not persist across restarts. Set SECRET_KEY in production.
+Database initialized successfully
+Crawl persistence tables initialized successfully
+============================================================
+LOCAL MODE ENABLED
+All users will have admin tier access
+No rate limits or tier restrictions
+Auto-login enabled with 'local' admin account
+============================================================
+Started crawler instance cleanup thread
+============================================================
+LibreCrawl - SEO Spider
+============================================================
+
+🚀 Server starting on http://0.0.0.0:5000
+🌐 Access from browser: http://localhost:5000
+📱 Access from network: http://<your-ip>:5000
+
+✨ Multi-tenancy enabled - each browser session is isolated
+💾 Settings stored in browser localStorage
+
+Press Ctrl+C to stop the server
+
+============================================================
+
+Starting LibreCrawl on http://localhost:5001
+Using Waitress WSGI server with multi-threading support
+Auto-logged in as existing 'local' user (ID: 1)
+Auto-logged in as existing 'local' user (ID: 1)
+Creating new settings instance for session: 2ce14dfa-f2f2-40b9-9906-56cca0f12b6c, user: 1, tier: admin
+get_status called - crawl_results length: 0, status: idle, crawled: 0
+DEBUG: After exclusion filter, 3775 issues remain
+DEBUG: export_fields = ['url', 'status_code', 'title', 'meta_description', 'h1', 'word_count', 'content_type', 'response_time', 'canonical_url', 'og_tags', 'twitter_tags', 'json_ld', 'analytics', 'internal_links', 'external_links', 'images', 'links_detailed', 'lang', 'charset', 'viewport', 'robots', 'issues_detected']
+DEBUG: tab = issues
+DEBUG: has_issues_export = True
+DEBUG: has_links_export = True
+DEBUG: regular_fields = ['url', 'status_code', 'title', 'meta_description', 'h1', 'word_count', 'content_type', 'response_time', 'canonical_url', 'og_tags', 'twitter_tags', 'json_ld', 'analytics', 'internal_links', 'external_links', 'images', 'lang', 'charset', 'viewport', 'robots']
+DEBUG: len(urls) = 0
+DEBUG: len(links) = 177199
+DEBUG: len(issues) = 3775
+
+============================================================
+GRACEFUL SHUTDOWN
+============================================================
+Saving all active crawls...
+All crawls saved successfully
+============================================================
+Goodbye!
