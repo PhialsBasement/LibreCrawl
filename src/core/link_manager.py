@@ -54,6 +54,40 @@ class LinkManager:
                         self.all_discovered_urls.add(clean_url)
                         self.discovered_urls.append((clean_url, depth))
 
+        """Extract images from HTML and add to discovery queue"""
+        imgs = soup.find_all('img', src=True)
+        for img in imgs:
+            src = img.get('src', '').strip()
+            if not src or src.startswith('data:'):
+                continue
+
+            try:
+                absolute_url = urljoin(current_url, src)
+                parsed = urlparse(absolute_url)
+
+                if parsed.scheme not in ('http', 'https'):
+                    continue
+
+                clean_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+                if parsed.query:
+                    clean_url += f"?{parsed.query}"
+
+                with self.urls_lock:
+                    if clean_url not in self.source_pages:
+                        self.source_pages[clean_url] = []
+                    if current_url not in self.source_pages[clean_url]:
+                        self.source_pages[clean_url].append(current_url)
+
+                    if (clean_url not in self.visited_urls and
+                        clean_url not in self.all_discovered_urls and
+                        clean_url != current_url):
+
+                        if should_crawl_callback(clean_url):
+                            self.all_discovered_urls.add(clean_url)
+                            self.discovered_urls.append((clean_url, depth))
+            except Exception:
+                continue
+
     def collect_all_links(self, soup, source_url, crawl_results):
         """Collect all links for the Links tab display"""
         links = soup.find_all('a', href=True)
