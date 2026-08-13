@@ -409,7 +409,7 @@ def generate_links_csv_export(links):
             'anchor_text': link.get('anchor_text', ''),
             'is_internal': 'Yes' if link.get('is_internal') else 'No',
             'target_domain': link.get('target_domain', ''),
-            'target_status': link.get('target_status', 'Not crawled'),
+            'target_status': link['target_status'] if link.get('target_status') is not None else 'Not crawled',
             'placement': link.get('placement', 'body')
         }
         writer.writerow(row)
@@ -1293,7 +1293,10 @@ def export_stream():
     try:
         export_format = request.args.get('format', 'csv')
         fields_param = request.args.get('fields', 'url,status_code,title')
-        export_fields = [f.strip() for f in fields_param.split(',') if f.strip()]
+        # Restrict field names to identifier-like strings — they become XML tag
+        # names and CSV headers, so arbitrary query input must not pass through
+        export_fields = [f.strip() for f in fields_param.split(',')
+                         if f.strip() and f.strip().replace('_', '').isalnum() and not f.strip()[0].isdigit()]
         data_type = request.args.get('type', 'urls')  # urls, links, issues
 
         # Get data from current crawler (already in memory from active or loaded crawl)
@@ -1474,7 +1477,7 @@ def _stream_links_csv(links):
             'anchor_text': link.get('anchor_text', ''),
             'is_internal': 'Yes' if link.get('is_internal') else 'No',
             'target_domain': link.get('target_domain', ''),
-            'target_status': link.get('target_status', 'Not crawled'),
+            'target_status': link['target_status'] if link.get('target_status') is not None else 'Not crawled',
             'placement': link.get('placement', 'body')
         })
         yield output.getvalue()
@@ -1494,7 +1497,7 @@ def _stream_links_json(links):
             'anchor_text': link.get('anchor_text', ''),
             'is_internal': link.get('is_internal', False),
             'target_domain': link.get('target_domain', ''),
-            'target_status': link.get('target_status', 'Not crawled'),
+            'target_status': link['target_status'] if link.get('target_status') is not None else 'Not crawled',
             'placement': link.get('placement', 'body')
         }
         prefix = ',\n' if i > 0 else ''
@@ -1504,7 +1507,7 @@ def _stream_links_json(links):
 
 def _stream_issues_csv(issues):
     """Generator that yields issue CSV rows one at a time"""
-    fieldnames = ['url', 'issue_type', 'severity', 'description', 'details']
+    fieldnames = ['url', 'type', 'category', 'issue', 'details']
     output = StringIO()
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
@@ -1515,9 +1518,9 @@ def _stream_issues_csv(issues):
     for issue in issues:
         writer.writerow({
             'url': issue.get('url', ''),
-            'issue_type': issue.get('issue_type', ''),
-            'severity': issue.get('severity', ''),
-            'description': issue.get('description', ''),
+            'type': issue.get('type', ''),
+            'category': issue.get('category', ''),
+            'issue': issue.get('issue', ''),
             'details': str(issue.get('details', ''))
         })
         yield output.getvalue()
@@ -1533,9 +1536,9 @@ def _stream_issues_json(issues):
     for i, issue in enumerate(issues):
         entry = {
             'url': issue.get('url', ''),
-            'issue_type': issue.get('issue_type', ''),
-            'severity': issue.get('severity', ''),
-            'description': issue.get('description', ''),
+            'type': issue.get('type', ''),
+            'category': issue.get('category', ''),
+            'issue': issue.get('issue', ''),
             'details': issue.get('details', '')
         }
         prefix = ',\n' if i > 0 else ''

@@ -1568,25 +1568,32 @@ async function exportData() {
         const exportFormat = settings.exportFormat || 'csv';
         const exportFields = settings.exportFields || ['url', 'status_code', 'title', 'meta_description', 'h1'];
 
-        // Check if there's data to export without loading all URLs
-        let hasData = false;
-        if (crawlState.urls && crawlState.urls.length > 0) {
-            hasData = true;
-        } else {
+        // Check where the exportable data lives: the server (active or resumed
+        // crawl) or only this browser (crawl loaded from a saved file)
+        let serverHasData = false;
+        try {
             // Lightweight check — use incremental param to avoid fetching all data
             const status = await fetch('/api/crawl_status?url_since=999999999');
             const statusData = await status.json();
-            if (statusData.stats && statusData.stats.crawled > 0) {
-                hasData = true;
-            }
+            serverHasData = !!(statusData.stats && statusData.stats.crawled > 0);
+        } catch (e) {
+            console.log('Status check failed, assuming local-only data:', e);
         }
+        const localHasData = crawlState.urls && crawlState.urls.length > 0;
 
-        if (!hasData) {
+        if (!serverHasData && !localHasData) {
             showNotification('No crawl data to export', 'error');
             return;
         }
 
         showNotification('Preparing export...', 'info');
+
+        if (!serverHasData) {
+            // File-loaded crawls exist only in the browser — the streaming
+            // endpoint can't see them, so use the legacy export endpoint
+            await legacyExportData(exportFormat, exportFields);
+            return;
+        }
 
         // Determine which data types to export based on settings
         const hasIssues = exportFields.includes('issues_detected');
@@ -1650,6 +1657,65 @@ async function exportData() {
             exportBtn.disabled = false;
             exportBtn.textContent = 'Export';
         }
+    }
+}
+
+// Legacy in-memory export via POST /api/export_data — used for crawls loaded
+// from a saved file, where the data exists only in browser state
+async function legacyExportData(exportFormat, exportFields) {
+    const exportResponse = await fetch('/api/export_data', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            format: exportFormat,
+            fields: exportFields,
+            localData: {
+                urls: crawlState.urls || [],
+                links: crawlState.links || [],
+                issues: crawlState.issues || window.currentIssues || []
+            }
+        })
+    });
+
+    const exportData = await exportResponse.json();
+
+    if (!exportData.success) {
+        showNotification(exportData.error || 'Export failed', 'error');
+        return;
+    }
+
+    if (exportData.multiple_files && exportData.files) {
+        exportData.files.forEach((file, index) => {
+            setTimeout(() => {
+                const blob = new Blob([file.content], { type: file.mimetype });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = file.filename;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+            }, index * 500); // Delay between downloads to avoid browser blocking
+        });
+
+        showNotification(`Exporting ${exportData.files.length} files...`, 'success');
+    } else {
+        const blob = new Blob([exportData.content], { type: exportData.mimetype });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = exportData.filename;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+
+        showNotification(`Export complete: ${exportData.filename}`, 'success');
     }
 }
 
