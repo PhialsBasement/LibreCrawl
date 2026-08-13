@@ -20,7 +20,7 @@ let defaultSettings = {
     googleApiKey: '',
 
     // Filter settings
-    includeExtensions: 'html,htm,php,asp,aspx,jsp',
+    includeExtensions: 'html,htm,php,asp,aspx,jsp,jpg,jpeg,png,gif,webp,svg,ico,avif,bmp',
     excludeExtensions: 'pdf,doc,docx,zip,exe,dmg',
     includePatterns: '',
     excludePatterns: '',
