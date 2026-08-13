@@ -1,5 +1,6 @@
 @echo off
 
+if not exist data mkdir data
 echo Checking for Docker...
 docker --version 2>nul
 if errorlevel 1 goto nodocker

@@ -2,6 +2,7 @@
 
 # Start LibreCrawl - tries Docker first, falls back to Python
 
+mkdir -p data
 echo "Checking for Docker..."
 if command -v docker &> /dev/null && command -v docker compose &> /dev/null; then
     echo "Docker found! Starting LibreCrawl with Docker..."
