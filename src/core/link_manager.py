@@ -4,6 +4,16 @@ from urllib.parse import urljoin, urlparse
 from collections import deque
 
 
+def normalize_url(url):
+    """Normalize a URL for deduplication: strip fragments and give bare domains a '/' path
+    so e.g. https://example.com and https://example.com/ dedupe to one URL"""
+    parsed = urlparse(url)
+    clean_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path or '/'}"
+    if parsed.query:
+        clean_url += f"?{parsed.query}"
+    return clean_url
+
+
 class LinkManager:
     """Manages link discovery, tracking, and extraction"""
 
@@ -32,10 +42,7 @@ class LinkManager:
             absolute_url = urljoin(current_url, href)
 
             # Clean URL (remove fragment)
-            parsed = urlparse(absolute_url)
-            clean_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
-            if parsed.query:
-                clean_url += f"?{parsed.query}"
+            clean_url = normalize_url(absolute_url)
 
             # Thread-safe checking and adding
             with self.urls_lock:
@@ -76,9 +83,7 @@ class LinkManager:
                 parsed_target = urlparse(absolute_url)
 
                 # Clean URL (remove fragment)
-                clean_url = f"{parsed_target.scheme}://{parsed_target.netloc}{parsed_target.path}"
-                if parsed_target.query:
-                    clean_url += f"?{parsed_target.query}"
+                clean_url = normalize_url(absolute_url)
 
                 # Determine if link is internal or external
                 target_domain_clean = parsed_target.netloc.replace('www.', '', 1)
@@ -140,9 +145,7 @@ class LinkManager:
                 if parsed_target.scheme not in ('http', 'https'):
                     continue
 
-                clean_url = f"{parsed_target.scheme}://{parsed_target.netloc}{parsed_target.path}"
-                if parsed_target.query:
-                    clean_url += f"?{parsed_target.query}"
+                clean_url = normalize_url(absolute_url)
 
                 target_domain_clean = parsed_target.netloc.replace('www.', '', 1)
                 base_domain_clean = self.base_domain.replace('www.', '', 1)
@@ -214,6 +217,7 @@ class LinkManager:
 
     def add_url(self, url, depth):
         """Add a URL to the discovery queue"""
+        url = normalize_url(url)
         with self.urls_lock:
             if url not in self.all_discovered_urls and url not in self.visited_urls:
                 self.all_discovered_urls.add(url)
