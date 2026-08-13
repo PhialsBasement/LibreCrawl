@@ -608,7 +608,7 @@ function updateCrawlButtons() {
 
         // Save button: only enabled if crawl is completed and has data
         const hasData = crawlState.stats.crawled > 0;
-        saveCrawlBtn.disabled = !hasData;
+        saveCrawlBtn.disabled = !hasData || isSavingCrawl;
 
         // Load button: only enabled if no current crawl data
         loadCrawlBtn.disabled = hasData;
@@ -1548,6 +1548,12 @@ async function loadUserInfo() {
 }
 
 async function exportData() {
+    const exportBtn = document.getElementById('exportBtn');
+    if (exportBtn) {
+        if (exportBtn.disabled) return; // Already exporting
+        exportBtn.disabled = true;
+        exportBtn.textContent = 'Exporting...';
+    }
     try {
         // Get current settings to determine export format and fields
         const settingsResponse = await fetch('/api/get_settings');
@@ -1656,6 +1662,11 @@ async function exportData() {
     } catch (error) {
         console.error('Export error:', error);
         showNotification('Export failed', 'error');
+    } finally {
+        if (exportBtn) {
+            exportBtn.disabled = false;
+            exportBtn.textContent = 'Export';
+        }
     }
 }
 
@@ -1927,7 +1938,16 @@ function getScoreClass(score) {
 }
 
 // Save/Load Crawl Functions
+let isSavingCrawl = false;
+
 async function saveCrawl() {
+    const saveCrawlBtn = document.getElementById('saveCrawlBtn');
+    if (isSavingCrawl || (saveCrawlBtn && saveCrawlBtn.disabled)) return;
+    isSavingCrawl = true;
+    if (saveCrawlBtn) {
+        saveCrawlBtn.disabled = true;
+        saveCrawlBtn.textContent = 'Saving...';
+    }
     try {
         if (crawlState.stats.crawled === 0) {
             showNotification('No crawl data to save', 'error');
@@ -1990,6 +2010,12 @@ async function saveCrawl() {
     } catch (error) {
         console.error('Save error:', error);
         showNotification('Failed to save crawl', 'error');
+    } finally {
+        isSavingCrawl = false;
+        if (saveCrawlBtn) {
+            saveCrawlBtn.textContent = 'Save Crawl';
+        }
+        updateCrawlButtons(); // Restore correct enabled/disabled state
     }
 }
 
