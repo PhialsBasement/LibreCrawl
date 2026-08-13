@@ -635,8 +635,16 @@
 
                     <div class="setting-group">
                         <label for="includeExtensions">Include File Extensions</label>
-                        <input type="text" id="includeExtensions" value="html,htm,php,asp,aspx,jsp,jpg,jpeg,png,gif,webp,svg,ico,avif,bmp">
+                        <input type="text" id="includeExtensions" value="html,htm,php,asp,aspx,jsp">
                         <span class="setting-help">Comma-separated list of extensions to crawl</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="crawlImages">
+                            Crawl Images
+                        </label>
+                        <span class="setting-help">Fully download images as crawl targets. When off, image status and size are still collected via lightweight HEAD requests</span>
                     </div>
 
                     <div class="setting-group">

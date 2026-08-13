@@ -15,6 +15,9 @@ from concurrent.futures import ThreadPoolExecutor
 from urllib.robotparser import RobotFileParser
 import nest_asyncio
 
+# Extensions treated as images by the "Crawl Images" setting
+IMAGE_EXTENSIONS = {'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'ico', 'avif', 'bmp'}
+
 
 def classify_fetch_error(exc_or_msg):
     """Classify a failed-fetch error into a coarse error_type.
@@ -133,6 +136,8 @@ class WebCrawler:
 
         # Image status cache (avoids re-checking the same image URL across pages)
         self._image_status_cache = {}
+        # Image URLs already given a synthesized result row from a HEAD check
+        self._synthesized_image_urls = set()
 
         # Database persistence
         self.crawl_id = crawl_id
@@ -163,8 +168,8 @@ class WebCrawler:
             'accept_language': 'en-US,en;q=0.9',
             'respect_robots': True,
             'allow_cookies': True,
-            'include_extensions': ['html', 'htm', 'php', 'asp', 'aspx', 'jsp',
-                                    'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'ico', 'avif', 'bmp'],
+            'include_extensions': ['html', 'htm', 'php', 'asp', 'aspx', 'jsp'],
+            'crawl_images': False,
             'exclude_extensions': ['pdf', 'doc', 'docx', 'zip', 'exe', 'dmg'],
             'include_patterns': [],
             'exclude_patterns': [],
@@ -345,6 +350,8 @@ class WebCrawler:
             self.issue_detector.reset()
 
         self.crawl_results.clear()
+        self._image_status_cache.clear()
+        self._synthesized_image_urls.clear()
         self.stats = {
             'discovered': 0,
             'crawled': 0,
@@ -990,7 +997,7 @@ class WebCrawler:
                     # HEAD-check image URLs for broken image detection
                     image_links = [l for l in new_links if l.get('placement') == 'image']
                     if image_links:
-                        self._check_image_statuses(image_links)
+                        self._check_image_statuses(image_links, depth + 1)
                         broken = [l for l in image_links
                                   if l.get('target_status') is not None
                                   and (l['target_status'] >= 400 or l['target_status'] == 0)]
@@ -1011,7 +1018,8 @@ class WebCrawler:
                 )
 
                 if should_extract:
-                    self.link_manager.extract_links(soup, url, depth + 1, self._should_crawl_url)
+                    self.link_manager.extract_links(soup, url, depth + 1, self._should_crawl_url,
+                                                    include_images=self.config.get('crawl_images', False))
 
             # Populate linked_from after all link collection is complete
             result['linked_from'] = self.link_manager.get_source_pages(url)
@@ -1124,7 +1132,7 @@ class WebCrawler:
                 # HEAD-check image URLs for broken image detection
                 image_links = [l for l in new_links if l.get('placement') == 'image']
                 if image_links:
-                    self._check_image_statuses(image_links)
+                    self._check_image_statuses(image_links, depth + 1)
                     broken = [l for l in image_links
                               if l.get('target_status') is not None
                               and (l['target_status'] >= 400 or l['target_status'] == 0)]
@@ -1145,7 +1153,8 @@ class WebCrawler:
             )
 
             if should_extract:
-                self.link_manager.extract_links(soup, url, depth + 1, self._should_crawl_url)
+                self.link_manager.extract_links(soup, url, depth + 1, self._should_crawl_url,
+                                                include_images=self.config.get('crawl_images', False))
 
             # Populate linked_from after all link collection is complete
             result['linked_from'] = self.link_manager.get_source_pages(url)
@@ -1291,12 +1300,16 @@ class WebCrawler:
 
         print(f"Updated linked_from data for {updated_count} URLs")
 
-    def _check_image_statuses(self, image_links):
+    def _check_image_statuses(self, image_links, depth=0):
         """HEAD-check image URLs to detect broken images.
 
         Uses a per-crawl cache so the same image URL is only checked once
         even if it appears on many pages.  Runs up to 5 checks in parallel,
         capped at 50 images per page to avoid blocking the crawl.
+
+        Images that won't be fetched as full crawl targets get a result row
+        synthesized from the HEAD response so they appear in the Images tab
+        without downloading the file.
         """
         to_check = []
         for link in image_links:
@@ -1312,16 +1325,46 @@ class WebCrawler:
 
         def _head_check(link):
             url = link['target_url']
+            content_type = ''
+            size = 0
             try:
                 resp = self.session.head(url, timeout=5, allow_redirects=True)
                 link['target_status'] = resp.status_code
+                content_type = resp.headers.get('content-type', '').split(';')[0]
+                try:
+                    size = int(resp.headers.get('content-length') or 0)
+                except ValueError:
+                    size = 0
             except Exception:
                 link['target_status'] = 0
             self._image_status_cache[url] = link['target_status']
 
+            # Skip synthesis for URLs that will be (or were) crawled for real
+            if not self._should_crawl_url(url):
+                self._record_image_result(url, link['target_status'], content_type, size, depth)
+
         batch = to_check[:50]
         with ThreadPoolExecutor(max_workers=min(5, len(batch))) as pool:
             pool.map(_head_check, batch)
+
+    def _record_image_result(self, url, status_code, content_type, size, depth):
+        """Add a result row for an image from its HEAD response (no body download)"""
+        with self.results_lock:
+            if url in self._synthesized_image_urls:
+                return
+            self._synthesized_image_urls.add(url)
+
+            result = self.seo_extractor.create_empty_result(url, depth, status_code)
+            result['content_type'] = content_type
+            result['size'] = size
+            result['is_internal'] = self.link_manager.is_internal(url)
+            self.crawl_results.append(result)
+            self.stats['crawled'] += 1
+
+        result['linked_from'] = self.link_manager.get_source_pages(url)
+        self.user_memory.track_url(result)
+        if self.db_save_enabled:
+            self.unsaved_urls.append(result)
 
     def _should_crawl_url(self, url):
         """Check if URL should be crawled based on settings"""
@@ -1345,7 +1388,10 @@ class WebCrawler:
             if extension in self.config['exclude_extensions']:
                 return False
 
-            if self.config['include_extensions'] and extension not in self.config['include_extensions']:
+            # "Crawl Images" setting lets image URLs through the include filter
+            if extension in IMAGE_EXTENSIONS and self.config.get('crawl_images', False):
+                pass
+            elif self.config['include_extensions'] and extension not in self.config['include_extensions']:
                 return False
 
         # Check URL patterns

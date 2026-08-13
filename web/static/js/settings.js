@@ -20,11 +20,12 @@ let defaultSettings = {
     googleApiKey: '',
 
     // Filter settings
-    includeExtensions: 'html,htm,php,asp,aspx,jsp,jpg,jpeg,png,gif,webp,svg,ico,avif,bmp',
+    includeExtensions: 'html,htm,php,asp,aspx,jsp',
     excludeExtensions: 'pdf,doc,docx,zip,exe,dmg',
     includePatterns: '',
     excludePatterns: '',
     maxFileSize: 50,
+    crawlImages: false,
 
     // Duplication detection settings
     enableDuplicationCheck: true,
@@ -459,7 +460,7 @@ function collectSettingsFromForm() {
     const formFields = [
         'maxDepth', 'maxUrls', 'crawlDelay', 'followRedirects', 'crawlExternalLinks',
         'userAgent', 'timeout', 'retries', 'acceptLanguage', 'respectRobotsTxt', 'allowCookies', 'discoverSitemaps', 'enablePageSpeed', 'googleApiKey',
-        'includeExtensions', 'excludeExtensions', 'includePatterns', 'excludePatterns', 'maxFileSize',
+        'includeExtensions', 'excludeExtensions', 'includePatterns', 'excludePatterns', 'maxFileSize', 'crawlImages',
         'enableDuplicationCheck', 'duplicationThreshold',
         'exportFormat', 'concurrency', 'memoryLimit', 'logLevel', 'saveSession',
         'enableProxy', 'proxyUrl', 'customHeaders',

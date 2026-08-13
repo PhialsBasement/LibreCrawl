@@ -29,7 +29,7 @@ class LinkManager:
         self.urls_lock = threading.Lock()
         self.links_lock = threading.Lock()
 
-    def extract_links(self, soup, current_url, depth, should_crawl_callback):
+    def extract_links(self, soup, current_url, depth, should_crawl_callback, include_images=False):
         """Extract links from HTML and add to discovery queue"""
         links = soup.find_all('a', href=True)
 
@@ -61,7 +61,10 @@ class LinkManager:
                         self.all_discovered_urls.add(clean_url)
                         self.discovered_urls.append((clean_url, depth))
 
-        """Extract images from HTML and add to discovery queue"""
+        # Optionally queue images as crawl targets (full download)
+        if not include_images:
+            return
+
         imgs = soup.find_all('img', src=True)
         for img in imgs:
             src = img.get('src', '').strip()
@@ -75,9 +78,7 @@ class LinkManager:
                 if parsed.scheme not in ('http', 'https'):
                     continue
 
-                clean_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
-                if parsed.query:
-                    clean_url += f"?{parsed.query}"
+                clean_url = normalize_url(absolute_url)
 
                 with self.urls_lock:
                     if clean_url not in self.source_pages:

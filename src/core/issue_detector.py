@@ -22,6 +22,11 @@ class IssueDetector:
         if self._should_exclude(url):
             return
 
+        # SEO checks only apply to HTML pages, not images/CSS/JS/etc.
+        content_type = result.get('content_type', '')
+        if content_type and 'html' not in content_type.lower():
+            return
+
         # Critical SEO Issues
         self._check_title_issues(result, issues)
         self._check_meta_description_issues(result, issues)

@@ -42,6 +42,7 @@ class SettingsManager:
             'discoverSitemaps', 'enablePageSpeed', 'googleApiKey',
             # Filters tab
             'includeExtensions', 'excludeExtensions', 'includePatterns', 'excludePatterns', 'maxFileSize',
+            'crawlImages',
             # JavaScript tab
             'enableJavaScript', 'jsWaitTime', 'jsTimeout', 'jsBrowser', 'jsHeadless',
             'jsUserAgent', 'jsViewportWidth', 'jsViewportHeight', 'jsMaxConcurrentPages',
@@ -91,11 +92,12 @@ class SettingsManager:
             'googleApiKey': '',
 
             # Filter settings
-            'includeExtensions': 'html,htm,php,asp,aspx,jsp,jpg,jpeg,png,gif,webp,svg,ico,avif,bmp',
+            'includeExtensions': 'html,htm,php,asp,aspx,jsp',
             'excludeExtensions': 'pdf,doc,docx,zip,exe,dmg',
             'includePatterns': '',
             'excludePatterns': '',
             'maxFileSize': 50,
+            'crawlImages': False,
 
             # Duplication detection settings
             'enableDuplicationCheck': True,
@@ -487,6 +489,7 @@ class SettingsManager:
             'respect_robots': settings['respectRobotsTxt'],
             'allow_cookies': settings['allowCookies'],
             'include_extensions': [ext.strip() for ext in settings['includeExtensions'].split(',') if ext.strip()],
+            'crawl_images': settings.get('crawlImages', False),
             'exclude_extensions': [ext.strip() for ext in settings['excludeExtensions'].split(',') if ext.strip()],
             'include_patterns': [p.strip() for p in settings['includePatterns'].split('\n') if p.strip()],
             'exclude_patterns': [p.strip() for p in settings['excludePatterns'].split('\n') if p.strip()],
