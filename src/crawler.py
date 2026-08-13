@@ -75,6 +75,7 @@ from src.core.sitemap_parser import SitemapParser
 from src.core.issue_detector import IssueDetector
 from src.core.memory_monitor import MemoryMonitor
 from src.core.memory_profiler import UserMemoryTracker
+from src.core.event_log import CrawlEventLog
 
 
 class WebCrawler:
@@ -107,9 +108,16 @@ class WebCrawler:
         # Demo mode state
         self._demo_limit_reached = False
 
+        # Sitemap discovery runs in a background thread; the crawl must not
+        # declare "no more URLs" while it is still feeding the queue
+        self._sitemap_discovery_done = True
+
         # Results storage
         self.crawl_results = []
         self.results_lock = threading.Lock()
+
+        # Change journal for incremental UI sync
+        self.event_log = CrawlEventLog()
 
         # State flags
         self.is_running = False
@@ -127,6 +135,12 @@ class WebCrawler:
             'speed': 0.0,
             'start_time': None
         }
+
+        # Pages actually fetched. stats['crawled'] also counts the rows
+        # synthesized from image HEAD checks, which are not fetches, so the
+        # max_urls budget is measured with this instead: otherwise one
+        # image-heavy page can exhaust the whole limit on its own.
+        self.pages_crawled = 0
 
         # Thread reference
         self.crawl_thread = None
@@ -148,6 +162,7 @@ class WebCrawler:
         self.unsaved_urls = []
         self.unsaved_links = []
         self.unsaved_issues = []
+        self._batch_lock = threading.Lock()
         self.auto_save_thread = None
         self.db_save_enabled = False  # Only enable when crawl_id is set
 
@@ -304,11 +319,13 @@ class WebCrawler:
             self.link_manager.add_url(url, 0)
             self.stats['discovered'] = 1
 
-            # Discover sitemaps if enabled
+            # Discover sitemaps in the background so the crawl (and the UI)
+            # starts immediately — sitemap probes can take many seconds on
+            # slow sites and used to block this request until they finished
             if self.config.get('discover_sitemaps', True):
-                print(f"Starting sitemap discovery for {url}")
-                self._discover_and_add_sitemap_urls(url)
-                print(f"Sitemap discovery completed. Total discovered URLs: {self.stats['discovered']}")
+                self._sitemap_discovery_done = False
+                threading.Thread(target=self._discover_sitemaps_background,
+                                 args=(url,), daemon=True).start()
 
             # Start auto-save thread if DB enabled
             if self.db_save_enabled:
@@ -334,7 +351,7 @@ class WebCrawler:
             requests_per_second = 100.0
 
         self.rate_limiter = RateLimiter(requests_per_second)
-        self.link_manager = LinkManager(self.base_domain)
+        self.link_manager = LinkManager(self.base_domain, event_log=self.event_log)
         self.sitemap_parser = SitemapParser(self.session, self.base_domain, self.config['timeout'])
         self.issue_detector = IssueDetector(self.config.get('issue_exclusion_patterns', []))
 
@@ -350,6 +367,8 @@ class WebCrawler:
             self.issue_detector.reset()
 
         self.crawl_results.clear()
+        self.pages_crawled = 0
+        self.event_log.new_epoch()
         self._image_status_cache.clear()
         self._synthesized_image_urls.clear()
         self.stats = {
@@ -364,6 +383,19 @@ class WebCrawler:
         self.memory_monitor.start_monitoring()
         self.user_memory.reset()
         self._demo_limit_reached = False
+        self._sitemap_discovery_done = True
+
+    def _discover_sitemaps_background(self, base_url):
+        """Run sitemap discovery off the request thread; the completion
+        checks in the crawl workers wait on _sitemap_discovery_done"""
+        try:
+            print(f"Starting sitemap discovery for {base_url}")
+            self._discover_and_add_sitemap_urls(base_url)
+            print(f"Sitemap discovery completed. Total discovered URLs: {self.stats['discovered']}")
+        except Exception as e:
+            print(f"Sitemap discovery error: {e}")
+        finally:
+            self._sitemap_discovery_done = True
 
     def _discover_and_add_sitemap_urls(self, base_url):
         """Discover sitemaps and add URLs to crawl queue"""
@@ -514,8 +546,16 @@ class WebCrawler:
                 self.user_memory.track_issues(loaded_issues)
             print(f"User memory tracker: {self.user_memory.total_mb:.0f}MB from loaded data")
 
-            # Restore statistics
+            # Rebuild the event log so polling clients resync the loaded data
+            self.event_log.new_epoch()
+            self.event_log.emit_many('url', self.crawl_results)
+            self.event_log.emit_many('link', loaded_links)
+            self.event_log.emit_many('issue', loaded_issues)
+
+            # Restore statistics. Resumed rows count against max_urls so a
+            # resume cannot push the crawl past the configured limit.
             self.stats['crawled'] = len(self.crawl_results)
+            self.pages_crawled = len(self.crawl_results)
             self.stats['discovered'] = crawl_data.get('urls_discovered', 0)
             self.stats['depth'] = crawl_data.get('max_depth_reached', 0)
             self.stats['start_time'] = time.time()  # New start time for resume
@@ -577,8 +617,52 @@ class WebCrawler:
             traceback.print_exc()
             return False, f"Error resuming crawl: {str(e)}"
 
-    def get_status(self):
-        """Get current crawl status and results"""
+    def load_data(self, crawl, urls, links, issues):
+        """Inject a historical crawl's data into this instance for viewing/export.
+
+        Rebuilds the event log under a new epoch, so any polling client
+        drops its accumulated state and replays the loaded data.
+        """
+        self.base_url = crawl['base_url']
+        self.base_domain = crawl['base_domain']
+
+        # A freshly created instance has no components yet (they normally
+        # initialize on start_crawl) — without them, loaded links/issues
+        # would silently vanish
+        if not self.link_manager or not self.issue_detector:
+            self._initialize_components()
+
+        with self.results_lock:
+            self.crawl_results = urls
+        self.stats['crawled'] = len(urls)
+        self.stats['discovered'] = len(urls)
+        self.pages_crawled = len(urls)
+
+        self.link_manager.all_links = links
+        self.link_manager.links_set.clear()
+        for link in links:
+            self.link_manager.links_set.add(f"{link['source_url']}|{link['target_url']}")
+
+        self.issue_detector.detected_issues = issues
+
+        # Rebuild per-user memory tracker for loaded data
+        self.user_memory.reset()
+        self._demo_limit_reached = False
+        for url_data in urls:
+            self.user_memory.track_url(url_data)
+        if links:
+            self.user_memory.track_links(links)
+        if issues:
+            self.user_memory.track_issues(issues)
+
+        self.event_log.new_epoch()
+        self.event_log.emit_many('url', urls)
+        self.event_log.emit_many('link', links)
+        self.event_log.emit_many('issue', issues)
+
+    def get_status_light(self):
+        """Current status, stats and progress — without the data arrays.
+        Data reaches polling clients through the event log instead."""
         if self._demo_limit_reached and not self.is_running:
             status = 'demo_stopped'
         elif not self.is_running and self.stats['crawled'] > 0:
@@ -596,7 +680,8 @@ class WebCrawler:
         # Get link manager stats
         link_stats = self.link_manager.get_stats() if self.link_manager else {'discovered': 0}
 
-        # Update link statuses before returning (ensures all crawled URLs have their status)
+        # Backfill link target statuses from crawled URLs. The link manager
+        # journals the ones that changed itself, under its own lock.
         if self.link_manager:
             self.link_manager.update_link_statuses(self.crawl_results)
 
@@ -606,17 +691,12 @@ class WebCrawler:
         # Per-user data sizes from incremental tracker (O(1), no recursion)
         data_sizes = self.user_memory.get_stats()
 
-        print(f"get_status called - crawl_results length: {len(self.crawl_results)}, status: {status}, crawled: {self.stats['crawled']}")
-
         return {
             'status': status,
             'stats': {
                 **self.stats,
                 'discovered': link_stats['discovered']
             },
-            'urls': self.crawl_results.copy(),
-            'links': self.link_manager.all_links.copy() if self.link_manager else [],
-            'issues': self.issue_detector.get_issues() if self.issue_detector else [],
             'progress': min(100, (self.stats['crawled'] / max(link_stats['discovered'], 1)) * 100),
             'is_running_pagespeed': self.is_running_pagespeed,
             'memory': self.memory_monitor.get_stats(),
@@ -625,6 +705,14 @@ class WebCrawler:
             'demo_mode': self.config.get('demo_mode', False)
         }
 
+    def get_status(self):
+        """Full status snapshot including data arrays (initial load, save, export)"""
+        status_data = self.get_status_light()
+        status_data['urls'] = self.crawl_results.copy()
+        status_data['links'] = self.link_manager.all_links.copy() if self.link_manager else []
+        status_data['issues'] = self.issue_detector.get_issues() if self.issue_detector else []
+        return status_data
+
     def _save_batch_to_db(self, force=False):
         """Save batched data to database"""
         if not self.db_save_enabled or not self.crawl_id:
@@ -632,21 +720,31 @@ class WebCrawler:
 
         from src.crawl_db import save_url_batch, save_links_batch, save_issues_batch, update_crawl_stats
 
+        # Take the pending batches before touching the database. Crawl workers
+        # keep appending during the write and the auto-save thread can run this
+        # concurrently with the worker, so clearing the lists after the write
+        # silently dropped everything appended in between. Each list keeps its
+        # identity and only the rows actually taken are removed, so appends that
+        # land mid-write survive and go out with the next batch.
+        def take(batch):
+            with self._batch_lock:
+                taken = batch[:]
+                del batch[:len(taken)]
+            return taken
+
+        urls = take(self.unsaved_urls)
+        links = take(self.unsaved_links)
+        issues = take(self.unsaved_issues)
+
         try:
-            # Save URLs
-            if self.unsaved_urls:
-                save_url_batch(self.crawl_id, self.unsaved_urls)
-                self.unsaved_urls.clear()
+            if urls:
+                save_url_batch(self.crawl_id, urls)
 
-            # Save links
-            if self.unsaved_links:
-                save_links_batch(self.crawl_id, self.unsaved_links)
-                self.unsaved_links.clear()
+            if links:
+                save_links_batch(self.crawl_id, links)
 
-            # Save issues
-            if self.unsaved_issues:
-                save_issues_batch(self.crawl_id, self.unsaved_issues)
-                self.unsaved_issues.clear()
+            if issues:
+                save_issues_batch(self.crawl_id, issues)
 
             # Update statistics
             memory_stats = self.memory_monitor.get_stats()
@@ -763,7 +861,7 @@ class WebCrawler:
 
                     # Submit new tasks - fill ALL available slots, apply rate limiting per task
                     while (len(active_futures) < max_workers and
-                           self.stats['crawled'] < self.config['max_urls']):
+                           self.pages_crawled < self.config['max_urls']):
 
                         url_info = self.link_manager.get_next_url()
                         if not url_info:
@@ -791,8 +889,12 @@ class WebCrawler:
                                     with self.results_lock:
                                         self.crawl_results.append(result)
                                         self.stats['crawled'] += 1
+                                        self.pages_crawled += 1
                                         self.stats['depth'] = max(self.stats['depth'], result.get('depth', 0))
                                         print(f"Added URL to results: {result['url']} - Total in results: {len(self.crawl_results)}")
+                                        self.event_log.emit('url', result)
+                                        if self.db_save_enabled:
+                                            self.unsaved_urls.append(result)
 
                                     # Track per-user memory
                                     self.user_memory.track_url(result)
@@ -805,9 +907,14 @@ class WebCrawler:
                                     # Track + batch new issues
                                     if issues_after > issues_before:
                                         new_issues = self.issue_detector.detected_issues[issues_before:issues_after]
+                                        self.event_log.emit_many('issue', new_issues)
                                         self.user_memory.track_issues(new_issues)
                                         if self.db_save_enabled:
                                             self.unsaved_issues.extend(new_issues)
+
+                                    if (self.db_save_enabled and
+                                            len(self.unsaved_urls) >= self.batch_save_size):
+                                        self._save_batch_to_db()
                             except Exception as e:
                                 print(f"Error in crawl task: {e}")
 
@@ -822,13 +929,17 @@ class WebCrawler:
                         break
 
                     # Check for completion
-                    if self.stats['crawled'] >= self.config['max_urls']:
+                    if self.pages_crawled >= self.config['max_urls']:
                         print(f"Reached maximum URLs limit ({self.config['max_urls']})")
                         break
 
-                    # Check if no more work
+                    # Check if no more work (sitemap discovery may still be
+                    # feeding the queue in the background — don't quit early)
                     link_stats = self.link_manager.get_stats()
                     if link_stats['pending'] == 0 and len(active_futures) == 0:
+                        if not self._sitemap_discovery_done:
+                            time.sleep(0.2)
+                            continue
                         print("No more URLs to crawl")
                         break
 
@@ -855,7 +966,7 @@ class WebCrawler:
             if self.issue_detector and self.config.get('enable_duplication_check', True):
                 print("Running duplication detection...")
                 duplication_threshold = self.config.get('duplication_threshold', 0.85)
-                self.issue_detector.detect_duplication_issues(self.crawl_results, duplication_threshold)
+                self._detect_duplication_issues(duplication_threshold)
                 print(f"Duplication detection complete. Total issues: {len(self.issue_detector.get_issues())}")
 
         # Save final data and set appropriate status
@@ -925,6 +1036,13 @@ class WebCrawler:
             # Determine if URL is internal
             is_internal = self.link_manager.is_internal(url)
 
+            # Where the content actually lives after any redirects — relative
+            # links in the HTML must resolve against this, not the requested
+            # URL (a redirect to another site would otherwise spray that
+            # site's relative links across our own domain)
+            final_url = str(response.url) if response.url else url
+            content_is_internal = self.link_manager.is_internal(final_url)
+
             # Create result structure
             result = {
                 'url': url,
@@ -972,6 +1090,13 @@ class WebCrawler:
                 'linked_from': []
             }
 
+            # Record the redirect chain (previously always left empty)
+            if response.history:
+                result['redirects'] = [
+                    {'url': str(h.url), 'status_code': h.status_code} for h in response.history
+                ]
+                result['redirected_to'] = final_url
+
             # Only parse HTML content
             if 'text/html' in response.headers.get('content-type', ''):
                 soup = BeautifulSoup(response.content, 'html.parser')
@@ -983,20 +1108,17 @@ class WebCrawler:
                 self.seo_extractor.extract_twitter_tags(soup, result)
                 self.seo_extractor.extract_json_ld(soup, result)
                 self.seo_extractor.extract_analytics_tracking(soup, response.text, result)
-                self.seo_extractor.extract_images(soup, url, result)
+                self.seo_extractor.extract_images(soup, final_url, result)
                 self.seo_extractor.extract_link_counts(soup, result, self.base_domain)
                 self.seo_extractor.extract_hreflang(soup, result)
                 self.seo_extractor.extract_schema_org(soup, result)
 
-                # Collect all links
-                links_before = len(self.link_manager.all_links)
-                self.link_manager.collect_all_links(soup, url, self.crawl_results)
-                links_after = len(self.link_manager.all_links)
+                # Collect all links (returns only the ones new to this crawl)
+                new_links = self.link_manager.collect_all_links(soup, url, self.crawl_results,
+                                                                base_url=final_url)
 
                 # Track + batch new links
-                if links_after > links_before:
-                    new_links = self.link_manager.all_links[links_before:links_after]
-
+                if new_links:
                     # HEAD-check image URLs for broken image detection
                     image_links = [l for l in new_links if l.get('placement') == 'image']
                     if image_links:
@@ -1010,31 +1132,33 @@ class WebCrawler:
                                 for l in broken
                             ]
 
+                    # (link events were journalled by the link manager)
                     self.user_memory.track_links(new_links)
                     if self.db_save_enabled:
                         self.unsaved_links.extend(new_links)
 
-                # Extract links for further crawling
+                # Extract links for further crawling. Gate on where the
+                # content actually lives: a page that redirected off-domain
+                # is external content and shouldn't seed the queue unless
+                # external crawling is enabled
                 should_extract = (
-                    (is_internal and depth < self.config['max_depth']) or
+                    (content_is_internal and depth < self.config['max_depth']) or
                     (self.config['crawl_external'] and depth < self.config['max_depth'])
                 )
 
                 if should_extract:
                     self.link_manager.extract_links(soup, url, depth + 1, self._should_crawl_url,
-                                                    include_images=self.config.get('crawl_images', False))
+                                                    include_images=self.config.get('crawl_images', False),
+                                                    base_url=final_url)
 
             # Populate linked_from after all link collection is complete
             result['linked_from'] = self.link_manager.get_source_pages(url)
             result['response_time'] = round((time.time() - start_time) * 1000, 2)
 
-            # Add to unsaved batch if DB persistence enabled
-            if self.db_save_enabled:
-                self.unsaved_urls.append(result)
-                # Trigger batch save if threshold reached
-                if len(self.unsaved_urls) >= self.batch_save_size:
-                    self._save_batch_to_db()
-
+            # NB: the DB batch is appended by the worker when it accepts this
+            # result into crawl_results, not here. A fetch that finishes after
+            # the worker stops (max_urls reached) must not reach the database,
+            # or a loaded crawl would show rows the crawl never counted.
             return result
 
         except Exception as e:
@@ -1049,7 +1173,7 @@ class WebCrawler:
 
         try:
             # Render page with JavaScript
-            html_content, status_code, error = await self.js_renderer.render_page(url)
+            html_content, status_code, error, final_url = await self.js_renderer.render_page(url)
 
             if error:
                 return self.seo_extractor.create_empty_result(
@@ -1059,6 +1183,10 @@ class WebCrawler:
 
             # Determine if URL is internal
             is_internal = self.link_manager.is_internal(url)
+
+            # Where the content actually lives after any redirects
+            final_url = final_url or url
+            content_is_internal = self.link_manager.is_internal(final_url)
 
             # Create result structure
             result = {
@@ -1118,20 +1246,17 @@ class WebCrawler:
             self.seo_extractor.extract_twitter_tags(soup, result)
             self.seo_extractor.extract_json_ld(soup, result)
             self.seo_extractor.extract_analytics_tracking(soup, html_content, result)
-            self.seo_extractor.extract_images(soup, url, result)
+            self.seo_extractor.extract_images(soup, final_url, result)
             self.seo_extractor.extract_link_counts(soup, result, self.base_domain)
             self.seo_extractor.extract_hreflang(soup, result)
             self.seo_extractor.extract_schema_org(soup, result)
 
-            # Collect all links
-            links_before = len(self.link_manager.all_links)
-            self.link_manager.collect_all_links(soup, url, self.crawl_results)
-            links_after = len(self.link_manager.all_links)
+            # Collect all links (returns only the ones new to this crawl)
+            new_links = self.link_manager.collect_all_links(soup, url, self.crawl_results,
+                                                            base_url=final_url)
 
             # Track + batch new links
-            if links_after > links_before:
-                new_links = self.link_manager.all_links[links_before:links_after]
-
+            if new_links:
                 # HEAD-check image URLs for broken image detection
                 image_links = [l for l in new_links if l.get('placement') == 'image']
                 if image_links:
@@ -1145,31 +1270,31 @@ class WebCrawler:
                             for l in broken
                         ]
 
+                # (link events were journalled by the link manager)
                 self.user_memory.track_links(new_links)
                 if self.db_save_enabled:
                     self.unsaved_links.extend(new_links)
 
-            # Extract links for further crawling
+            # Extract links for further crawling (gated on where the content
+            # actually lives — see the HTTP path for rationale)
             should_extract = (
-                (is_internal and depth < self.config['max_depth']) or
+                (content_is_internal and depth < self.config['max_depth']) or
                 (self.config['crawl_external'] and depth < self.config['max_depth'])
             )
 
             if should_extract:
                 self.link_manager.extract_links(soup, url, depth + 1, self._should_crawl_url,
-                                                include_images=self.config.get('crawl_images', False))
+                                                include_images=self.config.get('crawl_images', False),
+                                                base_url=final_url)
 
             # Populate linked_from after all link collection is complete
             result['linked_from'] = self.link_manager.get_source_pages(url)
             result['response_time'] = round((time.time() - start_time) * 1000, 2)
 
-            # Add to unsaved batch if DB persistence enabled
-            if self.db_save_enabled:
-                self.unsaved_urls.append(result)
-                # Trigger batch save if threshold reached
-                if len(self.unsaved_urls) >= self.batch_save_size:
-                    self._save_batch_to_db()
-
+            # NB: the DB batch is appended by the worker when it accepts this
+            # result into crawl_results, not here. A fetch that finishes after
+            # the worker stops (max_urls reached) must not reach the database,
+            # or a loaded crawl would show rows the crawl never counted.
             return result
 
         except Exception as e:
@@ -1187,7 +1312,7 @@ class WebCrawler:
             max_workers = self.config.get('js_max_concurrent_pages', 3)
             active_tasks = set()
 
-            while self.is_running and self.stats['crawled'] < self.config['max_urls']:
+            while self.is_running and self.pages_crawled < self.config['max_urls']:
                 # Check if paused
                 if self.is_paused:
                     await asyncio.sleep(1)
@@ -1221,8 +1346,12 @@ class WebCrawler:
                                 with self.results_lock:
                                     self.crawl_results.append(result)
                                     self.stats['crawled'] += 1
+                                    self.pages_crawled += 1
                                     self.stats['depth'] = max(self.stats['depth'], result.get('depth', 0))
                                     print(f"Added URL to results (JS): {result['url']} - Total in results: {len(self.crawl_results)}")
+                                    self.event_log.emit('url', result)
+                                    if self.db_save_enabled:
+                                        self.unsaved_urls.append(result)
 
                                 # Track per-user memory
                                 self.user_memory.track_url(result)
@@ -1235,9 +1364,14 @@ class WebCrawler:
                                 # Track + batch new issues
                                 if issues_after > issues_before:
                                     new_issues = self.issue_detector.detected_issues[issues_before:issues_after]
+                                    self.event_log.emit_many('issue', new_issues)
                                     self.user_memory.track_issues(new_issues)
                                     if self.db_save_enabled:
                                         self.unsaved_issues.extend(new_issues)
+
+                                if (self.db_save_enabled and
+                                        len(self.unsaved_urls) >= self.batch_save_size):
+                                    self._save_batch_to_db()
                         except Exception as e:
                             print(f"Error in async crawl task: {e}")
 
@@ -1247,9 +1381,13 @@ class WebCrawler:
                     self._demo_limit_reached = True
                     break
 
-                # Check completion
+                # Check completion (sitemap discovery may still be feeding
+                # the queue in the background — don't quit early)
                 link_stats = self.link_manager.get_stats()
                 if link_stats['pending'] == 0 and len(active_tasks) == 0:
+                    if not self._sitemap_discovery_done:
+                        await asyncio.sleep(0.2)
+                        continue
                     print("No more URLs to crawl")
                     break
 
@@ -1272,7 +1410,7 @@ class WebCrawler:
                 if self.issue_detector and self.config.get('enable_duplication_check', True):
                     print("Running duplication detection...")
                     duplication_threshold = self.config.get('duplication_threshold', 0.85)
-                    self.issue_detector.detect_duplication_issues(self.crawl_results, duplication_threshold)
+                    self._detect_duplication_issues(duplication_threshold)
                     print(f"Duplication detection complete. Total issues: {len(self.issue_detector.get_issues())}")
 
             # Save final data and set appropriate status
@@ -1289,19 +1427,31 @@ class WebCrawler:
             self.is_running = False
             print(f"Crawl completed. Discovered: {self.stats['discovered']}, Crawled: {self.stats['crawled']}")
 
+    def _detect_duplication_issues(self, duplication_threshold):
+        """Run duplication detection and journal/track/batch the new issues"""
+        issues_before = len(self.issue_detector.detected_issues)
+        self.issue_detector.detect_duplication_issues(self.crawl_results, duplication_threshold)
+        new_issues = self.issue_detector.detected_issues[issues_before:]
+        if new_issues:
+            self.event_log.emit_many('issue', new_issues)
+            self.user_memory.track_issues(new_issues)
+            if self.db_save_enabled:
+                self.unsaved_issues.extend(new_issues)
+
     def _update_all_linked_from(self):
         """Update linked_from field for all crawled URLs based on collected source_pages data"""
         print("Updating linked_from data for all URLs...")
-        updated_count = 0
+        updated = []
 
         for result in self.crawl_results:
-            url = result['url']
-            sources = self.link_manager.get_source_pages(url)
-            if sources:
+            sources = self.link_manager.get_source_pages(result['url'])
+            if sources and sources != result.get('linked_from'):
                 result['linked_from'] = sources
-                updated_count += 1
+                updated.append(result)
 
-        print(f"Updated linked_from data for {updated_count} URLs")
+        if updated:
+            self.event_log.emit_many('url_update', updated)
+        print(f"Updated linked_from data for {len(updated)} URLs")
 
     def _check_image_statuses(self, image_links, depth=0):
         """HEAD-check image URLs to detect broken images.
@@ -1314,16 +1464,30 @@ class WebCrawler:
         synthesized from the HEAD response so they appear in the Images tab
         without downloading the file.
         """
+        check_external = self.config.get('crawl_external', False)
+
+        # Statuses set here are journalled at the end: these links were already
+        # announced by the link manager, so the UI only learns about a HEAD
+        # result if we emit an update for it
+        mutated = []
+
         to_check = []
         for link in image_links:
             url = link['target_url']
+            # Respect the external-crawling setting: don't request (or mint
+            # result rows for) images hosted off-domain unless it's enabled
+            if not check_external and not self.link_manager.is_internal(url):
+                continue
             cached = self._image_status_cache.get(url)
             if cached is not None:
-                link['target_status'] = cached
+                if link.get('target_status') != cached:
+                    link['target_status'] = cached
+                    mutated.append(link)
             elif link.get('target_status') is None:
                 to_check.append(link)
 
         if not to_check:
+            self._emit_link_updates(mutated)
             return
 
         def _head_check(link):
@@ -1350,8 +1514,18 @@ class WebCrawler:
         with ThreadPoolExecutor(max_workers=min(5, len(batch))) as pool:
             pool.map(_head_check, batch)
 
+        mutated.extend(batch)
+        self._emit_link_updates(mutated)
+
+    def _emit_link_updates(self, links):
+        """Journal status changes made to links outside the link manager"""
+        if links:
+            self.event_log.emit_many('link_update', links)
+
     def _record_image_result(self, url, status_code, content_type, size, depth):
         """Add a result row for an image from its HEAD response (no body download)"""
+        sources = self.link_manager.get_source_pages(url)
+
         with self.results_lock:
             if url in self._synthesized_image_urls:
                 return
@@ -1361,13 +1535,14 @@ class WebCrawler:
             result['content_type'] = content_type
             result['size'] = size
             result['is_internal'] = self.link_manager.is_internal(url)
+            result['linked_from'] = sources
             self.crawl_results.append(result)
             self.stats['crawled'] += 1
+            self.event_log.emit('url', result)
+            if self.db_save_enabled:
+                self.unsaved_urls.append(result)
 
-        result['linked_from'] = self.link_manager.get_source_pages(url)
         self.user_memory.track_url(result)
-        if self.db_save_enabled:
-            self.unsaved_urls.append(result)
 
     def _should_crawl_url(self, url):
         """Check if URL should be crawled based on settings"""

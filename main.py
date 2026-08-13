@@ -420,39 +420,36 @@ def generate_links_json_export(links):
     """Generate JSON export for links data"""
     return json.dumps(links, indent=2)
 
-def filter_issues_by_exclusion_patterns(issues, exclusion_patterns):
-    """Filter issues based on exclusion patterns (applies current settings to loaded crawls)"""
+def issue_matches_exclusion(issue, exclusion_patterns):
+    """Check whether a single issue's URL matches any exclusion pattern"""
     from fnmatch import fnmatch
     from urllib.parse import urlparse
 
+    path = urlparse(issue.get('url', '')).path
+
+    for pattern in exclusion_patterns:
+        if not pattern.strip() or pattern.strip().startswith('#'):
+            continue
+
+        if '*' in pattern:
+            if fnmatch(path, pattern):
+                return True
+        elif path == pattern or path.startswith(pattern.rstrip('*')):
+            return True
+
+    return False
+
+def filter_issues_by_exclusion_patterns(issues, exclusion_patterns):
+    """Filter issues based on exclusion patterns (applies current settings to loaded crawls)"""
     if not exclusion_patterns:
         return issues
+    return [issue for issue in issues if not issue_matches_exclusion(issue, exclusion_patterns)]
 
-    filtered_issues = []
-
-    for issue in issues:
-        url = issue.get('url', '')
-        parsed = urlparse(url)
-        path = parsed.path
-
-        # Check if URL matches any exclusion pattern
-        should_exclude = False
-        for pattern in exclusion_patterns:
-            if not pattern.strip() or pattern.strip().startswith('#'):
-                continue
-
-            if '*' in pattern:
-                if fnmatch(path, pattern):
-                    should_exclude = True
-                    break
-            elif path == pattern or path.startswith(pattern.rstrip('*')):
-                should_exclude = True
-                break
-
-        if not should_exclude:
-            filtered_issues.append(issue)
-
-    return filtered_issues
+def get_exclusion_patterns(settings_manager):
+    """Current issue-exclusion patterns as a list of non-empty lines"""
+    current_settings = settings_manager.get_settings()
+    exclusion_patterns_text = current_settings.get('issueExclusionPatterns', '')
+    return [p.strip() for p in exclusion_patterns_text.split('\n') if p.strip()]
 
 def generate_issues_csv_export(issues):
     """Generate CSV export for issues data"""
@@ -724,7 +721,6 @@ def start_crawl():
         return jsonify({'success': False, 'error': 'URL is required'})
 
     user_id = session.get('user_id')
-    session_id = session.get('session_id')
     tier = session.get('tier', 'guest')
 
     # Check guest limits (IP-based) - skip in local mode
@@ -741,9 +737,12 @@ def start_crawl():
         # Log this guest crawl
         log_guest_crawl(client_ip)
 
-    # Get or create crawler for this session
+    # Get or create crawler for this session (this also ensures the session
+    # has a session_id — reading it earlier would return None on a session
+    # whose first API call is start_crawl, silently disabling persistence)
     crawler = get_or_create_crawler()
     settings_manager = get_session_settings()
+    session_id = session.get('session_id')
 
     # Apply current settings to crawler before starting
     try:
@@ -781,39 +780,52 @@ def crawl_status():
     crawler = get_or_create_crawler()
     settings_manager = get_session_settings()
 
-    # Check for incremental update parameters
-    url_since = request.args.get('url_since', type=int)
-    link_since = request.args.get('link_since', type=int)
-    issue_since = request.args.get('issue_since', type=int)
+    # Lightweight probe: status + stats only, no data (export pre-checks etc.)
+    if request.args.get('stats_only'):
+        status_data = crawler.get_status_light()
+        if crawler.base_url:
+            status_data['stats']['baseUrl'] = crawler.base_url
+        return jsonify(status_data)
 
-    # Get full status data
-    status_data = crawler.get_status()
+    since_seq = request.args.get('since_seq', type=int)
 
-    # Ensure baseUrl is in stats (needed for UI to work correctly)
-    if crawler.base_url and 'stats' in status_data:
+    if since_seq is None:
+        # Full snapshot (initial page load, save-crawl fetch)
+        status_data = crawler.get_status()
+        if crawler.base_url:
+            status_data['stats']['baseUrl'] = crawler.base_url
+
+        exclusion_patterns = get_exclusion_patterns(settings_manager)
+        status_data['issues'] = filter_issues_by_exclusion_patterns(
+            status_data.get('issues', []), exclusion_patterns)
+
+        return jsonify(status_data)
+
+    # Event mode: everything that changed after since_seq. If the client's
+    # epoch is stale (new crawl / loaded crawl / resume), reset=True and the
+    # events replay from zero so the client rebuilds its state.
+    #
+    # Events are read before the stats snapshot on purpose: a crawl running
+    # between the two calls should make the counters look newer than the rows,
+    # never older, so the UI never shows fewer crawled URLs than it lists.
+    epoch = request.args.get('epoch', '')
+    reset, events, latest_seq, current_epoch = crawler.event_log.events_since(since_seq, epoch)
+
+    status_data = crawler.get_status_light()
+    if crawler.base_url:
         status_data['stats']['baseUrl'] = crawler.base_url
 
-    # Check if we need to force a full refresh (after loading from DB)
-    force_full = session.pop('force_full_refresh', False)
+    exclusion_patterns = get_exclusion_patterns(settings_manager)
+    if exclusion_patterns:
+        events = [ev for ev in events
+                  if ev['kind'] != 'issue' or not issue_matches_exclusion(ev['data'], exclusion_patterns)]
 
-    # If incremental parameters provided AND not forcing full refresh, slice the arrays
-    if not force_full:
-        if url_since is not None:
-            status_data['urls'] = status_data.get('urls', [])[url_since:]
-        if link_since is not None:
-            status_data['links'] = status_data.get('links', [])[link_since:]
-        if issue_since is not None:
-            status_data['issues'] = status_data.get('issues', [])[issue_since:]
-
-    # Apply current issue exclusion patterns to displayed issues
-    issues = status_data.get('issues', [])
-    if issues:
-        current_settings = settings_manager.get_settings()
-        exclusion_patterns_text = current_settings.get('issueExclusionPatterns', '')
-        exclusion_patterns = [p.strip() for p in exclusion_patterns_text.split('\n') if p.strip()]
-        filtered_issues = filter_issues_by_exclusion_patterns(issues, exclusion_patterns)
-        status_data['issues'] = filtered_issues
-
+    status_data.update({
+        'reset': reset,
+        'epoch': current_epoch,
+        'latest_seq': latest_seq,
+        'events': events
+    })
     return jsonify(status_data)
 
 @app.route('/api/visualization_data')
@@ -1134,39 +1146,9 @@ def load_crawl_into_session(crawl_id):
         links = load_crawl_links(crawl_id)
         issues = load_crawl_issues(crawl_id)
 
-        # Inject into current crawler instance
-        with crawler.results_lock:
-            crawler.crawl_results = urls
-            crawler.stats['crawled'] = len(urls)
-            crawler.stats['discovered'] = len(urls)
-            crawler.base_url = crawl['base_url']
-            crawler.base_domain = crawl['base_domain']
-
-        # Load links into link manager
-        if crawler.link_manager:
-            crawler.link_manager.all_links = links
-            # Rebuild links_set
-            crawler.link_manager.links_set.clear()
-            for link in links:
-                link_key = f"{link['source_url']}|{link['target_url']}"
-                crawler.link_manager.links_set.add(link_key)
-
-        # Load issues into issue detector
-        if crawler.issue_detector:
-            crawler.issue_detector.detected_issues = issues
-
-        # Rebuild per-user memory tracker for loaded data
-        crawler.user_memory.reset()
-        crawler._demo_limit_reached = False
-        for url_data in urls:
-            crawler.user_memory.track_url(url_data)
-        if links:
-            crawler.user_memory.track_links(links)
-        if issues:
-            crawler.user_memory.track_issues(issues)
-
-        # Set Flask session flag for force full refresh
-        session['force_full_refresh'] = True
+        # Inject into the session's crawler. This starts a new event-log
+        # epoch, so any polling client resets and replays the loaded data.
+        crawler.load_data(crawl, urls, links, issues)
 
         return jsonify({
             'success': True,

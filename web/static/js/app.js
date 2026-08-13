@@ -389,12 +389,13 @@ function stopPythonCrawl() {
 function pollCrawlProgress() {
     if (!crawlState.isRunning) return;
 
-    // Use incremental poller if available, otherwise fall back to regular fetch
-    const fetchPromise = incrementalPoller
-        ? incrementalPoller.fetchUpdate()
-        : fetch('/api/crawl_status').then(response => response.json());
+    // The poller carries its own cursor/epoch; on a fresh page it starts at
+    // zero and the server replays the running crawl's events from scratch
+    if (!incrementalPoller) {
+        incrementalPoller = new IncrementalPoller();
+    }
 
-    fetchPromise
+    incrementalPoller.fetchUpdate()
         .then(data => {
             updateCrawlData(data);
 
@@ -457,15 +458,20 @@ function updateCrawlData(data) {
         updateMemoryDisplay(data.memory, data.memory_data);
     }
 
-    // Update tables with new URLs
-    if (data.urls) {
-        data.urls.forEach(url => {
-            addUrlToTable(url);
-        });
+    // The poller reports which collections actually changed this poll, so
+    // untouched tables are left alone (a plain snapshot changes everything)
+    const changed = data.changed || { urls: true, links: true, issues: true };
+
+    // Sync URL tables from the accumulated array. Updates to existing rows
+    // (linked_from, image statuses) come through as replaced objects, so the
+    // tables are rebuilt from state rather than append-only.
+    if (data.urls && changed.urls) {
+        crawlState.urls = data.urls;
+        refreshUrlTables();
     }
 
     // Update links tables only if Links tab is active to improve performance
-    if (data.links) {
+    if (data.links && changed.links) {
         // Always store links data in crawlState
         crawlState.links = data.links;
         if (isLinksTabActive()) {
@@ -477,7 +483,7 @@ function updateCrawlData(data) {
     }
 
     // Update issues table only if Issues tab is active
-    if (data.issues) {
+    if (data.issues && changed.issues) {
         // Always store issues data in crawlState
         crawlState.issues = data.issues;
         if (isIssuesTabActive()) {
@@ -488,11 +494,13 @@ function updateCrawlData(data) {
         }
     }
 
-    // Update filter counts
-    updateFilterCounts();
+    if (changed.urls) {
+        // Update filter counts
+        updateFilterCounts();
 
-    // Update status codes table (respecting active filter)
-    updateStatusCodesTable(crawlState.filters.active);
+        // Update status codes table (respecting active filter)
+        updateStatusCodesTable(crawlState.filters.active);
+    }
 
     // Update progress and status text
     updateProgress(data.progress || 0);
@@ -504,13 +512,33 @@ function updateCrawlData(data) {
     }
 
     // Notify plugins of data update
-    if (window.LibreCrawlPlugin && window.LibreCrawlPlugin.loader) {
+    if ((changed.urls || changed.links || changed.issues) &&
+        window.LibreCrawlPlugin && window.LibreCrawlPlugin.loader) {
         window.LibreCrawlPlugin.loader.notifyDataUpdate({
             urls: crawlState.urls,
             links: crawlState.links,
             issues: crawlState.issues,
             stats: crawlState.stats
         });
+    }
+}
+
+// Rebuild the URL virtual scrollers from crawlState.urls, honoring the
+// active sidebar filter if one is set
+function refreshUrlTables() {
+    if (crawlState.filters.active) {
+        applyFilter(crawlState.filters.active);
+        return;
+    }
+
+    if (virtualScrollers.overview) {
+        virtualScrollers.overview.setData(crawlState.urls);
+    }
+    if (virtualScrollers.internal) {
+        virtualScrollers.internal.setData(crawlState.urls.filter(url => url.is_internal));
+    }
+    if (virtualScrollers.external) {
+        virtualScrollers.external.setData(crawlState.urls.filter(url => !url.is_internal));
     }
 }
 
@@ -1572,8 +1600,8 @@ async function exportData() {
         // crawl) or only this browser (crawl loaded from a saved file)
         let serverHasData = false;
         try {
-            // Lightweight check — use incremental param to avoid fetching all data
-            const status = await fetch('/api/crawl_status?url_since=999999999');
+            // Lightweight check — stats only, no data arrays
+            const status = await fetch('/api/crawl_status?stats_only=1');
             const statusData = await status.json();
             serverHasData = !!(statusData.stats && statusData.stats.crawled > 0);
         } catch (e) {
@@ -2314,63 +2342,81 @@ function renderExternalRow(row, urlData, index) {
     });
 }
 
+// Build a <td> with text set via textContent so crawled-page content
+// (anchor text, URLs, issue details) can never inject markup
+function makeTextCell(text, wordBreak) {
+    const cell = document.createElement('td');
+    if (wordBreak) cell.style.wordBreak = wordBreak;
+    cell.textContent = text;
+    return cell;
+}
+
+function makeStatusBadgeCell(targetStatus) {
+    const cell = document.createElement('td');
+    if (targetStatus) {
+        const badge = document.createElement('span');
+        badge.className = `status-badge status-${Math.floor(targetStatus / 100)}xx`;
+        badge.textContent = targetStatus;
+        cell.appendChild(badge);
+    }
+    return cell;
+}
+
 function renderInternalLinkRow(row, link, index) {
-    const statusBadge = link.target_status ? `<span class="status-badge status-${Math.floor(link.target_status / 100)}xx">${link.target_status}</span>` : '';
     const placement = link.placement ? link.placement.charAt(0).toUpperCase() + link.placement.slice(1) : 'Unknown';
 
-    row.innerHTML = `
-        <td style="word-break: break-all;">${link.source_url}</td>
-        <td style="word-break: break-all;">${link.target_url}</td>
-        <td>${statusBadge}</td>
-        <td>${link.anchor_text || ''}</td>
-        <td>${placement}</td>
-    `;
+    row.appendChild(makeTextCell(link.source_url, 'break-all'));
+    row.appendChild(makeTextCell(link.target_url, 'break-all'));
+    row.appendChild(makeStatusBadgeCell(link.target_status));
+    row.appendChild(makeTextCell(link.anchor_text || ''));
+    row.appendChild(makeTextCell(placement));
 }
 
 function renderExternalLinkRow(row, link, index) {
-    const statusBadge = link.target_status ? `<span class="status-badge status-${Math.floor(link.target_status / 100)}xx">${link.target_status}</span>` : '';
     const placement = link.placement ? link.placement.charAt(0).toUpperCase() + link.placement.slice(1) : 'Unknown';
 
-    row.innerHTML = `
-        <td style="word-break: break-all;">${link.source_url}</td>
-        <td style="word-break: break-all;">${link.target_url}</td>
-        <td>${statusBadge}</td>
-        <td>${link.target_domain || ''}</td>
-        <td>${placement}</td>
-    `;
+    row.appendChild(makeTextCell(link.source_url, 'break-all'));
+    row.appendChild(makeTextCell(link.target_url, 'break-all'));
+    row.appendChild(makeStatusBadgeCell(link.target_status));
+    row.appendChild(makeTextCell(link.target_domain || ''));
+    row.appendChild(makeTextCell(placement));
 }
 
 function renderIssueRow(row, issue, index) {
     row.setAttribute('data-issue-type', issue.type);
 
     // Set row style based on issue type
+    let typeIcon, typeColor;
     if (issue.type === 'error') {
         row.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
-    } else if (issue.type === 'warning') {
-        row.style.backgroundColor = 'rgba(245, 158, 11, 0.1)';
-    } else {
-        row.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
-    }
-
-    // Create type indicator
-    let typeIcon = '';
-    let typeColor = '';
-    if (issue.type === 'error') {
         typeIcon = '❌';
         typeColor = '#ef4444';
     } else if (issue.type === 'warning') {
+        row.style.backgroundColor = 'rgba(245, 158, 11, 0.1)';
         typeIcon = '⚠️';
         typeColor = '#f59e0b';
     } else {
+        row.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
         typeIcon = 'ℹ️';
         typeColor = '#3b82f6';
     }
 
-    row.innerHTML = `
-        <td style="word-break: break-all;" title="${issue.url}">${issue.url}</td>
-        <td><span style="color: ${typeColor};">${typeIcon}</span> ${issue.type}</td>
-        <td>${issue.category}</td>
-        <td>${issue.issue}</td>
-        <td style="word-break: break-word;" title="${issue.details}">${issue.details}</td>
-    `;
+    const urlCell = makeTextCell(issue.url, 'break-all');
+    urlCell.title = issue.url;
+    row.appendChild(urlCell);
+
+    const typeCell = document.createElement('td');
+    const icon = document.createElement('span');
+    icon.style.color = typeColor;
+    icon.textContent = typeIcon;
+    typeCell.appendChild(icon);
+    typeCell.appendChild(document.createTextNode(' ' + issue.type));
+    row.appendChild(typeCell);
+
+    row.appendChild(makeTextCell(issue.category));
+    row.appendChild(makeTextCell(issue.issue));
+
+    const detailsCell = makeTextCell(issue.details, 'break-word');
+    detailsCell.title = issue.details;
+    row.appendChild(detailsCell);
 }

@@ -17,8 +17,12 @@ def normalize_url(url):
 class LinkManager:
     """Manages link discovery, tracking, and extraction"""
 
-    def __init__(self, base_domain):
+    def __init__(self, base_domain, event_log=None):
         self.base_domain = base_domain
+        # Journal for incremental UI sync. Links are emitted while links_lock
+        # is held so a status backfill can never be announced before the link
+        # it refers to.
+        self.event_log = event_log
         self.visited_urls = set()
         self.discovered_urls = deque()
         self.all_discovered_urls = set()
@@ -29,8 +33,14 @@ class LinkManager:
         self.urls_lock = threading.Lock()
         self.links_lock = threading.Lock()
 
-    def extract_links(self, soup, current_url, depth, should_crawl_callback, include_images=False):
-        """Extract links from HTML and add to discovery queue"""
+    def extract_links(self, soup, current_url, depth, should_crawl_callback, include_images=False, base_url=None):
+        """Extract links from HTML and add to discovery queue.
+
+        base_url overrides the URL relative hrefs resolve against — required
+        when the page was reached via redirect, because its content lives at
+        a different URL than the one that was requested.
+        """
+        resolve_base = base_url or current_url
         links = soup.find_all('a', href=True)
 
         for link in links:
@@ -39,7 +49,7 @@ class LinkManager:
                 continue
 
             # Convert relative URLs to absolute
-            absolute_url = urljoin(current_url, href)
+            absolute_url = urljoin(resolve_base, href)
 
             # Clean URL (remove fragment)
             clean_url = normalize_url(absolute_url)
@@ -72,7 +82,7 @@ class LinkManager:
                 continue
 
             try:
-                absolute_url = urljoin(current_url, src)
+                absolute_url = urljoin(resolve_base, src)
                 parsed = urlparse(absolute_url)
 
                 if parsed.scheme not in ('http', 'https'):
@@ -96,8 +106,18 @@ class LinkManager:
             except Exception:
                 continue
 
-    def collect_all_links(self, soup, source_url, crawl_results):
-        """Collect all links for the Links tab display"""
+    def collect_all_links(self, soup, source_url, crawl_results, base_url=None):
+        """Collect all links for the Links tab display.
+
+        base_url overrides the URL relative hrefs resolve against (for pages
+        reached via redirect); source_url stays the requested URL so link
+        attribution matches the results table.
+
+        Returns the links newly added by this call, so callers don't have to
+        diff all_links by index (which is racy with concurrent workers).
+        """
+        candidates = []
+        resolve_base = base_url or source_url
         links = soup.find_all('a', href=True)
 
         for link in links:
@@ -114,7 +134,7 @@ class LinkManager:
 
             # Convert relative URLs to absolute
             try:
-                absolute_url = urljoin(source_url, href)
+                absolute_url = urljoin(resolve_base, href)
                 parsed_target = urlparse(absolute_url)
 
                 # Clean URL (remove fragment)
@@ -152,13 +172,7 @@ class LinkManager:
                     if source_url not in self.source_pages[clean_url]:
                         self.source_pages[clean_url].append(source_url)
 
-                # Thread-safe adding to links collection with duplicate checking
-                with self.links_lock:
-                    link_key = f"{link_data['source_url']}|{link_data['target_url']}"
-
-                    if link_key not in self.links_set:
-                        self.links_set.add(link_key)
-                        self.all_links.append(link_data)
+                candidates.append(link_data)
 
             except Exception:
                 continue
@@ -173,7 +187,7 @@ class LinkManager:
             alt_text = img.get('alt', '').strip()[:100]
 
             try:
-                absolute_url = urljoin(source_url, src)
+                absolute_url = urljoin(resolve_base, src)
                 parsed_target = urlparse(absolute_url)
 
                 # Only HTTP(S) images
@@ -202,14 +216,32 @@ class LinkManager:
                     'placement': 'image'
                 }
 
-                with self.links_lock:
-                    link_key = f"{link_data['source_url']}|{link_data['target_url']}"
-                    if link_key not in self.links_set:
-                        self.links_set.add(link_key)
-                        self.all_links.append(link_data)
+                candidates.append(link_data)
 
             except Exception:
                 continue
+
+        return self._commit_links(candidates)
+
+    def _commit_links(self, candidates):
+        """Append new links and journal them in one locked step.
+
+        Emitting inside links_lock is what keeps update_link_statuses from
+        announcing a status backfill for a link the UI has not received yet.
+        """
+        new_links = []
+        with self.links_lock:
+            for link_data in candidates:
+                link_key = f"{link_data['source_url']}|{link_data['target_url']}"
+                if link_key not in self.links_set:
+                    self.links_set.add(link_key)
+                    self.all_links.append(link_data)
+                    new_links.append(link_data)
+
+            if new_links and self.event_log:
+                self.event_log.emit_many('link', new_links)
+
+        return new_links
 
     def _detect_link_placement(self, link_element):
         """Detect where on the page a link is placed"""
@@ -280,15 +312,27 @@ class LinkManager:
             }
 
     def update_link_statuses(self, crawl_results):
-        """Update target_status for all links based on crawl results"""
+        """Update target_status for all links based on crawl results.
+
+        Returns the links whose status actually changed, so callers can
+        emit update events for just those.
+        """
         # Build a fast lookup dict
         status_lookup = {result['url']: result['status_code'] for result in crawl_results}
 
+        changed = []
         with self.links_lock:
             for link in self.all_links:
                 target_url = link['target_url']
-                if target_url in status_lookup:
+                if target_url in status_lookup and link['target_status'] != status_lookup[target_url]:
                     link['target_status'] = status_lookup[target_url]
+                    changed.append(link)
+
+            # Inside the lock: a link is only ever updated after its own
+            # 'link' event has been journalled
+            if changed and self.event_log:
+                self.event_log.emit_many('link_update', changed)
+        return changed
 
     def get_source_pages(self, url):
         """Get list of source pages that link to this URL"""
