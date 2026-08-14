@@ -2,6 +2,8 @@
 
 Drop your custom plugin files here! Each `.js` file will automatically create a new tab in LibreCrawl.
 
+Looking for plugins, or want to share one? See the [Plugin Workshop](https://workshop.librecrawl.com).
+
 ## 🔌 Quick Start
 
 1. Create a new `.js` file in this folder (e.g., `my-plugin.js`)

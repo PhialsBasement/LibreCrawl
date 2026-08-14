@@ -134,6 +134,8 @@ python main.py -l
 
 Drop your custom plugin files in `/web/static/plugins/`! Each `.js` file will automatically create a new tab in LibreCrawl.
 
+Browse plugins other people have built, or share your own, at the **[Plugin Workshop](https://workshop.librecrawl.com)**.
+
 ### 🔌 Quick Start
 
 1. Create a new `.js` file in this folder (e.g., `my-plugin.js`)
