@@ -18,6 +18,9 @@ import nest_asyncio
 # Extensions treated as images by the "Crawl Images" setting
 IMAGE_EXTENSIONS = {'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'ico', 'avif', 'bmp'}
 
+# Parallel HEAD checks used for broken-image detection
+IMAGE_CHECK_WORKERS = 5
+
 
 def classify_fetch_error(exc_or_msg):
     """Classify a failed-fetch error into a coarse error_type.
@@ -90,6 +93,7 @@ class WebCrawler:
         self.session.headers.update({
             'User-Agent': 'LibreCrawl/1.0 (Web Crawler)'
         })
+        self._set_pool_size(self._get_default_config()['concurrency'])
 
         # Base URL tracking
         self.base_url = None
@@ -168,6 +172,21 @@ class WebCrawler:
 
         # Enable nested asyncio for thread compatibility
         nest_asyncio.apply()
+
+    def _set_pool_size(self, concurrency):
+        """Size the urllib3 connection pool to the work actually in flight.
+
+        requests defaults to 10 connections per host, but two things draw from
+        the pool at once: the crawl workers, and the image HEAD checks which run
+        their own pool of IMAGE_CHECK_WORKERS threads. Exceeding the limit makes
+        urllib3 discard established connections ("Connection pool is full"),
+        paying a fresh TCP and TLS handshake for the next request to that host.
+        """
+        size = max(10, int(concurrency) + IMAGE_CHECK_WORKERS + 5)
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=size, pool_maxsize=size, max_retries=0)
+        self.session.mount('http://', adapter)
+        self.session.mount('https://', adapter)
 
     def _get_default_config(self):
         """Get default configuration"""
@@ -830,6 +849,9 @@ class WebCrawler:
             }
         else:
             self.session.proxies = {}
+
+        # Keep the connection pool in step with the configured concurrency
+        self._set_pool_size(self.config.get('concurrency', 5))
 
         # Update rate limiter if it exists
         if self.rate_limiter:
@@ -1511,7 +1533,7 @@ class WebCrawler:
                 self._record_image_result(url, link['target_status'], content_type, size, depth)
 
         batch = to_check[:50]
-        with ThreadPoolExecutor(max_workers=min(5, len(batch))) as pool:
+        with ThreadPoolExecutor(max_workers=min(IMAGE_CHECK_WORKERS, len(batch))) as pool:
             pool.map(_head_check, batch)
 
         mutated.extend(batch)
