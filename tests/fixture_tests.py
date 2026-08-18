@@ -307,12 +307,91 @@ def test_event_ordering_under_polling():
         a.shutdown()
 
 
+def test_discovered_counts_image_rows():
+    """Issue #94: the discovered counter ignored synthesized image rows."""
+    site = BASE_PORT + 7
+    routes = {'/': html(''.join(f'<img src="/i{i}.png">' for i in range(6))
+                        + '<a href="/p1.html">p</a>'),
+              '/p1.html': html('<p>page</p>')}
+    for i in range(6):
+        routes[f'/i{i}.png'] = png()
+
+    a = serve(make_handler(routes), site)
+    try:
+        crawler = crawl(f'http://127.0.0.1:{site}/')
+        status = crawler.get_status_light()
+        discovered = status['stats']['discovered']
+        crawled = status['stats']['crawled']
+        rows = len(crawler.crawl_results)
+
+        result('discovered counts every row, images included',
+               discovered >= rows,
+               f'discovered={discovered} crawled={crawled} rows={rows}')
+        result('discovered is never behind crawled',
+               discovered >= crawled, f'{discovered} vs {crawled}')
+        result('image rows were actually synthesized',
+               rows > 2, f'{rows} rows')
+    finally:
+        a.shutdown()
+
+
+def test_js_response_time_excludes_render_wait():
+    """Issue #93: response_time included js_wait_time, flagging every page."""
+    if not _playwright_available():
+        result('js response time excludes the render wait', True,
+               'skipped, playwright not installed')
+        return
+
+    site = BASE_PORT + 8
+    a = serve(make_handler({'/': html('<h1>fast</h1>')}), site)
+    try:
+        wait = 3
+        crawler = crawl(f'http://127.0.0.1:{site}/', max_urls=1, enable_javascript=True,
+                        js_wait_time=wait, js_max_concurrent_pages=1, timeout=180)
+        pages = [r for r in crawler.crawl_results
+                 if (r.get('content_type') or '').startswith('text/html')]
+        if not pages:
+            result('js response time excludes the render wait', False, 'no page crawled')
+            return
+
+        page = pages[0]
+        response_ms = page.get('response_time') or 0
+        render_ms = page.get('render_time') or 0
+
+        result('response_time excludes the render wait',
+               response_ms < wait * 1000, f'{response_ms}ms with a {wait}s wait')
+        result('response_time stays under the slow threshold for a fast page',
+               response_ms < 3000, f'{response_ms}ms')
+        result('render_time is reported separately and includes the wait',
+               render_ms >= wait * 1000, f'{render_ms}ms')
+
+        from src.core.issue_detector import IssueDetector
+        detector = IssueDetector([])
+        detector.detect_issues(page)
+        slow = [i for i in detector.detected_issues
+                if i.get('issue') == 'Slow Response Time']
+        result('a fast page is not flagged as slow',
+               not slow, str(slow[:1]))
+    finally:
+        a.shutdown()
+
+
+def _playwright_available():
+    try:
+        import playwright  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 TESTS = (
     test_cross_domain_redirect,
     test_external_images,
     test_sitemap_discovery_is_async,
     test_max_urls_counts_pages_not_images,
     test_event_ordering_under_polling,
+    test_discovered_counts_image_rows,
+    test_js_response_time_excludes_render_wait,
 )
 
 

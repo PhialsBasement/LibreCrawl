@@ -1,6 +1,7 @@
 """JavaScript rendering handler using Playwright"""
 import asyncio
 import threading
+import time
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 from urllib.parse import urlparse
 
@@ -90,27 +91,52 @@ class JavaScriptRenderer:
         with self.pool_lock:
             self.page_pool.append(page)
 
+    @staticmethod
+    def _response_ms(response, navigation_ms):
+        """How long the server actually took, from the browser's own timings.
+
+        Falls back to the measured navigation time when timing data is missing.
+        """
+        try:
+            timing = response.request.timing if response else None
+            if timing:
+                for key in ('responseEnd', 'responseStart'):
+                    value = timing.get(key)
+                    if value and value > 0:
+                        return float(value)
+        except Exception:
+            pass
+        return navigation_ms
+
     async def render_page(self, url):
         """
         Render a page with JavaScript and return the HTML content
 
         Returns:
-            tuple: (html_content, status_code, error_message, final_url)
+            tuple: (html_content, status_code, error_message, final_url, timing)
             final_url is where the page ended up after any redirects.
+            timing carries response_ms (the server's own response, excluding the
+            configured render wait) and render_ms (the whole render). Keeping
+            them apart matters because js_wait_time is a deliberate sleep, and
+            counting it as response time flags every page as slow.
         """
         page = None
+        empty_timing = {'response_ms': 0.0, 'render_ms': 0.0}
         try:
             page = await self.get_page()
             if not page:
-                return None, 0, "No JavaScript page available", None
+                return None, 0, "No JavaScript page available", None, empty_timing
 
             # Navigate to the page
             try:
+                started = time.monotonic()
                 response = await page.goto(
                     url,
                     wait_until='domcontentloaded',
                     timeout=self.config.get('js_timeout', 30) * 1000
                 )
+                navigation_ms = (time.monotonic() - started) * 1000
+                response_ms = self._response_ms(response, navigation_ms)
 
                 # Wait for JavaScript to render
                 await asyncio.sleep(self.config.get('js_wait_time', 3))
@@ -118,16 +144,18 @@ class JavaScriptRenderer:
                 # Get the rendered HTML content
                 html_content = await page.content()
                 status_code = response.status if response else 200
+                render_ms = (time.monotonic() - started) * 1000
 
-                return html_content, status_code, None, page.url
+                return html_content, status_code, None, page.url, {
+                    'response_ms': response_ms, 'render_ms': render_ms}
 
             except PlaywrightTimeoutError:
-                return None, 0, "JavaScript rendering timeout", None
+                return None, 0, "JavaScript rendering timeout", None, empty_timing
             except Exception as e:
-                return None, 0, f"Navigation error: {str(e)}", None
+                return None, 0, f"Navigation error: {str(e)}", None, empty_timing
 
         except Exception as e:
-            return None, 0, f"JavaScript rendering error: {str(e)}", None
+            return None, 0, f"JavaScript rendering error: {str(e)}", None, empty_timing
 
         finally:
             if page:

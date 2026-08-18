@@ -1856,6 +1856,7 @@ function showUrlDetails(url) {
                             <div class="details-grid">
                                 <div><strong>Status Code:</strong> ${urlData.status_code}${urlData.error_type ? ' (' + escapeHtml(getStatusCodeText(parseInt(urlData.status_code) || 0, urlData.error_type)) + ')' : ''}</div>
                                 <div><strong>Response Time:</strong> ${urlData.response_time || 0}ms</div>
+                                ${urlData.render_time ? `<div><strong>Render Time:</strong> ${urlData.render_time}ms <span style="color:#9ca3af">(includes the JS render wait)</span></div>` : ''}
                                 <div><strong>Content Type:</strong> ${safeContentType}</div>
                                 <div><strong>Size:</strong> ${urlData.size || 0} bytes</div>
                                 ${urlData.error ? `<div><strong>Error:</strong> ${escapeHtml(urlData.error)}</div>` : ''}

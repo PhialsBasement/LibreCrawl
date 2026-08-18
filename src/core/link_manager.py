@@ -290,6 +290,16 @@ class LinkManager:
                 self.all_discovered_urls.add(url)
                 self.discovered_urls.append((url, depth))
 
+    def mark_discovered(self, url):
+        """Count a URL as discovered without queueing it.
+
+        Image rows synthesized from HEAD checks are real results but were never
+        queued, so without this the "URLs Discovered" counter sits at the HTML
+        page count while the crawled count climbs past it.
+        """
+        with self.urls_lock:
+            self.all_discovered_urls.add(normalize_url(url))
+
     def mark_visited(self, url):
         """Mark a URL as visited"""
         with self.urls_lock:

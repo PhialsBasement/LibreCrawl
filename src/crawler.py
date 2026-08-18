@@ -1195,7 +1195,8 @@ class WebCrawler:
 
         try:
             # Render page with JavaScript
-            html_content, status_code, error, final_url = await self.js_renderer.render_page(url)
+            html_content, status_code, error, final_url, timing = \
+                await self.js_renderer.render_page(url)
 
             if error:
                 return self.seo_extractor.create_empty_result(
@@ -1297,8 +1298,8 @@ class WebCrawler:
                 if self.db_save_enabled:
                     self.unsaved_links.extend(new_links)
 
-            # Extract links for further crawling (gated on where the content
-            # actually lives — see the HTTP path for rationale)
+            # Extract links for further crawling. Gated on
+            # where the content lives, as in the HTTP path.
             should_extract = (
                 (content_is_internal and depth < self.config['max_depth']) or
                 (self.config['crawl_external'] and depth < self.config['max_depth'])
@@ -1311,7 +1312,10 @@ class WebCrawler:
 
             # Populate linked_from after all link collection is complete
             result['linked_from'] = self.link_manager.get_source_pages(url)
-            result['response_time'] = round((time.time() - start_time) * 1000, 2)
+            # The render wait is a setting, not slowness,
+            # so keep it out of response_time (issue #93).
+            result['response_time'] = round(timing.get('response_ms') or 0, 2)
+            result['render_time'] = round(timing.get('render_ms') or 0, 2)
 
             # NB: the DB batch is appended by the worker when it accepts this
             # result into crawl_results, not here. A fetch that finishes after
@@ -1560,6 +1564,8 @@ class WebCrawler:
             result['linked_from'] = sources
             self.crawl_results.append(result)
             self.stats['crawled'] += 1
+            # a result counts as discovered (issue #94)
+            self.link_manager.mark_discovered(url)
             self.event_log.emit('url', result)
             if self.db_save_enabled:
                 self.unsaved_urls.append(result)
