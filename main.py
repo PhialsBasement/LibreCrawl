@@ -18,6 +18,7 @@ from src.crawler import WebCrawler
 from src.settings_manager import SettingsManager
 from src.auth_db import init_db, create_user, authenticate_user, get_user_by_id, log_guest_crawl, get_guest_crawls_last_24h, verify_user, set_user_tier, create_verification_token, verify_token, get_user_by_email
 from src.email_service import send_verification_email, send_welcome_email
+import paginated_routes
 
 # Load environment variables from .env file
 from dotenv import load_dotenv
@@ -223,6 +224,10 @@ def login_required(f):
             return redirect(url_for('login_page'))
         return f(*args, **kwargs)
     return decorated_function
+
+# Registered here rather than at the bottom because register() reads
+# login_required off __main__, so it must run after the decorator exists.
+paginated_routes.register(app)
 
 # Multi-tenant crawler instances
 crawler_instances = {}  # session_id -> {'crawler': WebCrawler, 'settings': SettingsManager, 'last_accessed': datetime}
