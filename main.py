@@ -1,3 +1,7 @@
+# First import in the file on purpose: it monkey-patches requests.Session,
+# so it has to land before any module below constructs one.
+import ssl_fallback  # noqa: F401
+
 import threading
 import time
 import csv
