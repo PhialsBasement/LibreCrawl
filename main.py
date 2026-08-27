@@ -1767,9 +1767,14 @@ def main():
 
     # Run Flask server with Waitress (production-grade WSGI server)
     from waitress import serve
-    print("Starting LibreCrawl on http://localhost:5000")
+    print("Starting LibreCrawl on http://localhost:" + os.environ.get("PORT", "6767"))
     print("Using Waitress WSGI server with multi-threading support")
-    serve(app, host='0.0.0.0', port=5000, threads=8)
+    serve(
+        app,
+        listen="*:" + str(int(os.environ.get("PORT", "6767"))),
+        threads=int(os.environ.get("THREADS", "16")),
+        connection_limit=int(os.environ.get("CONNECTION_LIMIT", "200")),
+    )
 
 if __name__ == '__main__':
     main()
