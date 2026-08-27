@@ -1766,13 +1766,15 @@ def main():
     print(f"\nPress Ctrl+C to stop the server\n")
     print("=" * 60 + "\n")
 
-    # Open browser in a separate thread after short delay
-    def open_browser():
-        time.sleep(1.5)  # Wait for Flask to start
-        webbrowser.open('http://localhost:5000')
+    # This fork runs headless in a container, where opening a browser fails and
+    # leaves the thread behind. Opt back in with OPEN_BROWSER=1 when running locally.
+    if os.environ.get("OPEN_BROWSER") == "1":
+        def open_browser():
+            time.sleep(1.5)  # Wait for Flask to start
+            webbrowser.open("http://localhost:" + os.environ.get("PORT", "6767"))
 
-    browser_thread = threading.Thread(target=open_browser, daemon=True)
-    browser_thread.start()
+        browser_thread = threading.Thread(target=open_browser, daemon=True)
+        browser_thread.start()
 
     # Run Flask server with Waitress (production-grade WSGI server)
     from waitress import serve
