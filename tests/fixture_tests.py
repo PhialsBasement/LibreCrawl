@@ -377,6 +377,13 @@ def test_js_response_time_excludes_render_wait():
 
 
 def _playwright_available():
+    # patchright first: this fork renders through it, and it is what
+    # js_renderer imports. Falling back keeps the test useful upstream.
+    try:
+        import patchright  # noqa: F401
+        return True
+    except ImportError:
+        pass
     try:
         import playwright  # noqa: F401
         return True

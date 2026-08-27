@@ -1,0 +1,49 @@
+name: tests
+
+# Every branch, not just the default one. This fork exists to carry patches over
+# upstream, and the moment they break is a rebase — which happens on a branch,
+# long before anything merges.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # The JS render test launches a real Chromium. Cached because downloading
+      # it on every push costs more than the whole rest of the run.
+      - name: Cache patchright chromium
+        id: chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: patchright-chromium-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+
+      - name: Install chromium
+        if: steps.chromium.outputs.cache-hit != 'true'
+        run: patchright install --with-deps chromium
+
+      - name: Install chromium system deps
+        if: steps.chromium.outputs.cache-hit == 'true'
+        run: patchright install-deps chromium
+
+      # Ours first: it is the cheap suite and the one covering the code upstream
+      # has no reason to keep working.
+      - name: Fork patches
+        run: python tests/referent_tests.py
+
+      - name: Upstream crawler behaviour
+        run: python tests/fixture_tests.py

@@ -1,7 +1,19 @@
 # LibreCrawl tests
 
-No test framework and no extra dependencies. Both files are plain scripts that
-run against the code already in this repo.
+No test framework and no extra dependencies. All three files are plain scripts
+that run against the code already in this repo. `.github/workflows/tests.yml`
+runs the two deterministic ones on every push, on every branch.
+
+## referent_tests.py
+
+Covers what this fork adds on top of upstream: crawl data retention, the
+incremental link-status backfill, and the paginated crawl-serve routes. That
+code is the most likely to break silently on a rebase, because upstream has no
+reason to keep any of it working.
+
+```bash
+python tests/referent_tests.py
+```
 
 ## fixture_tests.py
 
