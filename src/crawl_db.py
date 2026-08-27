@@ -16,7 +16,9 @@ DB_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 @contextmanager
 def get_db():
     """Context manager for database connections"""
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB_FILE, timeout=15)
+    conn.execute('PRAGMA journal_mode=WAL')
+    conn.execute('PRAGMA busy_timeout=15000')
     conn.row_factory = sqlite3.Row  # Return rows as dictionaries
     try:
         yield conn
