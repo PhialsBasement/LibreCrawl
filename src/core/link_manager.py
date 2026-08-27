@@ -29,6 +29,11 @@ class LinkManager:
         self.all_links = []
         self.links_set = set()
         self.source_pages = {}  # Maps target_url -> list of source_urls
+        # target_url -> the link rows pointing at it, so a status backfill can
+        # reach exactly the affected links instead of scanning all of them.
+        self.links_by_target = {}
+        # How many crawl_results update_link_statuses has already accounted for.
+        self._backfill_cursor = 0
 
         self.urls_lock = threading.Lock()
         self.links_lock = threading.Lock()
@@ -236,6 +241,7 @@ class LinkManager:
                 if link_key not in self.links_set:
                     self.links_set.add(link_key)
                     self.all_links.append(link_data)
+                    self.links_by_target.setdefault(link_data['target_url'], []).append(link_data)
                     new_links.append(link_data)
 
             if new_links and self.event_log:
@@ -322,21 +328,30 @@ class LinkManager:
             }
 
     def update_link_statuses(self, crawl_results):
-        """Update target_status for all links based on crawl results.
+        """Backfill target_status onto the links pointing at newly crawled URLs.
 
         Returns the links whose status actually changed, so callers can
         emit update events for just those.
-        """
-        # Build a fast lookup dict
-        status_lookup = {result['url']: result['status_code'] for result in crawl_results}
 
+        Only the crawl_results appended since the last call are looked at, and
+        each is resolved through links_by_target. The previous full scan ran on
+        every status poll at O(links) under links_lock — the same lock the crawl
+        needs to record what it is still discovering — so on a large crawl the
+        poll and the crawl spent their time waiting on each other. A link created
+        after its target was crawled already carries the right status out of
+        collect_all_links, so dropping the backwards scan loses nothing.
+        """
         changed = []
         with self.links_lock:
-            for link in self.all_links:
-                target_url = link['target_url']
-                if target_url in status_lookup and link['target_status'] != status_lookup[target_url]:
-                    link['target_status'] = status_lookup[target_url]
-                    changed.append(link)
+            new_results = crawl_results[self._backfill_cursor:]
+            self._backfill_cursor = len(crawl_results)
+
+            for result in new_results:
+                status_code = result['status_code']
+                for link in self.links_by_target.get(result['url'], ()):
+                    if link['target_status'] != status_code:
+                        link['target_status'] = status_code
+                        changed.append(link)
 
             # Inside the lock: a link is only ever updated after its own
             # 'link' event has been journalled
@@ -360,3 +375,5 @@ class LinkManager:
         with self.links_lock:
             self.all_links.clear()
             self.links_set.clear()
+            self.links_by_target.clear()
+            self._backfill_cursor = 0
