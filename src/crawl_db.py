@@ -667,3 +667,81 @@ def get_database_size_mb():
     except Exception as e:
         print(f"Error getting database size: {e}")
         return 0
+
+
+# Crawl data retention. links and issues are the two tables that grow without a
+# ceiling: in the deployment this was written for they held 12M and 1.3M rows
+# against 350k crawled_urls, and the single sqlite file had reached 7.7GB. The
+# crawls row and its crawled_urls are cheap and stay, so what was crawled and
+# when remains queryable long after the bulky part is gone.
+RETENTION_DAYS = int(os.environ.get('RETENTION_DAYS', '30'))
+RETENTION_MIN_CRAWLS = int(os.environ.get('RETENTION_MIN_CRAWLS', '50'))
+
+# A crawl in either state still has something to come back to: running is live,
+# paused keeps a queue checkpoint to resume from.
+RETENTION_PROTECTED_STATUSES = ('running', 'paused')
+
+
+def find_purgeable_crawls(days=None, min_crawls=None):
+    """Crawl ids whose links and issues are past the retention window.
+
+    Both bounds apply at once: older than `days` AND outside the newest
+    `min_crawls`. The age bound keeps the file small while crawls keep coming;
+    the count bound is what stops a quiet month from erasing everything.
+
+    Crawls that hold neither are skipped so repeat runs stay cheap — otherwise
+    every already-purged crawl would be re-deleted on every pass, forever.
+    """
+    days = RETENTION_DAYS if days is None else days
+    min_crawls = RETENTION_MIN_CRAWLS if min_crawls is None else min_crawls
+
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(f'''
+            SELECT id FROM crawls
+            WHERE status NOT IN ({','.join('?' * len(RETENTION_PROTECTED_STATUSES))})
+              AND started_at < datetime('now', ?)
+              AND id NOT IN (SELECT id FROM crawls ORDER BY started_at DESC LIMIT ?)
+              AND (EXISTS (SELECT 1 FROM crawl_links WHERE crawl_id = crawls.id)
+                   OR EXISTS (SELECT 1 FROM crawl_issues WHERE crawl_id = crawls.id))
+            ORDER BY started_at
+        ''', (*RETENTION_PROTECTED_STATUSES, f'-{int(days)} days', int(min_crawls)))
+        return [row['id'] for row in cursor.fetchall()]
+
+
+def purge_old_crawl_data(days=None, min_crawls=None):
+    """Delete the links and issues of every crawl past the retention window.
+
+    One transaction per crawl on purpose. A single DELETE covering millions of
+    rows holds the write lock for as long as it takes and grows the WAL by the
+    size of everything it touches, which is precisely the stall this is meant to
+    prevent. Returns (crawls_purged, links_deleted, issues_deleted).
+
+    Note this frees pages for reuse but does not shrink the file: sqlite hands
+    them to the freelist and new rows land there. The file stops growing, which
+    is the goal. Reclaiming space already allocated needs a VACUUM, which is a
+    deliberate offline operation rather than something a background thread does.
+    """
+    crawl_ids = find_purgeable_crawls(days, min_crawls)
+    if not crawl_ids:
+        return 0, 0, 0
+
+    links_deleted = 0
+    issues_deleted = 0
+
+    for crawl_id in crawl_ids:
+        try:
+            with get_db() as conn:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM crawl_links WHERE crawl_id = ?', (crawl_id,))
+                links_deleted += cursor.rowcount
+                cursor.execute('DELETE FROM crawl_issues WHERE crawl_id = ?', (crawl_id,))
+                issues_deleted += cursor.rowcount
+        except Exception as e:
+            print(f"Retention: could not purge crawl {crawl_id}: {e}")
+
+    print(f"Retention: purged {len(crawl_ids)} crawls "
+          f"({links_deleted:,} links, {issues_deleted:,} issues) "
+          f"older than {RETENTION_DAYS if days is None else days} days, "
+          f"keeping the newest {RETENTION_MIN_CRAWLS if min_crawls is None else min_crawls}")
+    return len(crawl_ids), links_deleted, issues_deleted

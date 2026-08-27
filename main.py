@@ -324,6 +324,28 @@ def start_cleanup_thread():
     cleanup_thread.start()
     print("Started crawler instance cleanup thread")
 
+def start_retention_thread():
+    """Purge crawl data past the retention window, at boot and then on a timer.
+
+    Boot is the cheapest moment to run it: nothing is crawling yet, so the write
+    lock is uncontended. It is a daemon thread, so a long first pass over a
+    database that has never been purged does not hold up serving.
+    """
+    interval = int(os.environ.get("RETENTION_INTERVAL_HOURS", "6")) * 3600
+
+    def retention_loop():
+        while True:
+            try:
+                from src.crawl_db import purge_old_crawl_data
+                purge_old_crawl_data()
+            except Exception as e:
+                print(f"Error in retention thread: {e}")
+            time.sleep(interval)
+
+    retention_thread = threading.Thread(target=retention_loop, daemon=True)
+    retention_thread.start()
+    print("Started crawl data retention thread")
+
 def generate_csv_export(urls, fields):
     """Generate CSV export content"""
     output = StringIO()
@@ -1754,6 +1776,9 @@ def main():
 
     # Start cleanup thread for old crawler instances
     start_cleanup_thread()
+
+    # Keep links and issues from growing without a ceiling
+    start_retention_thread()
 
     print("=" * 60)
     print("LibreCrawl - SEO Spider")
