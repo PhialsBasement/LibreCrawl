@@ -2,7 +2,7 @@
 import asyncio
 import threading
 import time
-from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
+from patchright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 from urllib.parse import urlparse
 
 
@@ -32,7 +32,7 @@ class JavaScriptRenderer:
                 self.browser = await self.playwright.webkit.launch(headless=headless)
             else:  # Default to chromium
                 args = ['--no-sandbox', '--disable-dev-shm-usage'] if headless else []
-                self.browser = await self.playwright.chromium.launch(headless=headless, args=args)
+                self.browser = await self.playwright.chromium.launch(channel="chromium", headless=headless, args=args)
 
             # Create page pool
             max_pages = self.config.get('js_max_concurrent_pages', 3)
