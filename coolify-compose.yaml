@@ -1,0 +1,66 @@
+# Coolify deployment for LibreCrawl.
+#
+# In Coolify: New Resource -> Docker Compose -> point at this repo, then set the
+# compose file path to "coolify-compose.yaml" (the non-default name is not
+# auto-detected). Coolify assigns the domain, terminates HTTPS, and manages the
+# container name and restart policy — that is why none of those are set here.
+#
+# Optional settings (SMTP, LOCAL_MODE, ...) go in the resource's Environment
+# Variables tab; every one of them has a safe default below.
+
+services:
+  librecrawl:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      # Coolify generates a domain for this service and proxies it to port 5000.
+      - SERVICE_URL_LIBRECRAWL_5000
+      - FLASK_APP=main.py
+      - PYTHONUNBUFFERED=1
+
+      # Session cookie signing key. Coolify generates this once and stores it on
+      # the resource, so sessions survive redeploys (main.py falls back to an
+      # ephemeral key when unset). Changing it logs everyone out.
+      - SECRET_KEY=${SERVICE_BASE64_64_LIBRECRAWL}
+
+      # Mode flags — main.py reads these env vars directly, so no CLI flags are
+      # needed. WARNING: LOCAL_MODE=true disables all auth and grants every
+      # visitor admin access; DANGEROUSLY_SKIP_AUTH=true lets anyone log in as
+      # any username with no password. Keep both "false" on a public domain.
+      - LOCAL_MODE=${LOCAL_MODE:-false}
+      - REGISTRATION_DISABLED=${REGISTRATION_DISABLED:-false}
+      - DISABLE_GUEST=${DISABLE_GUEST:-false}
+      - DEMO_MODE=${DEMO_MODE:-false}
+      - DANGEROUSLY_SKIP_AUTH=${DANGEROUSLY_SKIP_AUTH:-false}
+
+      # Verification-email links point at the Coolify-assigned domain.
+      - MAIN_APP_URL=${SERVICE_URL_LIBRECRAWL_5000}
+      - WORKSHOP_APP_URL=${WORKSHOP_APP_URL:-https://workshop.librecrawl.com}
+
+      # Email stays off until SMTP_USER and SMTP_PASSWORD are set. The defaults
+      # mirror src/email_service.py's own defaults so an unset variable never
+      # reaches the app as an empty string.
+      - SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-noreply@librecrawl.com}
+      - SMTP_FROM_NAME=${SMTP_FROM_NAME:-LibreCrawl}
+    volumes:
+      # User + crawl databases (src/auth_db.py, src/crawl_db.py).
+      - librecrawl-data:/app/data
+    # Chrome crashes on the default 64MB of /dev/shm.
+    shm_size: '2gb'
+    healthcheck:
+      # TCP liveness only: every HTTP route's status code depends on LOCAL_MODE
+      # and session state, and probing /login in local mode writes to the user
+      # database on every check.
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 5000), timeout=5).close()"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+volumes:
+  librecrawl-data:
