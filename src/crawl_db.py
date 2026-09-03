@@ -16,7 +16,10 @@ DB_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 @contextmanager
 def get_db():
     """Context manager for database connections"""
-    conn = sqlite3.connect(DB_FILE)
+    # Wait for a busy database instead of failing immediately: the crawler
+    # thread writes batches while request handlers read status and settings,
+    # and sqlite's default 5s was not enough during large end-of-crawl saves.
+    conn = sqlite3.connect(DB_FILE, timeout=30)
     conn.row_factory = sqlite3.Row  # Return rows as dictionaries
     try:
         yield conn

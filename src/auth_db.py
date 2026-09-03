@@ -15,7 +15,8 @@ DB_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 @contextmanager
 def get_db():
     """Context manager for database connections"""
-    conn = sqlite3.connect(DB_FILE)
+    # Wait for a busy database instead of failing immediately (see crawl_db).
+    conn = sqlite3.connect(DB_FILE, timeout=30)
     conn.row_factory = sqlite3.Row  # Return rows as dictionaries
     try:
         yield conn
@@ -30,6 +31,10 @@ def init_db():
     """Initialize the database with users and settings tables"""
     os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
     with get_db() as conn:
+        # Write-ahead logging lets status/settings reads proceed while the
+        # crawler thread is saving a batch, instead of "database is locked".
+        # Persistent: set once here, applies to every later connection.
+        conn.execute('PRAGMA journal_mode=WAL')
         cursor = conn.cursor()
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (

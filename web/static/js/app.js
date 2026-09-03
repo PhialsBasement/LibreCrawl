@@ -1583,16 +1583,24 @@ async function exportData() {
         exportBtn.textContent = 'Exporting...';
     }
     try {
-        // Get current settings to determine export format and fields
-        const settingsResponse = await fetch('/api/get_settings');
-        const settingsData = await settingsResponse.json();
+        // Export with the settings this browser is showing. settings.js keeps
+        // them in localStorage and syncs to the server in the background; the
+        // server copy can lag (a failed sync, a busy database), which used to
+        // make exports ignore the format picked in Settings. Only fall back to
+        // the server copy when nothing is loaded here.
+        let settings = (typeof currentSettings !== 'undefined' && currentSettings
+                        && Object.keys(currentSettings).length) ? currentSettings : null;
+        if (!settings) {
+            const settingsResponse = await fetch('/api/get_settings');
+            const settingsData = await settingsResponse.json();
 
-        if (!settingsData.success) {
-            showNotification('Failed to get export settings', 'error');
-            return;
+            if (!settingsData.success) {
+                showNotification('Failed to get export settings', 'error');
+                return;
+            }
+            settings = settingsData.settings;
         }
 
-        const settings = settingsData.settings;
         const exportFormat = settings.exportFormat || 'csv';
         const exportFields = settings.exportFields || ['url', 'status_code', 'title', 'meta_description', 'h1'];
 
@@ -1714,10 +1722,19 @@ async function legacyExportData(exportFormat, exportFields) {
         return;
     }
 
+    // Binary formats (xlsx) arrive base64-encoded; text formats as-is
+    const toBlob = (file) => {
+        if (file.encoding === 'base64') {
+            const bytes = Uint8Array.from(atob(file.content), c => c.charCodeAt(0));
+            return new Blob([bytes], { type: file.mimetype });
+        }
+        return new Blob([file.content], { type: file.mimetype });
+    };
+
     if (exportData.multiple_files && exportData.files) {
         exportData.files.forEach((file, index) => {
             setTimeout(() => {
-                const blob = new Blob([file.content], { type: file.mimetype });
+                const blob = toBlob(file);
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.style.display = 'none';
@@ -1732,7 +1749,7 @@ async function legacyExportData(exportFormat, exportFields) {
 
         showNotification(`Exporting ${exportData.files.length} files...`, 'success');
     } else {
-        const blob = new Blob([exportData.content], { type: exportData.mimetype });
+        const blob = toBlob(exportData);
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.style.display = 'none';

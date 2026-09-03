@@ -25,7 +25,7 @@ LibreCrawl crawls websites and gives you detailed information about pages, links
 - 📊 **SEO analysis** - Extract titles, meta descriptions, headings, etc.
 - 🔗 **Link analysis** - Track internal and external links with detailed relationship mapping
 - 📈 **PageSpeed Insights integration** - Analyze Core Web Vitals
-- 💾 **Multiple export formats** - CSV, JSON, or XML
+- 💾 **Multiple export formats** - CSV, Excel (XLSX), JSON, or XML
 - 🔍 **Issue detection** - Automated SEO issue identification
 - ⚡ **Real-time crawling progress** with live statistics
 
@@ -287,6 +287,7 @@ For PageSpeed analysis, add a Google API key in Settings > Requests for higher r
 ## Export formats
 
 - **CSV**: Spreadsheet-friendly format
+- **Excel (XLSX)**: Native spreadsheet workbook
 - **JSON**: Structured data with all details
 - **XML**: Markup format for other tools
 

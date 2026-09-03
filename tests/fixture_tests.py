@@ -376,6 +376,134 @@ def test_js_response_time_excludes_render_wait():
         a.shutdown()
 
 
+def test_duplicate_detection_is_linear():
+    """A site of N near-identical pages (suburb "doorway" pages) used to hold
+    the crawl in "finishing up" for minutes and produce N² duplicate issues
+    (700k rows for 1,000 pages), locking SQLite while they were saved. It must
+    finish promptly with exactly one issue per page."""
+    from collections import Counter
+    from src.core.issue_detector import IssueDetector
+
+    site = BASE_PORT + 9
+    count = 60
+    routes = {'/': html(''.join(f'<a href="/area-{i}/">{i}</a>' for i in range(count)))}
+    for i in range(count):
+        routes[f'/area-{i}/'] = (
+            f'<html><head><title>Asbestos Removal Area{i} | Get a Free Quote Today!</title>'
+            f'<meta name="description" content="Proudly known as the best Asbestos Removal '
+            f'experts in Area{i}! Enjoy peace of mind."></head>'
+            f'<body><h1>Asbestos Removal Area{i}</h1><p>{"word " * 300}</p></body></html>')
+    a = serve(make_handler(routes), site)
+    try:
+        started = time.time()
+        crawler = crawl(f'http://127.0.0.1:{site}/', max_urls=count + 1,
+                        enable_duplication_check=True, duplication_threshold=0.85)
+        elapsed = time.time() - started
+        dupes = [i for i in crawler.issue_detector.get_issues()
+                 if i.get('issue') == 'Duplicate Content Detected']
+        per_url = Counter(i['url'] for i in dupes)
+        result('one duplicate issue per templated page',
+               len(dupes) == count and per_url and max(per_url.values()) == 1,
+               f'{len(dupes)} issues for {count} pages')
+        result('each issue counts the other templated pages',
+               bool(dupes) and all(f'{count - 1} similar pages' in i['details'] for i in dupes),
+               dupes[0]['details'][:100] if dupes else 'no issues')
+        result('the unrelated index page is not flagged',
+               f'http://127.0.0.1:{site}/' not in per_url)
+        result('crawl finished promptly', elapsed < 60, f'{elapsed:.1f}s')
+    finally:
+        a.shutdown()
+
+    # Scale check on the detector alone: 1,500 templated pages used to take
+    # ~10 minutes of pairwise SequenceMatcher calls.
+    pages = [{'url': f'https://x.au/p{i}/', 'status_code': 200, 'content_type': 'text/html',
+              'title': f'Asbestos Removal Area{i} | Get a Free Quote Today!',
+              'meta_description': f'Proudly known as the best Asbestos Removal experts in Area{i}!',
+              'h1': f'Asbestos Removal Area{i}', 'word_count': 1000 + i % 9} for i in range(1500)]
+    detector = IssueDetector()
+    started = time.time()
+    detector.detect_duplication_issues(pages, 0.85)
+    elapsed = time.time() - started
+    result('1,500 templated pages produce 1,500 issues quickly',
+           len(detector.get_issues()) == 1500 and elapsed < 30 and not detector.duplication_truncated,
+           f'{len(detector.get_issues())} issues in {elapsed:.1f}s')
+
+
+def test_export_formats_apply_to_every_data_type():
+    """The format picked in Settings must apply to URLs, links AND issues.
+    Links/issues used to fall back to CSV for XML, and "Excel (XLSX)" was
+    offered in the UI but never implemented, so it silently produced CSV."""
+    import base64
+    import json
+    import types
+    import xml.etree.ElementTree as ET
+    from io import BytesIO
+
+    os.environ.setdefault('LOCAL_MODE', 'true')
+    import main as app_module
+    from openpyxl import load_workbook
+    from src.core.issue_detector import IssueDetector
+
+    urls = [{'url': 'https://e.au/', 'status_code': 200, 'title': 'Home', 'h2': ['a', 'b']},
+            {'url': 'https://e.au/p', 'status_code': 404, 'title': 'Gone', 'h2': []}]
+    links = [{'source_url': 'https://e.au/', 'target_url': 'https://e.au/p', 'anchor_text': 'p',
+              'is_internal': True, 'target_domain': 'e.au', 'target_status': 404, 'placement': 'body'}]
+    issues = [{'url': 'https://e.au/p', 'type': 'error', 'category': 'HTTP', 'issue': 'Not Found',
+               'details': '404'}]
+    formats = (('csv', 'text/csv'), ('json', 'application/json'),
+               ('xml', 'application/xml'), ('xlsx', app_module.XLSX_MIMETYPE))
+
+    def parses(fmt, data, expect_rows):
+        if fmt == 'xlsx':
+            rows = list(load_workbook(BytesIO(data)).active.iter_rows(values_only=True))
+            return len(rows) == expect_rows + 1
+        if fmt == 'xml':
+            root = ET.fromstring(data)
+            return len(root[0]) == expect_rows
+        if fmt == 'json':
+            return len(json.loads(data)['data']) == expect_rows
+        return data.decode().count('\n') == expect_rows + 1
+
+    client = app_module.app.test_client()
+    with client.session_transaction() as s:
+        s['user_id'] = 1
+        s['username'] = 'fixture'
+        s['tier'] = 'admin'
+
+    # Streaming endpoint (active or loaded crawl): seed this session's crawler.
+    client.get('/api/crawl_status?stats_only=1')
+    with client.session_transaction() as s:
+        crawler = app_module.crawler_instances[s['session_id']]['crawler']
+    crawler.crawl_results = urls
+    crawler.issue_detector = IssueDetector()
+    crawler.issue_detector.detected_issues = list(issues)
+    crawler.link_manager = types.SimpleNamespace(all_links=[dict(l) for l in links])
+    for data_type, expect_rows in (('urls', 2), ('links', 1), ('issues', 1)):
+        for fmt, mimetype in formats:
+            resp = client.get(f'/api/export_stream?format={fmt}&type={data_type}&fields=url,title,h2')
+            disposition = resp.headers.get('Content-Disposition', '')
+            ok = (resp.status_code == 200 and resp.mimetype == mimetype
+                  and disposition.endswith('.' + fmt) and parses(fmt, resp.data, expect_rows))
+            result(f'streaming {data_type} export honours {fmt}', ok,
+                   f'{resp.status_code} {resp.mimetype} {disposition}')
+
+    # Legacy endpoint (crawl loaded from a file, data lives in the browser).
+    for fmt, mimetype in formats:
+        resp = client.post('/api/export_data', json={
+            'format': fmt, 'fields': ['url', 'title', 'links_detailed', 'issues_detected'],
+            'localData': {'urls': urls, 'links': links, 'issues': issues}})
+        body = resp.get_json() or {}
+        files = body.get('files') or []
+        ok = body.get('success') and len(files) == 3 and all(
+            f['mimetype'] == mimetype and f['filename'].endswith('.' + fmt) for f in files)
+        if ok and fmt == 'xlsx':
+            ok = all(f.get('encoding') == 'base64'
+                     and parses('xlsx', base64.b64decode(f['content']), 1 if 'export' not in f['filename'] else 2)
+                     for f in files)
+        result(f'legacy export honours {fmt} for every file', bool(ok),
+               ', '.join(f['filename'] for f in files) if files else str(body)[:120])
+
+
 def _playwright_available():
     try:
         import playwright  # noqa: F401
@@ -392,6 +520,8 @@ TESTS = (
     test_event_ordering_under_polling,
     test_discovered_counts_image_rows,
     test_js_response_time_excludes_render_wait,
+    test_duplicate_detection_is_linear,
+    test_export_formats_apply_to_every_data_type,
 )
 
 

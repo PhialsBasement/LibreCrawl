@@ -529,7 +529,11 @@ function saveSettings() {
     .then(response => response.json())
     .then(data => {
         if (!data.success) {
-            console.warn('Backend sync failed:', data.error);
+            // The server copy drives crawls started later, so a failed sync
+            // must not hide behind the "saved" notification above.
+            const reason = data.message || data.error || 'unknown error';
+            console.warn('Backend sync failed:', reason);
+            showNotification('Settings saved in this browser, but the server did not accept them: ' + reason, 'warning');
         }
 
         // Update crawler with new settings if it's running
@@ -539,6 +543,7 @@ function saveSettings() {
     })
     .catch(error => {
         console.error('Error syncing settings to backend:', error);
+        showNotification('Settings saved in this browser, but syncing them to the server failed', 'warning');
     });
 }
 

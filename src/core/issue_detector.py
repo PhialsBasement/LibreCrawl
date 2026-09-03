@@ -1,17 +1,32 @@
 """SEO issue detection and reporting"""
+import math
+import re
 import threading
+import time
+from collections import defaultdict
 from fnmatch import fnmatch
 from urllib.parse import urlparse
-from difflib import SequenceMatcher
+
+# Near-duplicate detection is bounded so a large site can never hold a crawl in
+# "finishing up" indefinitely: when the budget is exhausted the pass stops with
+# a warning and partial results instead of running to completion.
+DUPLICATION_TIME_BUDGET_SECONDS = 120
+DUPLICATION_EXAMPLES_PER_PAGE = 5
+
+_TOKEN_SPLIT = re.compile(r'[^\w]+')
 
 
 class IssueDetector:
     """Detects SEO and technical issues in crawled pages"""
 
+    # Weights of the signals that make up the duplicate-content score.
+    _DUP_WEIGHTS = {'title': 0.35, 'desc': 0.35, 'h1': 0.20, 'word_count': 0.10}
+
     def __init__(self, exclusion_patterns=None):
         self.exclusion_patterns = exclusion_patterns or []
         self.detected_issues = []
         self.issues_lock = threading.Lock()
+        self.duplication_truncated = False
 
     def detect_issues(self, result):
         """Detect SEO issues for a crawled URL"""
@@ -370,121 +385,226 @@ class IssueDetector:
 
     def detect_duplication_issues(self, all_results, similarity_threshold=0.85):
         """
-        Detect content duplication across all crawled pages.
+        Flag pages whose title, meta description, H1 and length are near-identical
+        to other crawled pages.
+
+        Emits at most ONE issue per page — how many near-duplicates it has and
+        the closest few — so a site of N templated pages yields N issues, not N².
+        (The previous pairwise version produced two issues per matching pair:
+        700k rows for a 1,000-page site, which took minutes to compute and
+        locked SQLite for over a minute while saving.)
+
+        Only HTML pages that returned 200 and carry a title or description are
+        considered. Pages with identical normalised title/description/H1 are
+        grouped first; one representative per group is scored and the result
+        applies to every member. Candidate pairs between groups come from a
+        prefix filter on title tokens: with the default 0.85 threshold a pair
+        needs title similarity of at least 0.57, so any qualifying pair must
+        share one of each title's rarest few tokens. Sites with distinct titles
+        therefore score very few pairs; templated sites score many, but each
+        comparison is a handful of set operations, and the whole pass stops
+        after DUPLICATION_TIME_BUDGET_SECONDS with partial results rather than
+        holding the crawl in "finishing up".
 
         Args:
             all_results: List of all crawled result dictionaries
             similarity_threshold: Minimum similarity ratio to flag as duplicate (0.0-1.0)
         """
+        started = time.monotonic()
+        self.duplication_truncated = False
+
+        pages = self._duplication_candidates(all_results)
+        if len(pages) < 2:
+            return
+
+        # 1. Group pages with identical title / description / H1.
+        group_index = {}
+        groups = []
+        for page in pages:
+            signature = (page['title'], page['desc'], page['h1'])
+            idx = group_index.get(signature)
+            if idx is None:
+                idx = group_index[signature] = len(groups)
+                groups.append([])
+            groups[idx].append(page)
+        representatives = [group[0] for group in groups]
+
+        # 2. Score candidate pairs of groups, each pair once.
+        similar = defaultdict(list)  # group idx -> [(similarity, other group idx)]
+        compared = 0
+        for i, j in self._duplication_candidate_pairs(representatives, similarity_threshold):
+            compared += 1
+            if compared % 2000 == 0 and time.monotonic() - started > DUPLICATION_TIME_BUDGET_SECONDS:
+                self.duplication_truncated = True
+                print(f"Duplication detection stopped after {DUPLICATION_TIME_BUDGET_SECONDS}s "
+                      f"and {compared} comparisons; duplicate results are partial")
+                break
+            similarity = self._duplication_similarity(
+                representatives[i], representatives[j], similarity_threshold)
+            if similarity is not None:
+                similar[i].append((similarity, j))
+                similar[j].append((similarity, i))
+
+        # 3. One issue per page.
         issues = []
-        processed_pairs = set()
-
-        # Compare each result with all others
-        for i, result1 in enumerate(all_results):
-            url1 = result1.get('url', '')
-
-            # Skip if URL should be excluded
-            if self._should_exclude(url1):
+        for idx, group in enumerate(groups):
+            partners = [(1.0, member['url'], True) for member in group]
+            for similarity, j in similar.get(idx, ()):
+                partners.extend((similarity, other['url'], False) for other in groups[j])
+            if len(partners) < 2:
                 continue
-
-            for j, result2 in enumerate(all_results):
-                # Skip same URL or already processed pairs
-                if i >= j:
-                    continue
-
-                url2 = result2.get('url', '')
-
-                # Skip if URL should be excluded
-                if self._should_exclude(url2):
-                    continue
-
-                # Create unique pair identifier
-                pair_key = tuple(sorted([url1, url2]))
-                if pair_key in processed_pairs:
-                    continue
-
-                processed_pairs.add(pair_key)
-
-                # Calculate similarity
-                similarity = self._calculate_content_similarity(result1, result2)
-
-                # Flag as duplicate if above threshold
-                if similarity >= similarity_threshold:
-                    # Add issue for both URLs
-                    issues.append({
-                        'url': url1,
-                        'type': 'warning',
-                        'category': 'Duplication',
-                        'issue': 'Duplicate Content Detected',
-                        'details': f'Content is {similarity*100:.1f}% similar to {url2}'
-                    })
-                    issues.append({
-                        'url': url2,
-                        'type': 'warning',
-                        'category': 'Duplication',
-                        'issue': 'Duplicate Content Detected',
-                        'details': f'Content is {similarity*100:.1f}% similar to {url1}'
-                    })
+            partners.sort(key=lambda p: (-p[0], p[1]))
+            total = len(partners) - 1  # everything except the page itself
+            for page in group:
+                examples = [p for p in partners if p[1] != page['url']][:DUPLICATION_EXAMPLES_PER_PAGE]
+                described = '; '.join(
+                    f"{url} (identical title, description and H1)" if identical
+                    else f"{url} ({similarity * 100:.1f}% similar)"
+                    for similarity, url, identical in examples
+                )
+                more = total - len(examples)
+                issues.append({
+                    'url': page['url'],
+                    'type': 'warning',
+                    'category': 'Duplication',
+                    'issue': 'Duplicate Content Detected',
+                    'details': f"{total} similar page{'s' if total != 1 else ''}: {described}"
+                               + (f" (+{more} more)" if more > 0 else '')
+                })
 
         # Add all detected duplication issues
         with self.issues_lock:
             self.detected_issues.extend(issues)
 
-    def _calculate_content_similarity(self, result1, result2):
-        """
-        Calculate similarity between two page results.
+    def _duplication_candidates(self, all_results):
+        """Pages eligible for duplicate detection, with normalised fields and token sets."""
+        pages = []
+        for result in all_results:
+            url = result.get('url', '')
+            if not url or self._should_exclude(url):
+                continue
+            status = result.get('status_code')
+            if status is not None and status != 200:
+                continue
+            content_type = (result.get('content_type') or '').lower()
+            if content_type and 'html' not in content_type:
+                continue
+            page = self._duplication_page(result)
+            if not page['title'] and not page['desc']:
+                continue
+            pages.append(page)
+        return pages
 
-        Compares title, meta description, h1, and content length.
-        Returns a similarity ratio between 0.0 and 1.0.
-        """
-        # Extract content fields
-        title1 = result1.get('title', '').lower().strip()
-        title2 = result2.get('title', '').lower().strip()
-
-        desc1 = result1.get('meta_description', '').lower().strip()
-        desc2 = result2.get('meta_description', '').lower().strip()
-
-        h1_1 = result1.get('h1', '').lower().strip()
-        h1_2 = result2.get('h1', '').lower().strip()
-
-        word_count1 = result1.get('word_count', 0)
-        word_count2 = result2.get('word_count', 0)
-
-        # Calculate individual similarities
-        title_sim = self._text_similarity(title1, title2) if title1 and title2 else 0
-        desc_sim = self._text_similarity(desc1, desc2) if desc1 and desc2 else 0
-        h1_sim = self._text_similarity(h1_1, h1_2) if h1_1 and h1_2 else 0
-
-        # Word count similarity (1.0 if within 10% of each other)
-        if word_count1 and word_count2:
-            max_count = max(word_count1, word_count2)
-            min_count = min(word_count1, word_count2)
-            word_count_sim = min_count / max_count if max_count > 0 else 0
-        else:
-            word_count_sim = 0
-
-        # Weighted average (title and description are most important)
-        weights = {
-            'title': 0.35,
-            'desc': 0.35,
-            'h1': 0.20,
-            'word_count': 0.10
+    def _duplication_page(self, result):
+        title = self._normalise_text(result.get('title'))
+        desc = self._normalise_text(result.get('meta_description'))
+        h1 = self._normalise_text(result.get('h1'))
+        return {
+            'url': result.get('url', ''),
+            'title': title,
+            'desc': desc,
+            'h1': h1,
+            'title_tokens': self._tokens(title),
+            'desc_tokens': self._tokens(desc),
+            'h1_tokens': self._tokens(h1),
+            'word_count': result.get('word_count') or 0,
         }
 
-        overall_similarity = (
-            title_sim * weights['title'] +
-            desc_sim * weights['desc'] +
-            h1_sim * weights['h1'] +
-            word_count_sim * weights['word_count']
-        )
+    @staticmethod
+    def _normalise_text(value):
+        """Lower-cased, whitespace-collapsed text; H1 may arrive as a list."""
+        if isinstance(value, list):
+            value = next((v for v in value if isinstance(v, str) and v.strip()), '')
+        if not isinstance(value, str):
+            return ''
+        return ' '.join(value.lower().split())
 
-        return overall_similarity
+    @staticmethod
+    def _tokens(text):
+        return frozenset(t for t in _TOKEN_SPLIT.split(text) if t)
 
-    def _text_similarity(self, text1, text2):
-        """Calculate similarity ratio between two text strings using SequenceMatcher"""
-        if not text1 or not text2:
+    def _duplication_candidate_pairs(self, representatives, threshold):
+        """Yield (i, j) with i < j for the pairs worth scoring.
+
+        Uses a prefix filter on title tokens. The title carries 35% of the
+        score, so a pair can only reach `threshold` if the titles' Dice
+        similarity is at least (threshold - 0.65) / 0.35. Dice(A, B) >= t
+        implies |A ∩ B| >= t·|A| / (2 - t); ordering tokens by global rarity,
+        two such sets must share a token within the first
+        |A| - need + 1 tokens of each, so indexing those prefixes finds every
+        qualifying pair while skipping most pairs of distinct titles.
+        """
+        weights = self._DUP_WEIGHTS
+        min_title = (threshold - (1.0 - weights['title'])) / weights['title']
+        count = len(representatives)
+
+        if min_title <= 0:
+            # Threshold is too low for the title to prune anything.
+            for i in range(count):
+                for j in range(i + 1, count):
+                    yield i, j
+            return
+
+        frequency = defaultdict(int)
+        for rep in representatives:
+            for token in rep['title_tokens']:
+                frequency[token] += 1
+
+        index = defaultdict(list)
+        prefixes = []
+        for i, rep in enumerate(representatives):
+            ordered = sorted(rep['title_tokens'], key=lambda t: (frequency[t], t))
+            need = math.ceil(min_title * len(ordered) / (2 - min_title))
+            prefix = ordered[:max(1, len(ordered) - need + 1)] if ordered else []
+            prefixes.append(prefix)
+            for token in prefix:
+                index[token].append(i)
+
+        for i, prefix in enumerate(prefixes):
+            seen = set()
+            for token in prefix:
+                for j in index[token]:
+                    if j < i and j not in seen:
+                        seen.add(j)
+                        yield j, i
+
+    def _duplication_similarity(self, a, b, threshold):
+        """Weighted similarity of two candidate pages, or None once it is clear
+        the score cannot reach `threshold` (so cheap signals short-circuit)."""
+        weights = self._DUP_WEIGHTS
+        score = self._dice(a['title_tokens'], b['title_tokens']) * weights['title']
+        if score + weights['desc'] + weights['h1'] + weights['word_count'] < threshold:
+            return None
+        score += self._dice(a['desc_tokens'], b['desc_tokens']) * weights['desc']
+        if score + weights['h1'] + weights['word_count'] < threshold:
+            return None
+        score += self._dice(a['h1_tokens'], b['h1_tokens']) * weights['h1']
+        if score + weights['word_count'] < threshold:
+            return None
+        score += self._length_similarity(a['word_count'], b['word_count']) * weights['word_count']
+        return score if score >= threshold else None
+
+    @staticmethod
+    def _dice(tokens_a, tokens_b):
+        """Dice coefficient of two token sets (0.0 when either is empty)."""
+        if not tokens_a or not tokens_b:
             return 0.0
-        return SequenceMatcher(None, text1, text2).ratio()
+        return 2.0 * len(tokens_a & tokens_b) / (len(tokens_a) + len(tokens_b))
+
+    @staticmethod
+    def _length_similarity(count_a, count_b):
+        if not count_a or not count_b:
+            return 0.0
+        return min(count_a, count_b) / max(count_a, count_b)
+
+    def _calculate_content_similarity(self, result1, result2):
+        """
+        Similarity of two page results in [0.0, 1.0]: word-level Dice
+        similarity of title (35%), meta description (35%) and H1 (20%), plus
+        the ratio of their word counts (10%).
+        """
+        return self._duplication_similarity(
+            self._duplication_page(result1), self._duplication_page(result2), 0.0)
 
     def _should_exclude(self, url):
         """Check if URL should be excluded from issue detection"""
