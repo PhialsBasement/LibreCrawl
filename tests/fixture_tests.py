@@ -504,6 +504,62 @@ def test_export_formats_apply_to_every_data_type():
                ', '.join(f['filename'] for f in files) if files else str(body)[:120])
 
 
+def test_empty_alt_is_not_missing_alt():
+    """Issue #95: alt="" is correct for decorative images, not a defect."""
+    site = BASE_PORT + 11
+    page = html('<img src="/a.png" alt="A hand holding a crawler report">'
+                '<img src="/b.png" alt="">'
+                '<img src="/c.png">')
+    routes = {'/': page}
+    for name in ('a', 'b', 'c'):
+        routes[f'/{name}.png'] = png()
+
+    a = serve(make_handler(routes), site)
+    try:
+        crawler = crawl(f'http://127.0.0.1:{site}/')
+        root = next((r for r in crawler.crawl_results
+                     if r['url'].rstrip('/').endswith(str(site))), None)
+        if root is None:
+            root = next(r for r in crawler.crawl_results
+                        if (r.get('content_type') or '').startswith('text/html'))
+
+        images = {img['src'].rsplit('/', 1)[-1]: img for img in root.get('images', [])}
+        result('alt extraction keeps all three images',
+               len(images) == 3, str(sorted(images)))
+
+        result('described image records its alt',
+               images['a.png'].get('alt') == 'A hand holding a crawler report'
+               and images['a.png'].get('has_alt') is True)
+        result('decorative image is marked as having an alt',
+               images['b.png'].get('alt') == '' and images['b.png'].get('has_alt') is True)
+        result('image with no attribute is marked as missing',
+               images['c.png'].get('has_alt') is False)
+
+        from src.core.issue_detector import IssueDetector
+        detector = IssueDetector([])
+        detector.detect_issues(root)
+        alt_issues = [i for i in detector.detected_issues
+                      if i.get('issue') == 'Images Without Alt Text']
+
+        result('exactly one image is reported, not two',
+               len(alt_issues) == 1 and '1 of 3' in alt_issues[0]['details'],
+               alt_issues[0]['details'] if alt_issues else 'no issue raised')
+        result('the decorative image is called out as fine',
+               bool(alt_issues) and 'decorative' in alt_issues[0]['details'],
+               alt_issues[0]['details'] if alt_issues else '')
+
+        # a page where every image is correctly marked must raise nothing
+        clean = dict(root)
+        clean['images'] = [images['a.png'], images['b.png']]
+        detector.detected_issues = []
+        detector.detect_issues(clean)
+        result('correct markup raises no alt warning at all',
+               not [i for i in detector.detected_issues
+                    if i.get('issue') == 'Images Without Alt Text'])
+    finally:
+        a.shutdown()
+
+
 def _playwright_available():
     try:
         import playwright  # noqa: F401
@@ -522,6 +578,7 @@ TESTS = (
     test_js_response_time_excludes_render_wait,
     test_duplicate_detection_is_linear,
     test_export_formats_apply_to_every_data_type,
+    test_empty_alt_is_not_missing_alt,
 )
 
 

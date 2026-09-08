@@ -184,7 +184,11 @@ class LinkManager:
             if not src or src.startswith('data:'):
                 continue
 
-            alt_text = img.get('alt', '').strip()[:100]
+            # keep "decorative" apart from "no attribute" (issue #95)
+            raw_alt = img.get('alt')
+            alt_text = (raw_alt or '').strip()[:100]
+            if not alt_text:
+                alt_text = '(decorative)' if raw_alt is not None else '(no alt attribute)'
 
             try:
                 absolute_url = urljoin(resolve_base, src)
@@ -209,7 +213,7 @@ class LinkManager:
                 link_data = {
                     'source_url': source_url,
                     'target_url': clean_url,
-                    'anchor_text': alt_text or '(no alt text)',
+                    'anchor_text': alt_text,
                     'is_internal': is_internal,
                     'target_domain': parsed_target.netloc,
                     'target_status': target_status,

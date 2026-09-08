@@ -162,7 +162,10 @@ class SEOExtractor:
 
         for img in images:
             src = img.get('src', '')
-            alt = img.get('alt', '')
+            # alt="" is correct markup for a decorative image, and is not the
+            # same as having no alt attribute. Keep the two apart (issue #95).
+            raw_alt = img.get('alt')
+            alt = raw_alt if raw_alt is not None else ''
 
             if src:
                 # Convert relative URLs to absolute
@@ -177,6 +180,7 @@ class SEOExtractor:
                 result['images'].append({
                     'src': src,
                     'alt': alt,
+                    'has_alt': raw_alt is not None,
                     'width': img.get('width', ''),
                     'height': img.get('height', '')
                 })

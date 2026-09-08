@@ -16,6 +16,18 @@ DUPLICATION_EXAMPLES_PER_PAGE = 5
 _TOKEN_SPLIT = re.compile(r'[^\w]+')
 
 
+def has_alt_attribute(image):
+    """True when the img carried an alt attribute, empty or not.
+
+    alt="" is the correct way to mark an image decorative, so it counts as
+    present. Crawls saved before has_alt existed carry no flag, and are treated
+    as fine rather than guessed at (issue #95).
+    """
+    if 'has_alt' in image:
+        return bool(image['has_alt'])
+    return True
+
+
 class IssueDetector:
     """Detects SEO and technical issues in crawled pages"""
 
@@ -249,16 +261,26 @@ class IssueDetector:
                 'details': 'HTML tag has no lang attribute'
             })
 
-        # Image alt text
+        # Image alt text. Only a missing attribute is a defect;
+        # alt="" marks a decorative image and is correct.
         images = result.get('images', [])
-        images_without_alt = [img for img in images if not img.get('alt')]
-        if images_without_alt:
+        missing = [img for img in images if not has_alt_attribute(img)]
+        decorative = [img for img in images
+                      if has_alt_attribute(img) and not (img.get('alt') or '').strip()]
+
+        if missing:
+            detail = f'{len(missing)} of {len(images)} images have no alt attribute'
+            if decorative:
+                count = len(decorative)
+                noun = 'image' if count == 1 else 'images'
+                verb = 'is' if count == 1 else 'are'
+                detail += f' ({count} decorative {noun} with alt="" {verb} fine)'
             issues.append({
                 'url': url,
                 'type': 'warning',
                 'category': 'Accessibility',
                 'issue': 'Images Without Alt Text',
-                'details': f'{len(images_without_alt)} of {len(images)} images lack alt text'
+                'details': detail
             })
 
     def _check_social_media_issues(self, result, issues):
