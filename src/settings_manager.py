@@ -115,6 +115,7 @@ class SettingsManager:
             'enableProxy': False,
             'proxyUrl': '',
             'customHeaders': '',
+            'allowPrivateTargets': os.getenv('ALLOW_PRIVATE_TARGETS', '').lower() in ('true', '1', 'yes'),
 
             # JavaScript rendering settings
             'enableJavaScript': False,
@@ -514,7 +515,8 @@ class SettingsManager:
             'js_max_concurrent_pages': settings['jsMaxConcurrentPages'],
             'issue_exclusion_patterns': [p.strip() for p in settings['issueExclusionPatterns'].split('\n') if p.strip()],
             'enable_duplication_check': settings['enableDuplicationCheck'],
-            'duplication_threshold': settings['duplicationThreshold']
+            'duplication_threshold': settings['duplicationThreshold'],
+            'allow_private_targets': settings.get('allowPrivateTargets', False)
         }
 
     def _parse_custom_headers(self, headers_text):

@@ -38,6 +38,8 @@ parser.add_argument('--dangerously-skip-auth', '-dsa', action='store_true',
                     help='DANGEROUS: Allow anyone to log in as any username with no password. '
                          'The username is only used to separate per-user sessions. '
                          'Do NOT use on a public network or in production.')
+parser.add_argument('--allow-private-targets', action='store_true',
+                    help='Allow crawling private / local network targets (disables SSRF guard)')
 args = parser.parse_args()
 
 LOCAL_MODE = args.local or os.getenv('LOCAL_MODE', '').lower() in ('true', '1', 'yes')
@@ -45,6 +47,11 @@ DISABLE_REGISTER = args.disable_register or os.getenv('REGISTRATION_DISABLED', '
 DISABLE_GUEST = args.disable_guest or os.getenv('DISABLE_GUEST', '').lower() in ('true', '1', 'yes')
 DEMO_MODE = args.demo or os.getenv('DEMO_MODE', '').lower() in ('true', '1', 'yes')
 SKIP_AUTH = args.dangerously_skip_auth or os.getenv('DANGEROUSLY_SKIP_AUTH', '').lower() in ('true', '1', 'yes')
+ALLOW_PRIVATE_TARGETS_ENV = os.getenv('ALLOW_PRIVATE_TARGETS')
+if ALLOW_PRIVATE_TARGETS_ENV is not None:
+    ALLOW_PRIVATE_TARGETS = ALLOW_PRIVATE_TARGETS_ENV.lower() in ('true', '1', 'yes')
+else:
+    ALLOW_PRIVATE_TARGETS = args.allow_private_targets or LOCAL_MODE
 
 app = Flask(__name__, template_folder='web/templates', static_folder='web/static')
 app.secret_key = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
@@ -751,6 +758,10 @@ def start_crawl():
         crawler.update_config(crawler_config)
     except Exception as e:
         print(f"Warning: Could not apply settings: {e}")
+
+    # Set allow_private_targets if configured via CLI or env
+    if ALLOW_PRIVATE_TARGETS:
+        crawler.config['allow_private_targets'] = True
 
     # Enforce demo mode limits
     if DEMO_MODE:

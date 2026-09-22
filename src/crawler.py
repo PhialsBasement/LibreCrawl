@@ -9,11 +9,19 @@ import threading
 import time
 import asyncio
 import re
+import os
 from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor
 from urllib.robotparser import RobotFileParser
 import nest_asyncio
+from src.utils.ssrf_guard import (
+    BlockedDestinationError,
+    make_guarded_session,
+    mount_guarded_adapter,
+    check_target_url,
+    is_blocked_ip,
+)
 
 # Extensions treated as images by the "Crawl Images" setting
 IMAGE_EXTENSIONS = {'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'ico', 'avif', 'bmp'}
@@ -89,7 +97,9 @@ class WebCrawler:
 
     def __init__(self, crawl_id=None, resume_from_db=False):
         # HTTP session
-        self.session = requests.Session()
+        self.session = make_guarded_session(
+            allow_private_targets=lambda: self.config.get('allow_private_targets', False)
+        )
         self.session.headers.update({
             'User-Agent': 'LibreCrawl/1.0 (Web Crawler)'
         })
@@ -183,10 +193,13 @@ class WebCrawler:
         paying a fresh TCP and TLS handshake for the next request to that host.
         """
         size = max(10, int(concurrency) + IMAGE_CHECK_WORKERS + 5)
-        adapter = requests.adapters.HTTPAdapter(
-            pool_connections=size, pool_maxsize=size, max_retries=0)
-        self.session.mount('http://', adapter)
-        self.session.mount('https://', adapter)
+        mount_guarded_adapter(
+            self.session,
+            pool_connections=size,
+            pool_maxsize=size,
+            max_retries=0,
+            allow_private_targets=lambda: self.config.get('allow_private_targets', False),
+        )
 
     def _get_default_config(self):
         """Get default configuration"""
@@ -213,6 +226,7 @@ class WebCrawler:
             'log_level': 'INFO',
             'enable_proxy': False,
             'proxy_url': None,
+            'allow_private_targets': os.getenv('ALLOW_PRIVATE_TARGETS', '').lower() in ('true', '1', 'yes'),
             'custom_headers': {},
             'discover_sitemaps': True,
             'enable_pagespeed': False,
@@ -309,6 +323,12 @@ class WebCrawler:
             # Validate and normalize URL
             if not url.startswith(('http://', 'https://')):
                 url = 'https://' + url
+
+            # Validate start URL against SSRF policy
+            allow_private = self.config.get('allow_private_targets', False)
+            is_blocked, block_reason = check_target_url(url, allow_private_targets=allow_private)
+            if is_blocked:
+                return False, f"Start URL blocked by SSRF policy: {block_reason}"
 
             parsed = urlparse(url)
             self.base_url = f"{parsed.scheme}://{parsed.netloc}"
@@ -1749,7 +1769,7 @@ class WebCrawler:
 
             for attempt in range(retries + 1):
                 try:
-                    response = requests.get(api_url, params=params, timeout=60)
+                    response = self.session.get(api_url, params=params, timeout=60)
 
                     if response.status_code == 200:
                         data = response.json()

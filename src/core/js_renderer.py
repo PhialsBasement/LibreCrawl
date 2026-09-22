@@ -2,8 +2,10 @@
 import asyncio
 import threading
 import time
+import socket
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 from urllib.parse import urlparse
+from src.utils.ssrf_guard import is_blocked_ip, is_private_allowed, is_allowed_by_test_hook
 
 
 class JavaScriptRenderer:
@@ -15,6 +17,64 @@ class JavaScriptRenderer:
         self.browser = None
         self.page_pool = []
         self.pool_lock = threading.Lock()
+
+    async def _guard_route(self, route, request):
+        """Abort requests to private / reserved IPs.
+
+        Note on DNS Rebinding residual risk:
+        Playwright/Chromium resolves DNS independently when making the actual network request.
+        While we intercept requests at the route level and resolve hostnames in Python here,
+        a time-of-check to time-of-use (TOCTOU) DNS rebinding window exists where a malicious
+        DNS server could return a public IP during this check, but subsequently return a private IP
+        when Chromium establishes the actual socket. True connect-time enforcement inside Chromium
+        would require browser-level proxy/socket hooks (or network namespace isolation).
+        """
+        allow_flag = self.config.get('allow_private_targets')
+        if is_private_allowed(allow_flag):
+            await route.continue_()
+            return
+
+        url = request.url
+        try:
+            parsed = urlparse(url)
+            hostname = parsed.hostname
+            if not hostname:
+                await route.continue_()
+                return
+
+            port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+            clean_host = hostname.strip('[]')
+
+            # Check if host is already an IP address
+            try:
+                if is_blocked_ip(clean_host):
+                    if is_allowed_by_test_hook(hostname, clean_host, port):
+                        await route.continue_()
+                        return
+                    await route.abort('blockedbyclient')
+                    return
+                await route.continue_()
+                return
+            except ValueError:
+                pass
+
+            # Resolve domain in thread pool to avoid blocking async event loop
+            loop = asyncio.get_running_loop()
+            addrs = await loop.run_in_executor(None, socket.getaddrinfo, hostname, port)
+            for addr in addrs:
+                ip_str = addr[4][0]
+                if is_allowed_by_test_hook(hostname, ip_str, port):
+                    continue
+                if is_blocked_ip(ip_str):
+                    await route.abort('blockedbyclient')
+                    return
+
+            await route.continue_()
+        except Exception:
+            try:
+                await route.abort('blockedbyclient')
+            except Exception:
+                pass
 
     async def initialize(self):
         """Initialize Playwright browser and page pool"""
@@ -44,6 +104,7 @@ class JavaScriptRenderer:
                         'height': self.config.get('js_viewport_height', 1080)
                     }
                 )
+                await context.route("**/*", self._guard_route)
                 page = await context.new_page()
                 page.set_default_timeout(self.config.get('js_timeout', 30) * 1000)
                 self.page_pool.append(page)

@@ -28,6 +28,9 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Fixture tests run against local HTTP servers (127.0.0.1)
+os.environ.setdefault('ALLOW_PRIVATE_TARGETS', 'true')
+
 from src.crawler import WebCrawler  # noqa: E402
 
 # Fixture servers bind here upward. Override if these clash locally.
