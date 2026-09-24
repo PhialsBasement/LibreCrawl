@@ -1034,10 +1034,21 @@ def update_crawler_settings():
     try:
         crawler = get_or_create_crawler()
         settings_manager = get_session_settings()
-        # Get current settings and update crawler configuration
+
+        # Apply anything sent with the request. Without this the endpoint
+        # silently ignored its own body and answered success, so a client
+        # that posted {"maxUrls": 2000} got a crawl with the default limit
+        # and no indication that its setting had been dropped.
+        data = request.get_json(silent=True) or {}
+        if data:
+            ok, message = settings_manager.save_settings(data)
+            if not ok:
+                return jsonify({'success': False, 'error': message})
+
         crawler_config = settings_manager.get_crawler_config()
         crawler.update_config(crawler_config)
-        return jsonify({'success': True, 'message': 'Crawler settings updated'})
+        return jsonify({'success': True, 'message': 'Crawler settings updated',
+                        'applied': list(data) if data else []})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
