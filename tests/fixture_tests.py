@@ -11,8 +11,8 @@ means a real regression rather than a flaky expectation:
 
   1. relative links on a page reached through a cross-domain redirect resolve
      against the site that served the content, not the URL that was requested
-  2. images hosted off-domain are neither requested nor listed while
-     "crawl external links" is off
+  2. images hosted off-domain (CDNs) are checked and listed even while
+     "crawl external links" is off, without crawling off-domain pages
   3. sitemap discovery does not block start_crawl, and a crawl does not
      finish while discovery is still feeding the queue
   4. max_urls budgets pages actually fetched, not the rows synthesized from
@@ -151,28 +151,24 @@ def test_cross_domain_redirect():
 
 
 def test_external_images():
-    """crawl_external=off must also apply to image HEAD checks."""
+    """Off-domain (CDN) images are checked even with crawl_external off."""
     site, other = BASE_PORT + 2, BASE_PORT + 3
     other_hits = []
     a = serve(make_handler({
-        '/': html(f'<img src="/in.png"><img src="http://127.0.0.1:{other}/out.png">'),
+        '/': html(f'<img src="/in.png"><img src="http://127.0.0.1:{other}/out.png">'
+                  f'<a href="http://127.0.0.1:{other}/page">offsite page</a>'),
         '/in.png': png(),
     }), site)
-    b = serve(make_handler({'/out.png': png()}, hits=other_hits), other)
+    b = serve(make_handler({'/out.png': png(), '/page': html('')}, hits=other_hits), other)
     try:
         crawler = crawl(f'http://127.0.0.1:{site}/')
         urls = {r['url'] for r in crawler.crawl_results}
-        result('images: offsite image not listed as a row',
-               f'http://127.0.0.1:{other}/out.png' not in urls)
-        result('images: offsite host never contacted', not other_hits, str(other_hits))
+        result('images: offsite image listed as a row',
+               f'http://127.0.0.1:{other}/out.png' in urls)
+        result('images: offsite image HEAD-checked', '/out.png' in other_hits, str(other_hits))
+        result('images: offsite page not crawled', '/page' not in other_hits, str(other_hits))
         result('images: same-domain image still listed',
                f'http://127.0.0.1:{site}/in.png' in urls)
-
-        other_hits.clear()
-        crawler = crawl(f'http://127.0.0.1:{site}/', crawl_external=True)
-        urls = {r['url'] for r in crawler.crawl_results}
-        result('images: offsite image checked when external crawling is on',
-               f'http://127.0.0.1:{other}/out.png' in urls and bool(other_hits))
     finally:
         a.shutdown()
         b.shutdown()

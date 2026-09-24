@@ -1490,8 +1490,6 @@ class WebCrawler:
         synthesized from the HEAD response so they appear in the Images tab
         without downloading the file.
         """
-        check_external = self.config.get('crawl_external', False)
-
         # Statuses set here are journalled at the end: these links were already
         # announced by the link manager, so the UI only learns about a HEAD
         # result if we emit an update for it
@@ -1500,10 +1498,9 @@ class WebCrawler:
         to_check = []
         for link in image_links:
             url = link['target_url']
-            # Respect the external-crawling setting: don't request (or mint
-            # result rows for) images hosted off-domain unless it's enabled
-            if not check_external and not self.link_manager.is_internal(url):
-                continue
+            # Off-domain images are checked whatever crawl_external says: they
+            # are assets of the page embedding them, and sites on Wix, Shopify,
+            # Squarespace etc. serve every image from a CDN host
             cached = self._image_status_cache.get(url)
             if cached is not None:
                 if link.get('target_status') != cached:
