@@ -1884,7 +1884,7 @@ def main():
     print("=" * 60)
     print("LibreCrawl - SEO Spider")
     print("=" * 60)
-    print(f"\n🚀 Server starting on http://0.0.0.0:5000")
+    print(f"\n🚀 Server starting on http://{os.environ.get('HOST_BINDING', '127.0.0.1')}:{os.environ.get('EXTERNAL_PORT', 5000)}")
     print(f"🌐 Access from browser: http://localhost:5000")
     print(f"📱 Access from network: http://<your-ip>:5000")
     print(f"\n✨ Multi-tenancy enabled - each browser session is isolated")
@@ -1904,7 +1904,13 @@ def main():
     from waitress import serve
     print("Starting LibreCrawl on http://localhost:5000")
     print("Using Waitress WSGI server with multi-threading support")
-    serve(app, host='0.0.0.0', port=5000, threads=8)
+    # .env.example documents HOST_BINDING, but nothing read it: the server
+    # always bound to every interface. Combined with LOCAL_MODE=true, which
+    # disables authentication and grants admin to every visitor, that puts
+    # an admin UI on the local network by default.
+    host = os.environ.get('HOST_BINDING', '127.0.0.1')
+    port = int(os.environ.get('EXTERNAL_PORT', 5000))
+    serve(app, host=host, port=port, threads=8)
 
 if __name__ == '__main__':
     main()
