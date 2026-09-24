@@ -11,8 +11,9 @@ means a real regression rather than a flaky expectation:
 
   1. relative links on a page reached through a cross-domain redirect resolve
      against the site that served the content, not the URL that was requested
-  2. images hosted off-domain (CDNs) are checked and listed even while
-     "crawl external links" is off, without crawling off-domain pages
+  2. images hosted off-domain (CDNs) and external links are HEAD-checked and
+     listed even while "crawl external links" is off, without crawling
+     off-domain pages
   3. sitemap discovery does not block start_crawl, and a crawl does not
      finish while discovery is still feeding the queue
   4. max_urls budgets pages actually fetched, not the rows synthesized from
@@ -74,7 +75,7 @@ def make_handler(routes, hits=None, slow_paths=(), slow_seconds=0.0):
 
         def do_GET(self):
             if hits is not None:
-                hits.append(self.path)
+                hits.append(f'{self.command} {self.path}')
             if any(self.path.startswith(p) for p in slow_paths):
                 time.sleep(slow_seconds)
 
@@ -124,9 +125,10 @@ def test_cross_domain_redirect():
         '/local.html': html('<p>local page</p>'),
         '/go': (302, f'http://127.0.0.1:{site_b}/landing'),
     }), site_a)
+    b_hits = []
     b = serve(make_handler({
         '/landing': html('<a href="/issues">issues</a><a href="/pulls">pulls</a>'),
-    }), site_b)
+    }, hits=b_hits), site_b)
     try:
         crawler = crawl(f'http://127.0.0.1:{site_a}/')
         urls = {r['url'] for r in crawler.crawl_results}
@@ -143,32 +145,69 @@ def test_cross_domain_redirect():
 
         result('redirect: offsite links attributed to the other host',
                f'http://127.0.0.1:{site_b}/issues' in targets)
+        # (with crawl_external off, offsite links are HEAD-checked for the
+        # External tab, but never fetched)
         result('redirect: offsite content does not enter the queue',
-               f'http://127.0.0.1:{site_b}/issues' not in urls)
+               'GET /issues' not in b_hits, str(b_hits))
     finally:
         a.shutdown()
         b.shutdown()
 
 
 def test_external_images():
-    """Off-domain (CDN) images are checked even with crawl_external off."""
+    """With crawl_external off, off-domain images (CDNs) and external links are
+    HEAD-checked and listed, but the external site is never crawled."""
     site, other = BASE_PORT + 2, BASE_PORT + 3
     other_hits = []
+    off = f'http://127.0.0.1:{other}'
     a = serve(make_handler({
-        '/': html(f'<img src="/in.png"><img src="http://127.0.0.1:{other}/out.png">'
-                  f'<a href="http://127.0.0.1:{other}/page">offsite page</a>'),
+        '/': html(f'<img src="/in.png"><img src="{off}/out.png">'
+                  f'<a href="{off}/page">offsite page</a>'
+                  f'<a href="{off}/gone">dead link</a>'
+                  f'<a href="{off}/no-head">HEAD refused</a>'
+                  f'<a href="javascript:void(0)">js</a>'),
         '/in.png': png(),
     }), site)
-    b = serve(make_handler({'/out.png': png(), '/page': html('')}, hits=other_hits), other)
+
+    class NoHead(make_handler({'/out.png': png(), '/page': html('<a href="/deeper">x</a>'),
+                               '/no-head': html('')}, hits=other_hits)):
+        def do_HEAD(self):
+            if self.path == '/no-head':
+                other_hits.append(f'HEAD {self.path}')
+                self._send(405)
+            else:
+                self.do_GET()
+
+    b = serve(NoHead, other)
     try:
         crawler = crawl(f'http://127.0.0.1:{site}/')
-        urls = {r['url'] for r in crawler.crawl_results}
-        result('images: offsite image listed as a row',
-               f'http://127.0.0.1:{other}/out.png' in urls)
-        result('images: offsite image HEAD-checked', '/out.png' in other_hits, str(other_hits))
-        result('images: offsite page not crawled', '/page' not in other_hits, str(other_hits))
+        rows = {r['url']: r for r in crawler.crawl_results}
+        result('images: offsite image listed as a row', f'{off}/out.png' in rows)
+        result('images: offsite image HEAD-checked', 'HEAD /out.png' in other_hits, str(other_hits))
         result('images: same-domain image still listed',
-               f'http://127.0.0.1:{site}/in.png' in urls)
+               f'http://127.0.0.1:{site}/in.png' in rows)
+
+        ext = rows.get(f'{off}/page')
+        result('external: link listed as an external row',
+               ext is not None and ext['is_internal'] is False and ext['status_code'] == 200,
+               str(ext and (ext['is_internal'], ext['status_code'])))
+        result('external: link HEAD-checked, never fetched',
+               'HEAD /page' in other_hits and 'GET /page' not in other_hits
+               and not any('/deeper' in h for h in other_hits), str(other_hits))
+        result('external: dead link reports 404',
+               rows.get(f'{off}/gone', {}).get('status_code') == 404)
+        result('external: HEAD 405 falls back to GET',
+               rows.get(f'{off}/no-head', {}).get('status_code') == 200, str(other_hits))
+        link_statuses = {l['target_url']: l['target_status'] for l in crawler.link_manager.all_links}
+        result('external: link status shown in Links tab',
+               link_statuses.get(f'{off}/gone') == 404, str(link_statuses))
+        result('external: non-http links ignored',
+               not any(u.startswith('javascript:') for u in rows))
+
+        other_hits.clear()
+        crawler = crawl(f'http://127.0.0.1:{site}/', crawl_external=True)
+        result('external: crawled for real when crawl_external is on',
+               'GET /page' in other_hits and 'GET /deeper' in other_hits, str(other_hits))
     finally:
         a.shutdown()
         b.shutdown()
