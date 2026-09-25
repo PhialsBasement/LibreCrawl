@@ -67,8 +67,9 @@ class ZohoOAuthConfig:
             'scope': self.scopes,
             'redirect_uri': redirect_uri,
             'state': state,
+            # No `prompt`: Zoho rejects any value but "consent", which would
+            # make users re-approve the app on every login
             'access_type': 'online',
-            'prompt': 'select_account',
         }
         return f'{self.accounts_url}/oauth/v2/auth?{urlencode(params)}'
 
