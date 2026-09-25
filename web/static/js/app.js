@@ -523,6 +523,13 @@ function updateCrawlData(data) {
     }
 }
 
+// Rows for external links that were only HEAD-checked (Crawl External off)
+// stay out of the Overview unless the External filter is picked: those sites
+// were not crawled. The External tab always lists them.
+function overviewUrls() {
+    return crawlState.urls.filter(url => !url.link_check_only);
+}
+
 // Rebuild the URL virtual scrollers from crawlState.urls, honoring the
 // active sidebar filter if one is set
 function refreshUrlTables() {
@@ -532,7 +539,7 @@ function refreshUrlTables() {
     }
 
     if (virtualScrollers.overview) {
-        virtualScrollers.overview.setData(crawlState.urls);
+        virtualScrollers.overview.setData(overviewUrls());
     }
     if (virtualScrollers.internal) {
         virtualScrollers.internal.setData(crawlState.urls.filter(url => url.is_internal));
@@ -1041,7 +1048,7 @@ function addUrlToTable(urlData) {
     crawlState.urls.push(urlData);
 
     // Update virtual scrollers with new data
-    if (virtualScrollers.overview) {
+    if (virtualScrollers.overview && !urlData.link_check_only) {
         virtualScrollers.overview.appendData([urlData]);
     }
 
@@ -1221,7 +1228,7 @@ function clearActiveFilters() {
 
     // Reset all virtual scrollers to show full data
     if (virtualScrollers.overview) {
-        virtualScrollers.overview.setData(crawlState.urls);
+        virtualScrollers.overview.setData(overviewUrls());
     }
     if (virtualScrollers.internal) {
         const internalUrls = crawlState.urls.filter(url => url.is_internal);
@@ -1243,7 +1250,9 @@ function filterVirtualScrollerData(scrollerName, filterType) {
     let filteredData = crawlState.urls;
 
     // Apply base filter for internal/external tables
-    if (scrollerName === 'internal') {
+    if (scrollerName === 'overview' && filterType !== 'external') {
+        filteredData = overviewUrls();
+    } else if (scrollerName === 'internal') {
         filteredData = filteredData.filter(url => url.is_internal);
     } else if (scrollerName === 'external') {
         filteredData = filteredData.filter(url => !url.is_internal);
@@ -1338,6 +1347,9 @@ function updateFilterCounts() {
         if (isInternalURL(url.url)) counts.internal++;
         else counts.external++;
 
+        // The other filters match what the Overview shows under them
+        if (url.link_check_only) return;
+
         // Count by status code
         const statusCode = parseInt(url.status_code);
         if (statusCode >= 200 && statusCode < 300) counts['2xx']++;
@@ -1369,46 +1381,46 @@ function updateStatusCodesTable(filterType = null) {
 
     // Count status codes, respecting current filter
     const statusCounts = {};
-    let filteredUrls = crawlState.urls;
+    let filteredUrls = filterType === 'external' ? crawlState.urls : overviewUrls();
 
     // Apply filter if specified
     if (filterType === 'internal') {
-        filteredUrls = crawlState.urls.filter(url => isInternalURL(url.url));
+        filteredUrls = filteredUrls.filter(url => isInternalURL(url.url));
     } else if (filterType === 'external') {
-        filteredUrls = crawlState.urls.filter(url => !isInternalURL(url.url));
+        filteredUrls = filteredUrls.filter(url => !isInternalURL(url.url));
     } else if (filterType === '2xx') {
-        filteredUrls = crawlState.urls.filter(url => {
+        filteredUrls = filteredUrls.filter(url => {
             const status = parseInt(url.status_code);
             return status >= 200 && status < 300;
         });
     } else if (filterType === '3xx') {
-        filteredUrls = crawlState.urls.filter(url => {
+        filteredUrls = filteredUrls.filter(url => {
             const status = parseInt(url.status_code);
             return status >= 300 && status < 400;
         });
     } else if (filterType === '4xx') {
-        filteredUrls = crawlState.urls.filter(url => {
+        filteredUrls = filteredUrls.filter(url => {
             const status = parseInt(url.status_code);
             return status >= 400 && status < 500;
         });
     } else if (filterType === '5xx') {
-        filteredUrls = crawlState.urls.filter(url => {
+        filteredUrls = filteredUrls.filter(url => {
             const status = parseInt(url.status_code);
             return status >= 500;
         });
     } else if (filterType === 'no_response') {
-        filteredUrls = crawlState.urls.filter(url =>
+        filteredUrls = filteredUrls.filter(url =>
             (url.status_code === 0 || url.status_code === null || url.status_code === undefined)
             && url.error_type !== 'file_too_large'
         );
     } else if (filterType === 'html') {
-        filteredUrls = crawlState.urls.filter(url => (url.content_type || '').includes('html'));
+        filteredUrls = filteredUrls.filter(url => (url.content_type || '').includes('html'));
     } else if (filterType === 'css') {
-        filteredUrls = crawlState.urls.filter(url => (url.content_type || '').includes('css'));
+        filteredUrls = filteredUrls.filter(url => (url.content_type || '').includes('css'));
     } else if (filterType === 'js') {
-        filteredUrls = crawlState.urls.filter(url => (url.content_type || '').includes('javascript'));
+        filteredUrls = filteredUrls.filter(url => (url.content_type || '').includes('javascript'));
     } else if (filterType === 'images') {
-        filteredUrls = crawlState.urls.filter(url => (url.content_type || '').includes('image'));
+        filteredUrls = filteredUrls.filter(url => (url.content_type || '').includes('image'));
     }
 
     let totalUrls = filteredUrls.length;

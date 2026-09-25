@@ -1483,9 +1483,9 @@ class WebCrawler:
                               if l.get('placement') != 'image' and not l.get('is_internal')
                               and urlparse(l['target_url']).scheme in ('http', 'https')]
             if external_links:
-                self._head_check_links(external_links, depth)
+                self._head_check_links(external_links, depth, link_check_only=True)
 
-    def _head_check_links(self, links, depth=0):
+    def _head_check_links(self, links, depth=0, link_check_only=False):
         """HEAD-check link targets that won't be fetched as crawl targets.
 
         Uses a per-crawl cache so the same URL is only checked once even if
@@ -1494,7 +1494,9 @@ class WebCrawler:
 
         URLs that won't be fetched as full crawl targets get a result row
         synthesized from the HEAD response so they appear in the Images /
-        External tabs without downloading the body.
+        External tabs without downloading the body. link_check_only marks
+        rows for links to sites that were not crawled, which the Overview
+        leaves out.
         """
         # Statuses set here are journalled at the end: these links were already
         # announced by the link manager, so the UI only learns about a HEAD
@@ -1540,7 +1542,8 @@ class WebCrawler:
 
             # Skip synthesis for URLs that will be (or were) crawled for real
             if not self._should_crawl_url(url):
-                self._record_head_result(url, link['target_status'], content_type, size, depth)
+                self._record_head_result(url, link['target_status'], content_type, size, depth,
+                                         link_check_only)
 
         batch = to_check[:50]
         with ThreadPoolExecutor(max_workers=min(HEAD_CHECK_WORKERS, len(batch))) as pool:
@@ -1554,7 +1557,8 @@ class WebCrawler:
         if links:
             self.event_log.emit_many('link_update', links)
 
-    def _record_head_result(self, url, status_code, content_type, size, depth):
+    def _record_head_result(self, url, status_code, content_type, size, depth,
+                            link_check_only=False):
         """Add a result row for a URL from its HEAD response (no body download)"""
         sources = self.link_manager.get_source_pages(url)
 
@@ -1568,6 +1572,7 @@ class WebCrawler:
             result['size'] = size
             result['is_internal'] = self.link_manager.is_internal(url)
             result['linked_from'] = sources
+            result['link_check_only'] = link_check_only
             self.crawl_results.append(result)
             self.stats['crawled'] += 1
             # a result counts as discovered (issue #94)

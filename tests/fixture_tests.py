@@ -201,6 +201,12 @@ def test_external_images():
         link_statuses = {l['target_url']: l['target_status'] for l in crawler.link_manager.all_links}
         result('external: link status shown in Links tab',
                link_statuses.get(f'{off}/gone') == 404, str(link_statuses))
+        result('external: link rows flagged link_check_only (left out of Overview)',
+               ext is not None and ext.get('link_check_only') is True)
+        result('external: offsite image rows not flagged (stay in Overview)',
+               rows.get(f'{off}/out.png', {}).get('link_check_only') is False)
+        result('external: crawled pages not flagged',
+               not rows[f'http://127.0.0.1:{site}/'].get('link_check_only'))
         result('external: non-http links ignored',
                not any(u.startswith('javascript:') for u in rows))
 
