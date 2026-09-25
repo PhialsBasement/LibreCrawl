@@ -104,6 +104,16 @@ def init_db():
         except:
             pass  # Column already exists
 
+        # Zoho account ID, set for users who sign in with Zoho OAuth
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN zoho_id TEXT")
+        except:
+            pass  # Column already exists
+        cursor.execute('''
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_users_zoho_id
+            ON users(zoho_id)
+        ''')
+
         print("Database initialized successfully")
 
     # Initialize crawl persistence tables
@@ -557,3 +567,62 @@ def get_user_by_email(email):
     except Exception as e:
         print(f"Error fetching user by email: {e}")
         return None
+
+def get_or_create_zoho_user(zoho_id, email, display_name, default_tier='user', allow_create=True):
+    """
+    Find the user for a Zoho account, linking or creating one as needed.
+
+    Lookup order: an account already linked to this Zoho ID, then an existing
+    account with the same (Zoho-verified) email, which gets linked. Otherwise a
+    new verified account is created when allow_create is set.
+    Returns (success, message, user_data)
+    """
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT id, username, email, tier FROM users WHERE zoho_id = ?', (zoho_id,))
+            user = cursor.fetchone()
+
+            if not user and email:
+                cursor.execute('SELECT id, username, email, tier FROM users WHERE email = ? COLLATE NOCASE', (email,))
+                user = cursor.fetchone()
+                if user:
+                    # Zoho has verified the email, so the account counts as verified
+                    cursor.execute('UPDATE users SET zoho_id = ?, verified = 1 WHERE id = ?', (zoho_id, user['id']))
+
+            if not user:
+                if not allow_create:
+                    return False, "No LibreCrawl account is linked to this Zoho account", None
+
+                # Build a unique username from the display name or email
+                base = (display_name or email.split('@')[0]).strip()
+                base = ''.join(c for c in base if c.isalnum() or c in '._-')[:40] or 'zoho_user'
+                if len(base) < 3:
+                    base = f'{base}_zoho'
+                username = base
+                suffix = 1
+                while cursor.execute('SELECT 1 FROM users WHERE username = ?', (username,)).fetchone():
+                    suffix += 1
+                    username = f'{base}{suffix}'
+
+                # Nobody knows this password, so password login stays unusable
+                password_hash = hash_password(secrets.token_urlsafe(32))
+                cursor.execute('''
+                    INSERT INTO users (username, email, password_hash, verified, tier, zoho_id)
+                    VALUES (?, ?, ?, 1, ?, ?)
+                ''', (username, email, password_hash, default_tier, zoho_id))
+                user = {'id': cursor.lastrowid, 'username': username, 'email': email, 'tier': default_tier}
+
+            cursor.execute('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?', (user['id'],))
+
+            user_data = {
+                'id': user['id'],
+                'username': user['username'],
+                'email': user['email'],
+                'tier': user['tier'] or 'guest'
+            }
+            return True, "Login successful", user_data
+
+    except Exception as e:
+        print(f"Zoho login error: {e}")
+        return False, "An error occurred during Zoho login", None

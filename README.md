@@ -96,6 +96,20 @@ REGISTRATION_DISABLED=false
 SECRET_KEY=replace-with-a-long-random-string
 ```
 
+To add a **Login with Zoho** button, create a "Server-based Application" client at
+[api-console.zoho.com](https://api-console.zoho.com) with the redirect URI
+`https://your-host/auth/zoho/callback`, then set:
+
+```bash
+ZOHO_OAUTH_ENABLED=true
+ZOHO_CLIENT_ID=...
+ZOHO_CLIENT_SECRET=...
+ZOHO_REDIRECT_URI=https://your-host/auth/zoho/callback
+# Optional: ZOHO_ACCOUNTS_URL, ZOHO_ALLOWED_DOMAINS, ZOHO_ALLOW_SIGNUP, ZOHO_DEFAULT_TIER
+```
+
+See `.env.example` for what each option does.
+
 
 #### Option 2: Python
 

@@ -123,6 +123,35 @@
             font-size: 14px;
         }
 
+        .btn-zoho {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            background: white;
+            color: #374151;
+            border: 2px solid #e5e7eb;
+            text-decoration: none;
+        }
+
+        .btn-zoho:hover {
+            border-color: #e42527;
+            box-shadow: 0 8px 16px rgba(228, 37, 39, 0.15);
+        }
+
+        .btn-zoho .zoho-mark {
+            width: 22px;
+            height: 22px;
+            border-radius: 5px;
+            background: #e42527;
+            color: white;
+            font-size: 13px;
+            font-weight: 700;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
         .register-link {
             text-align: center;
             margin-top: 24px;
@@ -172,7 +201,15 @@
             <p>SEO Spider Tool</p>
         </div>
 
-        <div id="alert" class="alert"></div>
+        <div id="alert" class="alert{% if login_error %} alert-error show{% endif %}">{{ login_error or '' }}</div>
+
+        {% if zoho_enabled %}
+        <a href="/auth/zoho/login" class="btn btn-zoho" id="zohoBtn">
+            <span class="zoho-mark" aria-hidden="true">Z</span>
+            Login with Zoho
+        </a>
+        <div class="divider">or</div>
+        {% endif %}
 
         {% if skip_auth %}
         <div class="alert alert-error show" style="text-align: left;">

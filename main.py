@@ -17,8 +17,9 @@ from flask_compress import Compress
 from functools import wraps
 from src.crawler import WebCrawler
 from src.settings_manager import SettingsManager
-from src.auth_db import init_db, create_user, authenticate_user, get_user_by_id, log_guest_crawl, get_guest_crawls_last_24h, verify_user, set_user_tier, create_verification_token, verify_token, get_user_by_email
+from src.auth_db import init_db, create_user, authenticate_user, get_user_by_id, log_guest_crawl, get_guest_crawls_last_24h, verify_user, set_user_tier, create_verification_token, verify_token, get_user_by_email, get_or_create_zoho_user
 from src.email_service import send_verification_email, send_welcome_email
+from src.zoho_oauth import ZohoOAuthConfig, ZohoOAuthError
 
 # Load environment variables from .env file
 from dotenv import load_dotenv
@@ -45,6 +46,7 @@ DISABLE_REGISTER = args.disable_register or os.getenv('REGISTRATION_DISABLED', '
 DISABLE_GUEST = args.disable_guest or os.getenv('DISABLE_GUEST', '').lower() in ('true', '1', 'yes')
 DEMO_MODE = args.demo or os.getenv('DEMO_MODE', '').lower() in ('true', '1', 'yes')
 SKIP_AUTH = args.dangerously_skip_auth or os.getenv('DANGEROUSLY_SKIP_AUTH', '').lower() in ('true', '1', 'yes')
+ZOHO = ZohoOAuthConfig(registration_disabled=DISABLE_REGISTER)
 
 app = Flask(__name__, template_folder='web/templates', static_folder='web/static')
 app.secret_key = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
@@ -194,6 +196,15 @@ if SKIP_AUTH:
     print("Anyone can log in as any username with no password!")
     print("Username is used only to separate per-user sessions.")
     print("DO NOT use on a public network or production server!")
+    print("=" * 60)
+
+if ZOHO.enabled:
+    print("=" * 60)
+    print("ZOHO OAUTH LOGIN ENABLED")
+    print(f"Accounts server: {ZOHO.accounts_url}")
+    if ZOHO.allowed_domains:
+        print(f"Allowed email domains: {', '.join(ZOHO.allowed_domains)}")
+    print(f"New Zoho users: {'created with tier ' + repr(ZOHO.default_tier) if ZOHO.allow_signup else 'not allowed'}")
     print("=" * 60)
 
 def get_client_ip():
@@ -503,7 +514,60 @@ def login_page():
     # Redirect to app if already logged in
     if 'user_id' in session:
         return redirect(url_for('index'))
-    return render_template('login.html', registration_disabled=DISABLE_REGISTER, guest_disabled=DISABLE_GUEST, skip_auth=SKIP_AUTH)
+    return render_template('login.html', registration_disabled=DISABLE_REGISTER, guest_disabled=DISABLE_GUEST, skip_auth=SKIP_AUTH,
+                           zoho_enabled=ZOHO.enabled, login_error=session.pop('login_error', None))
+
+def _zoho_redirect_uri():
+    return ZOHO.redirect_uri or url_for('zoho_callback', _external=True)
+
+@app.route('/auth/zoho/login')
+def zoho_login():
+    if not ZOHO.enabled:
+        return redirect(url_for('login_page'))
+    state = secrets.token_urlsafe(32)
+    session['zoho_oauth_state'] = state
+    return redirect(ZOHO.authorize_url(_zoho_redirect_uri(), state))
+
+@app.route('/auth/zoho/callback')
+def zoho_callback():
+    if not ZOHO.enabled:
+        return redirect(url_for('login_page'))
+
+    def fail(message):
+        session['login_error'] = message
+        return redirect(url_for('login_page'))
+
+    expected_state = session.pop('zoho_oauth_state', None)
+    if request.args.get('error'):
+        return fail('Zoho login was cancelled or denied.')
+    if not expected_state or not secrets.compare_digest(expected_state, request.args.get('state', '')):
+        return fail('Zoho login expired or was invalid. Please try again.')
+    code = request.args.get('code')
+    if not code:
+        return fail('Zoho did not return an authorization code.')
+
+    try:
+        accounts_server = ZOHO.accounts_server_for(request.args.get('accounts-server'))
+        identity = ZOHO.fetch_identity(code, _zoho_redirect_uri(), accounts_server)
+    except ZohoOAuthError as e:
+        print(f"Zoho OAuth error: {e}")
+        return fail(str(e))
+
+    if not ZOHO.domain_allowed(identity['email']):
+        return fail('Your Zoho account\'s email domain is not allowed to log in here.')
+
+    success, message, user_data = get_or_create_zoho_user(
+        identity['zoho_id'], identity['email'], identity['name'],
+        default_tier=ZOHO.default_tier, allow_create=ZOHO.allow_signup)
+    if not success:
+        return fail(message)
+
+    session.clear()
+    session['user_id'] = user_data['id']
+    session['username'] = user_data['username']
+    session['tier'] = user_data['tier']
+    session.permanent = True
+    return redirect(url_for('index'))
 
 @app.route('/register')
 def register_page():

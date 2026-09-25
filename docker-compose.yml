@@ -22,6 +22,16 @@ services:
       # DANGEROUS: Set to "true" to allow login as any username with no password
       # (username only used to separate sessions). Do NOT use in production.
       - DANGEROUSLY_SKIP_AUTH=${DANGEROUSLY_SKIP_AUTH:-false}
+      # Zoho OAuth login (see .env.example for details)
+      - ZOHO_OAUTH_ENABLED=${ZOHO_OAUTH_ENABLED:-false}
+      - ZOHO_CLIENT_ID=${ZOHO_CLIENT_ID:-}
+      - ZOHO_CLIENT_SECRET=${ZOHO_CLIENT_SECRET:-}
+      - ZOHO_REDIRECT_URI=${ZOHO_REDIRECT_URI:-}
+      - ZOHO_ACCOUNTS_URL=${ZOHO_ACCOUNTS_URL:-}
+      - ZOHO_SCOPES=${ZOHO_SCOPES:-}
+      - ZOHO_ALLOWED_DOMAINS=${ZOHO_ALLOWED_DOMAINS:-}
+      - ZOHO_ALLOW_SIGNUP=${ZOHO_ALLOW_SIGNUP:-}
+      - ZOHO_DEFAULT_TIER=${ZOHO_DEFAULT_TIER:-}
       # Uncomment these for SMTP sending
       # - SMTP_HOST=${SMTP_HOST}
       # - SMTP_PORT=${SMTP_PORT}
