@@ -1,7 +1,30 @@
 """SEO data extraction from HTML content"""
+import copy
 import re
 import json
 from urllib.parse import urljoin, urlparse
+
+
+CHROME_TAGS = ('script', 'style', 'noscript', 'template',
+               'nav', 'header', 'footer', 'aside')
+_WORD_RE = re.compile(r'\b\w+\b')
+
+
+def _count_content_words(soup):
+    """Words in the page body, without scripts, styles or repeated chrome.
+
+    Works on a copy: the caller keeps using this soup for links, headings and
+    images, so the elements removed here must not disappear from it.
+    """
+    try:
+        body = copy.copy(soup)
+    except Exception:
+        body = soup
+    for tag in body(CHROME_TAGS):
+        tag.decompose()
+    main = body.find('main') or body.find('body') or body
+    return len(_WORD_RE.findall(main.get_text(' ', strip=True)))
+
 
 
 class SEOExtractor:
@@ -28,10 +51,16 @@ class SEOExtractor:
         h3_tags = soup.find_all('h3')
         result['h3'] = [h3.get_text().strip() for h3 in h3_tags[:10]]
 
-        # Count words
-        text_content = soup.get_text()
-        words = re.findall(r'\b\w+\b', text_content)
-        result['word_count'] = len(words)
+        # Count words in the page's own content.
+        #
+        # soup.get_text() on the whole document counted the contents of
+        # <script> and <style> as words, plus the navigation, header and
+        # footer that repeat on every page. On a site with a large menu that
+        # is over a thousand words of chrome added to every page, which makes
+        # word_count meaningless and quietly breaks everything built on it:
+        # the low-content check below 300 words never fires, and word_count
+        # carries weight in near-duplicate detection.
+        result['word_count'] = _count_content_words(soup)
 
         # Extract language
         html_tag = soup.find('html')
