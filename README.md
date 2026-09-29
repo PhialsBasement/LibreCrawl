@@ -10,7 +10,7 @@ A web-based multi-tenant crawler for SEO analysis and website auditing.
 
 **Browse plugins other people have built, or share your own, at the [Plugin Workshop](https://workshop.librecrawl.com)**.
 
-LibreCrawl will ***always*** be free and open source. If it's replacing your $259/year Screaming Frog license, deepcrawl license or sitebulb license, [buy me a coffee](https://www.paypal.com/donate/?business=7H9HFA3385JS8&no_recurring=0&item_name=Continue+the+development+of+LibreCrawl&currency_code=AUD).
+LibreCrawl will ***always*** be free and open source. If it's replacing your $279/year Screaming Frog license, deepcrawl license or sitebulb license, [buy me a coffee](https://www.paypal.com/donate/?business=7H9HFA3385JS8&no_recurring=0&item_name=Continue+the+development+of+LibreCrawl&currency_code=AUD).
 
 ## What it does
 
