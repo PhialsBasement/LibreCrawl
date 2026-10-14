@@ -7,6 +7,7 @@ let defaultSettings = {
     crawlDelay: 1,
     followRedirects: true,
     crawlExternalLinks: false,
+    checkExternalLinks: true,
 
     // Request settings
     userAgent: 'LibreCrawl/1.0 (Web Crawler)',
@@ -26,6 +27,7 @@ let defaultSettings = {
     excludePatterns: '',
     maxFileSize: 50,
     crawlImages: false,
+    checkImageStatus: true,
 
     // Duplication detection settings
     enableDuplicationCheck: true,
@@ -458,9 +460,9 @@ function collectSettingsFromForm() {
 
     // Collect regular form fields
     const formFields = [
-        'maxDepth', 'maxUrls', 'crawlDelay', 'followRedirects', 'crawlExternalLinks',
+        'maxDepth', 'maxUrls', 'crawlDelay', 'followRedirects', 'crawlExternalLinks', 'checkExternalLinks',
         'userAgent', 'timeout', 'retries', 'acceptLanguage', 'respectRobotsTxt', 'allowCookies', 'discoverSitemaps', 'enablePageSpeed', 'googleApiKey',
-        'includeExtensions', 'excludeExtensions', 'includePatterns', 'excludePatterns', 'maxFileSize', 'crawlImages',
+        'includeExtensions', 'excludeExtensions', 'includePatterns', 'excludePatterns', 'maxFileSize', 'crawlImages', 'checkImageStatus',
         'enableDuplicationCheck', 'duplicationThreshold',
         'exportFormat', 'concurrency', 'memoryLimit', 'logLevel', 'saveSession',
         'enableProxy', 'proxyUrl', 'customHeaders',

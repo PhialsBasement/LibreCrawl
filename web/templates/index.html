@@ -561,6 +561,14 @@
                         </label>
                         <span class="setting-help">Include external domains in crawl</span>
                     </div>
+
+                    <div class="setting-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="checkExternalLinks">
+                            Check External Link Status
+                        </label>
+                        <span class="setting-help">Check HTTP status of external links without fully crawling those sites</span>
+                    </div>
                 </div>
 
                 <!-- Request Settings -->
@@ -648,7 +656,15 @@
                             <input type="checkbox" id="crawlImages">
                             Crawl Images
                         </label>
-                        <span class="setting-help">Fully download images as crawl targets. When off, image status and size are still collected via lightweight HEAD requests</span>
+                        <span class="setting-help">Fully download images as crawl targets</span>
+                    </div>
+
+                    <div class="setting-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="checkImageStatus">
+                            Check Image Status
+                        </label>
+                        <span class="setting-help">Check image HTTP status without downloading full images as crawl targets</span>
                     </div>
 
                     <div class="setting-group">

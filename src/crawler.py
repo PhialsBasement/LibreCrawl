@@ -1458,32 +1458,55 @@ class WebCrawler:
         print(f"Updated linked_from data for {len(updated)} URLs")
 
     def _head_check_new_links(self, new_links, result, depth):
-        """HEAD-check a page's new image links and uncrawled external links.
+        """Optionally check image and external link HTTP status.
 
-        Off-domain images are checked whatever crawl_external says: they are
-        assets of the page embedding them, and sites on Wix, Shopify,
-        Squarespace etc. serve every image from a CDN host. External links
-        are checked when crawl_external is off, so the External tab still
-        lists them (with status) without crawling the other site.
+        Link discovery remains active even when status checks are disabled.
         """
-        image_links = [l for l in new_links if l.get('placement') == 'image']
-        if image_links:
-            self._head_check_links(image_links, depth)
-            broken = [l for l in image_links
-                      if l.get('target_status') is not None
-                      and (l['target_status'] >= 400 or l['target_status'] == 0)]
-            if broken:
-                result['broken_images'] = [
-                    {'url': l['target_url'], 'status': l['target_status']}
-                    for l in broken
+
+        if self.config.get('check_image_status', True):
+            image_links = [
+                link for link in new_links
+                if link.get('placement') == 'image'
+            ]
+
+            if image_links:
+                self._head_check_links(image_links, depth)
+
+                broken = [
+                    link for link in image_links
+                    if link.get('target_status') is not None
+                    and (
+                        link['target_status'] >= 400
+                        or link['target_status'] == 0
+                    )
                 ]
 
-        if not self.config.get('crawl_external', False):
-            external_links = [l for l in new_links
-                              if l.get('placement') != 'image' and not l.get('is_internal')
-                              and urlparse(l['target_url']).scheme in ('http', 'https')]
+                if broken:
+                    result['broken_images'] = [
+                        {
+                            'url': link['target_url'],
+                            'status': link['target_status']
+                        }
+                        for link in broken
+                    ]
+
+        if (
+            self.config.get('check_external_links', True)
+            and not self.config.get('crawl_external', False)
+        ):
+            external_links = [
+                link for link in new_links
+                if link.get('placement') != 'image'
+                and not link.get('is_internal')
+                and urlparse(link['target_url']).scheme in ('http', 'https')
+            ]
+
             if external_links:
-                self._head_check_links(external_links, depth, link_check_only=True)
+                self._head_check_links(
+                    external_links,
+                    depth,
+                    link_check_only=True
+                )
 
     def _head_check_links(self, links, depth=0, link_check_only=False):
         """HEAD-check link targets that won't be fetched as crawl targets.

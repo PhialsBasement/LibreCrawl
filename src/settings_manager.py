@@ -26,7 +26,7 @@ class SettingsManager:
         # user: Crawler, Export, Issue Exclusion tabs
         user_settings = [
             # Crawler tab
-            'maxDepth', 'maxUrls', 'crawlDelay', 'followRedirects', 'crawlExternalLinks',
+            'maxDepth', 'maxUrls', 'crawlDelay', 'followRedirects', 'crawlExternalLinks', 'checkExternalLinks',
             # Export tab
             'exportFormat', 'exportFields',
             # Issues tab
@@ -42,7 +42,7 @@ class SettingsManager:
             'discoverSitemaps', 'enablePageSpeed', 'googleApiKey',
             # Filters tab
             'includeExtensions', 'excludeExtensions', 'includePatterns', 'excludePatterns', 'maxFileSize',
-            'crawlImages',
+            'crawlImages', 'checkImageStatus',
             # JavaScript tab
             'enableJavaScript', 'jsWaitTime', 'jsTimeout', 'jsBrowser', 'jsHeadless',
             'jsUserAgent', 'jsViewportWidth', 'jsViewportHeight', 'jsMaxConcurrentPages',
@@ -79,6 +79,7 @@ class SettingsManager:
             'crawlDelay': 1,
             'followRedirects': True,
             'crawlExternalLinks': False,
+            'checkExternalLinks': True,
 
             # Request settings
             'userAgent': 'LibreCrawl/1.0 (Web Crawler)',
@@ -98,6 +99,7 @@ class SettingsManager:
             'excludePatterns': '',
             'maxFileSize': 50,
             'crawlImages': False,
+            'checkImageStatus': True,
 
             # Duplication detection settings
             'enableDuplicationCheck': True,
@@ -482,6 +484,7 @@ class SettingsManager:
             'delay': settings['crawlDelay'],
             'follow_redirects': settings['followRedirects'],
             'crawl_external': settings['crawlExternalLinks'],
+            'check_external_links': settings.get('checkExternalLinks', True),
             'user_agent': settings['userAgent'],
             'timeout': settings['timeout'],
             'retries': settings['retries'],
@@ -490,6 +493,7 @@ class SettingsManager:
             'allow_cookies': settings['allowCookies'],
             'include_extensions': [ext.strip() for ext in settings['includeExtensions'].split(',') if ext.strip()],
             'crawl_images': settings.get('crawlImages', False),
+            'check_image_status': settings.get('checkImageStatus', True),
             'exclude_extensions': [ext.strip() for ext in settings['excludeExtensions'].split(',') if ext.strip()],
             'include_patterns': [p.strip() for p in settings['includePatterns'].split('\n') if p.strip()],
             'exclude_patterns': [p.strip() for p in settings['excludePatterns'].split('\n') if p.strip()],
