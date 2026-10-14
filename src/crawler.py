@@ -1019,7 +1019,7 @@ class WebCrawler:
         """Crawl a single URL using traditional HTTP requests"""
         print(f"Starting crawl of {url}")
         retries = self.config.get('retries', 3)
-        start_time = time.time()
+        start_time = time.perf_counter()
 
         try:
             # Check file size if configured
@@ -1105,7 +1105,8 @@ class WebCrawler:
                 'images': [],
                 'external_links': 0,
                 'internal_links': 0,
-                'response_time': 0,
+                'response_time': round(sum(r.elapsed.total_seconds() for r in [*response.history, response]) * 1000, 2),
+                'processing_time': 0,
                 'redirects': [],
                 'hreflang': [],
                 'schema_org': [],
@@ -1164,7 +1165,7 @@ class WebCrawler:
 
             # Populate linked_from after all link collection is complete
             result['linked_from'] = self.link_manager.get_source_pages(url)
-            result['response_time'] = round((time.time() - start_time) * 1000, 2)
+            result['processing_time'] = round((time.perf_counter() - start_time) * 1000, 2)
 
             # NB: the DB batch is appended by the worker when it accepts this
             # result into crawl_results, not here. A fetch that finishes after
