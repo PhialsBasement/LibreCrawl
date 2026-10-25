@@ -1419,6 +1419,29 @@ def export_stream():
                     headers={'Content-Disposition': f'attachment; filename=librecrawl_issues_{timestamp}.csv'}
                 )
 
+        elif data_type == 'pagespeed':
+            results = crawler.stats.get('pagespeed_results') or []
+            if not results:
+                return jsonify({'success': False, 'error': 'No PageSpeed results to export'}), 404
+            if export_format == 'json':
+                return Response(
+                    _pagespeed_json_text(results),
+                    mimetype='application/json',
+                    headers={'Content-Disposition': f'attachment; filename=librecrawl_pagespeed_{timestamp}.json'}
+                )
+            elif export_format == 'xlsx':
+                return Response(
+                    _pagespeed_xlsx(results),
+                    mimetype=XLSX_MIMETYPE,
+                    headers={'Content-Disposition': f'attachment; filename=librecrawl_pagespeed_{timestamp}.xlsx'}
+                )
+            else:  # csv (and xml, which is served as csv for this file)
+                return Response(
+                    _pagespeed_csv_text(results),
+                    mimetype='text/csv',
+                    headers={'Content-Disposition': f'attachment; filename=librecrawl_pagespeed_{timestamp}.csv'}
+                )
+
         else:
             # URLs export
             urls = crawler.crawl_results
@@ -1426,7 +1449,7 @@ def export_stream():
                 return jsonify({'success': False, 'error': 'No data to export'}), 404
 
             # Remove special fields from regular export
-            regular_fields = [f for f in export_fields if f not in ['issues_detected', 'links_detailed']]
+            regular_fields = [f for f in export_fields if f not in ['issues_detected', 'links_detailed', 'pagespeed_detailed']]
             if not regular_fields:
                 return jsonify({'success': False, 'error': 'No fields selected'}), 400
 
@@ -1521,6 +1544,11 @@ def _build_xlsx(sheet_title, headers, rows):
 
 LINK_EXPORT_FIELDS = ['source_url', 'target_url', 'anchor_text', 'is_internal', 'target_domain', 'target_status', 'placement']
 ISSUE_EXPORT_FIELDS = ['url', 'type', 'category', 'issue', 'details']
+PAGESPEED_EXPORT_FIELDS = ['url', 'strategy', 'performance_score', 'first_contentful_paint',
+                           'largest_contentful_paint', 'cumulative_layout_shift', 'first_input_delay',
+                           'speed_index', 'time_to_interactive', 'status', 'error', 'analysis_date']
+PAGESPEED_METRICS = ['first_contentful_paint', 'largest_contentful_paint', 'cumulative_layout_shift',
+                     'first_input_delay', 'speed_index', 'time_to_interactive']
 
 
 def _link_export_row(link):
@@ -1558,6 +1586,49 @@ def _links_xlsx(links):
 def _issues_xlsx(issues):
     return _build_xlsx('Issues', ISSUE_EXPORT_FIELDS,
                        ([_issue_export_row(i)[f] for f in ISSUE_EXPORT_FIELDS] for i in issues))
+
+
+def _pagespeed_rows(results):
+    """One row per analysed page and strategy (mobile, desktop)."""
+    rows = []
+    for page in results or []:
+        for strategy in ('mobile', 'desktop'):
+            res = page.get(strategy) or {}
+            metrics = res.get('metrics') or {}
+            ok = bool(res.get('success'))
+            row = {
+                'url': page.get('url', ''),
+                'strategy': strategy,
+                'performance_score': '' if res.get('performance_score') is None else res.get('performance_score'),
+                'status': 'OK' if ok else 'Error',
+                'error': '' if ok else res.get('error', ''),
+                'analysis_date': page.get('analysis_date', ''),
+            }
+            for key in PAGESPEED_METRICS:
+                value = metrics.get(key)
+                row[key] = '' if value is None else value
+            rows.append(row)
+    return rows
+
+
+def _pagespeed_csv_text(results):
+    output = StringIO()
+    writer = csv.DictWriter(output, fieldnames=PAGESPEED_EXPORT_FIELDS)
+    writer.writeheader()
+    writer.writerows(_pagespeed_rows(results))
+    return output.getvalue()
+
+
+def _pagespeed_json_text(results):
+    return json.dumps({
+        'export_date': time.strftime('%Y-%m-%d %H:%M:%S'),
+        'pagespeed_results': _pagespeed_rows(results),
+    }, ensure_ascii=False, indent=2)
+
+
+def _pagespeed_xlsx(results):
+    return _build_xlsx('PageSpeed', PAGESPEED_EXPORT_FIELDS,
+                       ([row[f] for f in PAGESPEED_EXPORT_FIELDS] for row in _pagespeed_rows(results)))
 
 
 def _stream_urls_csv(urls, fields):
@@ -1719,6 +1790,7 @@ def export_data():
             urls = local_data.get('urls', [])
             links = local_data.get('links', [])
             issues = local_data.get('issues', [])
+            pagespeed_results = local_data.get('pagespeed', []) or []
         else:
             # Get current crawl results
             crawler = get_or_create_crawler()
@@ -1726,6 +1798,7 @@ def export_data():
             urls = crawl_data.get('urls', [])
             links = crawl_data.get('links', [])
             issues = crawl_data.get('issues', [])
+            pagespeed_results = crawl_data.get('pagespeed_results', []) or []
 
         if not urls:
             return jsonify({'success': False, 'error': 'No data to export'})
@@ -1753,9 +1826,10 @@ def export_data():
         # Check for special export fields and prepare them as separate files
         has_issues_export = 'issues_detected' in export_fields
         has_links_export = 'links_detailed' in export_fields
+        has_pagespeed_export = 'pagespeed_detailed' in export_fields
 
         # Remove special fields from regular export fields
-        regular_fields = [f for f in export_fields if f not in ['issues_detected', 'links_detailed']]
+        regular_fields = [f for f in export_fields if f not in ['issues_detected', 'links_detailed', 'pagespeed_detailed']]
 
         # Debug logging
         print(f"DEBUG: export_fields = {export_fields}")
@@ -1826,6 +1900,28 @@ def export_data():
                 **({'encoding': 'base64'} if export_format == 'xlsx' else {})
             })
 
+        # Generate PageSpeed export if requested
+        if has_pagespeed_export and pagespeed_results:
+            if export_format == 'json':
+                pagespeed_content = _pagespeed_json_text(pagespeed_results)
+                pagespeed_mimetype = 'application/json'
+                pagespeed_filename = f'librecrawl_pagespeed_{int(time.time())}.json'
+            elif export_format == 'xlsx':
+                pagespeed_content = base64.b64encode(_pagespeed_xlsx(pagespeed_results)).decode('ascii')
+                pagespeed_mimetype = XLSX_MIMETYPE
+                pagespeed_filename = f'librecrawl_pagespeed_{int(time.time())}.xlsx'
+            else:  # csv (and xml, served as csv for this file)
+                pagespeed_content = _pagespeed_csv_text(pagespeed_results)
+                pagespeed_mimetype = 'text/csv'
+                pagespeed_filename = f'librecrawl_pagespeed_{int(time.time())}.csv'
+
+            files_to_export.append({
+                'content': pagespeed_content,
+                'mimetype': pagespeed_mimetype,
+                'filename': pagespeed_filename,
+                **({'encoding': 'base64'} if export_format == 'xlsx' else {})
+            })
+
         # Generate regular export if there are regular fields
         if regular_fields:
             if export_format == 'csv':
@@ -1860,6 +1956,8 @@ def export_data():
                 return jsonify({'success': False, 'error': 'No issues data to export'})
             elif has_links_export and not links:
                 return jsonify({'success': False, 'error': 'No links data to export'})
+            elif has_pagespeed_export and not pagespeed_results:
+                return jsonify({'success': False, 'error': 'No PageSpeed results to export'})
             else:
                 return jsonify({'success': False, 'error': 'No data to export'})
 

@@ -1646,7 +1646,8 @@ async function exportData() {
         // Determine which data types to export based on settings
         const hasIssues = exportFields.includes('issues_detected');
         const hasLinks = exportFields.includes('links_detailed');
-        const regularFields = exportFields.filter(f => f !== 'issues_detected' && f !== 'links_detailed');
+        const hasPagespeed = exportFields.includes('pagespeed_detailed');
+        const regularFields = exportFields.filter(f => f !== 'issues_detected' && f !== 'links_detailed' && f !== 'pagespeed_detailed');
 
         // Use streaming endpoint — downloads directly, no memory blow-up
         const downloads = [];
@@ -1672,6 +1673,14 @@ async function exportData() {
             const params = new URLSearchParams({
                 format: exportFormat,
                 type: 'issues'
+            });
+            downloads.push('/api/export_stream?' + params.toString());
+        }
+
+        if (hasPagespeed) {
+            const params = new URLSearchParams({
+                format: exportFormat,
+                type: 'pagespeed'
             });
             downloads.push('/api/export_stream?' + params.toString());
         }
@@ -1722,7 +1731,8 @@ async function legacyExportData(exportFormat, exportFields) {
             localData: {
                 urls: crawlState.urls || [],
                 links: crawlState.links || [],
-                issues: crawlState.issues || window.currentIssues || []
+                issues: crawlState.issues || window.currentIssues || [],
+                pagespeed: window.currentPageSpeed || []
             }
         })
     });
@@ -1941,6 +1951,8 @@ function closeUrlDetails() {
 }
 
 function displayPageSpeedResults(results) {
+    // keep the latest results so the export can include them (also for loaded crawls)
+    window.currentPageSpeed = results || [];
     const container = document.getElementById('pagespeedResults');
     if (!container || !results || results.length === 0) {
         return;
