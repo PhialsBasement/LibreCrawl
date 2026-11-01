@@ -2048,6 +2048,170 @@ function getScoreClass(score) {
 // Save/Load Crawl Functions
 let isSavingCrawl = false;
 
+// Browsers cap one string near 512 MB, and a big crawl's JSON
+// exceeds it. Save files are built and read a row at a time.
+const SAVE_BATCH_ROWS = 5000;
+
+// Returns Blob parts forming {...meta, key: [rows], ...}.
+async function buildCrawlFileParts(meta, arrays) {
+    const head = JSON.stringify(meta);
+    const parts = [head.slice(0, -1)];
+    for (const [key, rows] of Object.entries(arrays)) {
+        parts.push(`,${JSON.stringify(key)}:[`);
+        for (let i = 0; i < rows.length; i += SAVE_BATCH_ROWS) {
+            const end = Math.min(i + SAVE_BATCH_ROWS, rows.length);
+            let chunk = '';
+            for (let j = i; j < end; j++) {
+                chunk += (j ? ',' : '') + (JSON.stringify(rows[j]) ?? 'null');
+            }
+            parts.push(chunk);
+            // Yield so the page stays responsive
+            await new Promise(resolve => setTimeout(resolve, 0));
+        }
+        parts.push(']');
+    }
+    parts.push('}');
+    return parts;
+}
+
+// Incremental parser for a saved crawl: a top-level object
+// whose array values are parsed one element at a time.
+class CrawlFileParser {
+    constructor() {
+        this.data = {};
+        this.state = 'start';
+        this.depth = 0;
+        this.inString = false;
+        this.escaped = false;
+        this.key = null;
+        this.rows = null;
+        this.capturing = false;
+        this.capStart = 0;
+        this.buf = '';
+    }
+
+    begin(i) {
+        this.capturing = true;
+        this.capStart = i;
+        this.buf = '';
+    }
+
+    take(chunk, end) {
+        const text = this.buf + chunk.slice(this.capStart, end);
+        this.capturing = false;
+        this.buf = '';
+        return text;
+    }
+
+    flushRow(chunk, i) {
+        if (this.capturing) this.rows.push(JSON.parse(this.take(chunk, i)));
+    }
+
+    push(chunk) {
+        for (let i = 0; i < chunk.length; i++) {
+            const c = chunk[i];
+            if (this.inString) {
+                if (this.escaped) {
+                    this.escaped = false;
+                } else if (c === '\\') {
+                    this.escaped = true;
+                } else if (c === '"') {
+                    this.inString = false;
+                    if (this.state === 'key') {
+                        this.key = JSON.parse(this.take(chunk, i + 1));
+                        this.state = 'colon';
+                    }
+                }
+                continue;
+            }
+            if (c === ' ' || c === '\n' || c === '\r' || c === '\t') continue;
+
+            switch (this.state) {
+                case 'start':
+                    if (c !== '{') throw new Error('Not a crawl file');
+                    this.depth = 1;
+                    this.state = 'key';
+                    break;
+                case 'key':
+                    if (c === '"') {
+                        this.begin(i);
+                        this.inString = true;
+                    } else if (c === '}') {
+                        this.state = 'done';
+                    } else if (c !== ',') {
+                        throw new Error('Malformed crawl file');
+                    }
+                    break;
+                case 'colon':
+                    if (c !== ':') throw new Error('Malformed crawl file');
+                    this.state = 'value';
+                    break;
+                case 'value':
+                    if (c === '[') {
+                        this.rows = [];
+                        this.depth = 2;
+                        this.state = 'array';
+                    } else {
+                        this.state = 'scalar';
+                        this.begin(i);
+                        this.track(c);
+                    }
+                    break;
+                case 'array':
+                    if (this.depth === 2 && c === ',') {
+                        this.flushRow(chunk, i);
+                    } else if (this.depth === 2 && c === ']') {
+                        this.flushRow(chunk, i);
+                        this.data[this.key] = this.rows;
+                        this.rows = null;
+                        this.depth = 1;
+                        this.state = 'key';
+                    } else {
+                        if (!this.capturing) this.begin(i);
+                        this.track(c);
+                    }
+                    break;
+                case 'scalar':
+                    if (this.depth === 1 && (c === ',' || c === '}')) {
+                        this.data[this.key] = JSON.parse(this.take(chunk, i));
+                        this.state = c === '}' ? 'done' : 'key';
+                    } else {
+                        this.track(c);
+                    }
+                    break;
+                default:
+                    throw new Error('Unexpected data after end of crawl file');
+            }
+        }
+        if (this.capturing) {
+            this.buf += chunk.slice(this.capStart);
+            this.capStart = 0;
+        }
+    }
+
+    track(c) {
+        if (c === '"') this.inString = true;
+        else if (c === '{' || c === '[') this.depth++;
+        else if (c === '}' || c === ']') this.depth--;
+    }
+
+    finish() {
+        if (this.state !== 'done') throw new Error('Crawl file is truncated');
+        return this.data;
+    }
+}
+
+async function readCrawlFile(file) {
+    const parser = new CrawlFileParser();
+    const reader = file.stream().pipeThrough(new TextDecoderStream()).getReader();
+    for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        parser.push(value);
+    }
+    return parser.finish();
+}
+
 async function saveCrawl() {
     const saveCrawlBtn = document.getElementById('saveCrawlBtn');
     if (isSavingCrawl || (saveCrawlBtn && saveCrawlBtn.disabled)) return;
@@ -2062,42 +2226,32 @@ async function saveCrawl() {
             return;
         }
 
-        // Get current crawl data from backend or use local state
-        let urls = crawlState.urls;
-        let links = crawlState.links;
-        let issues = crawlState.issues;
+        // The poller keeps the rows current. Only stats are refreshed,
+        // for PageSpeed results that land after the crawl finishes.
         let stats = crawlState.stats;
-
-        // Try to get fresh data from backend if available
         try {
-            const status = await fetch('/api/crawl_status');
-            const crawlData = await status.json();
-            if (crawlData.urls && crawlData.urls.length > 0) {
-                urls = crawlData.urls;
-                links = crawlData.links || links;
-                issues = crawlData.issues || issues;
-                // Update stats to include latest PageSpeed results if available
-                if (crawlData.stats) {
-                    stats = crawlData.stats;
-                }
+            const status = await fetch('/api/crawl_status?stats_only=1');
+            const light = await status.json();
+            if (light.stats && light.stats.crawled === stats.crawled) {
+                stats = light.stats;
             }
         } catch (e) {
-            console.log('Using local state for save:', e);
+            console.log('Using local stats for save:', e);
         }
 
-        // Add metadata
-        const saveData = {
+        const meta = {
             timestamp: new Date().toISOString(),
             baseUrl: crawlState.baseUrl,
             stats: stats,
-            urls: urls,
-            links: links,
-            issues: issues,
             version: '1.1'
         };
+        const parts = await buildCrawlFileParts(meta, {
+            urls: crawlState.urls || [],
+            links: crawlState.links || [],
+            issues: crawlState.issues || []
+        });
 
-        // Create and download the file
-        const blob = new Blob([JSON.stringify(saveData, null, 2)], { type: 'application/json' });
+        const blob = new Blob(parts, { type: 'application/json' });
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.style.display = 'none';
@@ -2117,7 +2271,7 @@ async function saveCrawl() {
 
     } catch (error) {
         console.error('Save error:', error);
-        showNotification('Failed to save crawl', 'error');
+        showNotification(`Failed to save crawl: ${error.message}`, 'error');
     } finally {
         isSavingCrawl = false;
         if (saveCrawlBtn) {
@@ -2138,9 +2292,10 @@ function loadCrawl() {
         const file = event.target.files[0];
         if (!file) return;
 
+        const loadCrawlBtn = document.getElementById('loadCrawlBtn');
+        if (loadCrawlBtn) loadCrawlBtn.textContent = 'Loading...';
         try {
-            const text = await file.text();
-            const saveData = JSON.parse(text);
+            const saveData = await readCrawlFile(file);
 
             // Validate save data
             if (!saveData.version || !saveData.urls || !saveData.stats) {
@@ -2287,7 +2442,9 @@ function loadCrawl() {
 
         } catch (error) {
             console.error('Load error:', error);
-            showNotification('Failed to load crawl file', 'error');
+            showNotification(`Failed to load crawl file: ${error.message}`, 'error');
+        } finally {
+            if (loadCrawlBtn) loadCrawlBtn.textContent = 'Load Crawl';
         }
     });
 
