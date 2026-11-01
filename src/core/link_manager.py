@@ -28,10 +28,27 @@ class LinkManager:
         self.all_discovered_urls = set()
         self.all_links = []
         self.links_set = set()
-        self.source_pages = {}  # Maps target_url -> list of source_urls
+        # target_url -> {source_url: None}, an ordered set
+        self.source_pages = {}
+
+        # Incremental indexes for target status backfill, so each
+        # result and each link is processed once (see _sync_statuses)
+        self._status = {}
+        self._status_src = None
+        self._status_len = 0
+        self._by_target = {}
+        self._indexed_links = None
+        self._indexed_len = 0
 
         self.urls_lock = threading.Lock()
         self.links_lock = threading.Lock()
+
+    def _add_source(self, target_url, source_url):
+        """Record a source page for target_url. Caller holds urls_lock."""
+        sources = self.source_pages.get(target_url)
+        if sources is None:
+            sources = self.source_pages[target_url] = {}
+        sources[source_url] = None
 
     def extract_links(self, soup, current_url, depth, should_crawl_callback, include_images=False, base_url=None):
         """Extract links from HTML and add to discovery queue.
@@ -56,11 +73,7 @@ class LinkManager:
 
             # Thread-safe checking and adding
             with self.urls_lock:
-                # Track source page for this URL
-                if clean_url not in self.source_pages:
-                    self.source_pages[clean_url] = []
-                if current_url not in self.source_pages[clean_url]:
-                    self.source_pages[clean_url].append(current_url)
+                self._add_source(clean_url, current_url)
 
                 if (clean_url not in self.visited_urls and
                     clean_url not in self.all_discovered_urls and
@@ -91,10 +104,7 @@ class LinkManager:
                 clean_url = normalize_url(absolute_url)
 
                 with self.urls_lock:
-                    if clean_url not in self.source_pages:
-                        self.source_pages[clean_url] = []
-                    if current_url not in self.source_pages[clean_url]:
-                        self.source_pages[clean_url].append(current_url)
+                    self._add_source(clean_url, current_url)
 
                     if (clean_url not in self.visited_urls and
                         clean_url not in self.all_discovered_urls and
@@ -145,13 +155,6 @@ class LinkManager:
                 base_domain_clean = self.base_domain.replace('www.', '', 1)
                 is_internal = target_domain_clean == base_domain_clean
 
-                # Find the status of the target URL if we've crawled it
-                target_status = None
-                for result in crawl_results:
-                    if result['url'] == clean_url:
-                        target_status = result['status_code']
-                        break
-
                 # Determine placement (navigation, footer, body)
                 placement = self._detect_link_placement(link)
 
@@ -161,16 +164,13 @@ class LinkManager:
                     'anchor_text': anchor_text or '(no text)',
                     'is_internal': is_internal,
                     'target_domain': parsed_target.netloc,
-                    'target_status': target_status,
+                    'target_status': None,  # filled in by _commit_links
                     'placement': placement
                 }
 
                 # Track source page for this URL (for "Linked From" feature)
                 with self.urls_lock:
-                    if clean_url not in self.source_pages:
-                        self.source_pages[clean_url] = []
-                    if source_url not in self.source_pages[clean_url]:
-                        self.source_pages[clean_url].append(source_url)
+                    self._add_source(clean_url, source_url)
 
                 candidates.append(link_data)
 
@@ -204,19 +204,13 @@ class LinkManager:
                 base_domain_clean = self.base_domain.replace('www.', '', 1)
                 is_internal = target_domain_clean == base_domain_clean
 
-                target_status = None
-                for result in crawl_results:
-                    if result['url'] == clean_url:
-                        target_status = result['status_code']
-                        break
-
                 link_data = {
                     'source_url': source_url,
                     'target_url': clean_url,
                     'anchor_text': alt_text,
                     'is_internal': is_internal,
                     'target_domain': parsed_target.netloc,
-                    'target_status': target_status,
+                    'target_status': None,
                     'placement': 'image'
                 }
 
@@ -225,9 +219,9 @@ class LinkManager:
             except Exception:
                 continue
 
-        return self._commit_links(candidates)
+        return self._commit_links(candidates, crawl_results)
 
-    def _commit_links(self, candidates):
+    def _commit_links(self, candidates, crawl_results):
         """Append new links and journal them in one locked step.
 
         Emitting inside links_lock is what keeps update_link_statuses from
@@ -235,17 +229,71 @@ class LinkManager:
         """
         new_links = []
         with self.links_lock:
+            # Backfills for links already sent, and fresh statuses
+            # for the new ones before they are sent
+            changed = self._sync_statuses(crawl_results)
             for link_data in candidates:
                 link_key = f"{link_data['source_url']}|{link_data['target_url']}"
                 if link_key not in self.links_set:
                     self.links_set.add(link_key)
+                    target = link_data['target_url']
+                    if target in self._status:
+                        link_data['target_status'] = self._status[target]
                     self.all_links.append(link_data)
                     new_links.append(link_data)
 
-            if new_links and self.event_log:
-                self.event_log.emit_many('link', new_links)
+            if self.event_log:
+                if changed:
+                    self.event_log.emit_many('link_update', changed)
+                if new_links:
+                    self.event_log.emit_many('link', new_links)
 
         return new_links
+
+    def _sync_statuses(self, crawl_results):
+        """Apply results and links added since the last call.
+
+        Caller holds links_lock. Returns the links whose
+        target_status changed. Falls back to a full pass when
+        either list was replaced or cleared.
+        """
+        full = False
+        links = self.all_links
+        if links is not self._indexed_links or len(links) < self._indexed_len:
+            self._by_target = {}
+            self._indexed_links = links
+            self._indexed_len = 0
+            full = True
+        if crawl_results is not self._status_src or len(crawl_results) < self._status_len:
+            self._status = {}
+            self._status_src = crawl_results
+            self._status_len = 0
+            full = True
+
+        new_results = crawl_results[self._status_len:]
+        self._status_len += len(new_results)
+        for result in new_results:
+            self._status[result['url']] = result['status_code']
+
+        new_links = links[self._indexed_len:]
+        self._indexed_len += len(new_links)
+        for link in new_links:
+            self._by_target.setdefault(link['target_url'], []).append(link)
+
+        if full:
+            candidates = links
+        else:
+            candidates = list(new_links)
+            for result in new_results:
+                candidates.extend(self._by_target.get(result['url'], ()))
+
+        changed = []
+        for link in candidates:
+            target = link['target_url']
+            if target in self._status and link['target_status'] != self._status[target]:
+                link['target_status'] = self._status[target]
+                changed.append(link)
+        return changed
 
     def _detect_link_placement(self, link_element):
         """Detect where on the page a link is placed"""
@@ -331,16 +379,8 @@ class LinkManager:
         Returns the links whose status actually changed, so callers can
         emit update events for just those.
         """
-        # Build a fast lookup dict
-        status_lookup = {result['url']: result['status_code'] for result in crawl_results}
-
-        changed = []
         with self.links_lock:
-            for link in self.all_links:
-                target_url = link['target_url']
-                if target_url in status_lookup and link['target_status'] != status_lookup[target_url]:
-                    link['target_status'] = status_lookup[target_url]
-                    changed.append(link)
+            changed = self._sync_statuses(crawl_results)
 
             # Inside the lock: a link is only ever updated after its own
             # 'link' event has been journalled
@@ -351,7 +391,7 @@ class LinkManager:
     def get_source_pages(self, url):
         """Get list of source pages that link to this URL"""
         with self.urls_lock:
-            return self.source_pages.get(url, []).copy()
+            return list(self.source_pages.get(url, ()))
 
     def reset(self):
         """Reset all state"""
