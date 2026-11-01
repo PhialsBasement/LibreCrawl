@@ -233,11 +233,14 @@ def run(args, client_holder=None):
           f'{len(stale)} rows hold stale linked_from on the client, e.g. {stale[0]["url"] if stale else ""}')
 
     host = urllib.parse.urlparse(args.url).netloc.replace('www.', '', 1)
-    offdomain = [u for u in client.urls
-                 if urllib.parse.urlparse(u).netloc.replace('www.', '', 1) != host]
+    # HEAD-checked rows (external links, off-site images) carry
+    # link_check_only; only rows fetched as pages count here
+    offdomain = [u for u, row in client.urls.items()
+                 if urllib.parse.urlparse(u).netloc.replace('www.', '', 1) != host
+                 and 'link_check_only' not in row]
     if not args.external:
         check(not offdomain,
-              f'{len(offdomain)} off-domain rows with external crawling off: {offdomain[:3]}')
+              f'{len(offdomain)} off-domain pages crawled with external crawling off: {offdomain[:3]}')
 
     crawled_urls = set(client.urls)
     missing_status = [key for key, link in client.links.items()
