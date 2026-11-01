@@ -601,6 +601,44 @@ def test_empty_alt_is_not_missing_alt():
         a.shutdown()
 
 
+def test_crawl_delay_is_honoured():
+    """The delay setting must space out page fetches without JS too."""
+    site = BASE_PORT + 12
+    stamps = []
+    pages = {'/': html(''.join(f'<a href="/p{i}">p{i}</a>' for i in range(9)))}
+    pages.update({f'/p{i}': html('leaf') for i in range(9)})
+
+    class Timed(http.server.BaseHTTPRequestHandler):
+        protocol_version = 'HTTP/1.1'
+
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            if self.command == 'GET':
+                stamps.append(time.time())
+            body = pages.get(self.path, 'not found').encode()
+            self.send_response(200 if self.path in pages else 404)
+            self.send_header('Content-Type', 'text/html')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            if self.command == 'GET':
+                self.wfile.write(body)
+
+        do_HEAD = do_GET
+
+    srv = serve(Timed, site)
+    try:
+        crawler = crawl(f'http://127.0.0.1:{site}/', delay=0.5, concurrency=5)
+        gaps = [b - a for a, b in zip(stamps, stamps[1:])]
+        result('delay: every page was fetched', len(crawler.crawl_results) == 10,
+               f'{len(crawler.crawl_results)} rows')
+        result('delay: fetches spaced by the configured 0.5s', min(gaps) >= 0.45,
+               f'smallest gap {min(gaps):.3f}s over {len(stamps)} GETs')
+    finally:
+        srv.shutdown()
+
+
 def _playwright_available():
     try:
         import playwright  # noqa: F401
@@ -620,6 +658,7 @@ TESTS = (
     test_duplicate_detection_is_linear,
     test_export_formats_apply_to_every_data_type,
     test_empty_alt_is_not_missing_alt,
+    test_crawl_delay_is_honoured,
 )
 
 

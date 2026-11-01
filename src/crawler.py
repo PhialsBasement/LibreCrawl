@@ -895,7 +895,7 @@ class WebCrawler:
                         if depth > self.config['max_depth']:
                             continue
 
-                        # Submit crawl task immediately - rate limiting happens inside the worker
+                        # Rate limiting happens in _crawl_url_with_requests
                         print(f"Submitting task for: {current_url}")
                         future = executor.submit(self._crawl_url, current_url, depth)
                         active_futures[future] = current_url
@@ -1019,6 +1019,11 @@ class WebCrawler:
         """Crawl a single URL using traditional HTTP requests"""
         print(f"Starting crawl of {url}")
         retries = self.config.get('retries', 3)
+
+        # Space out page fetches by the configured delay, as the
+        # JavaScript path does in its submit loop
+        if self.config.get('delay', 0) > 0:
+            self.rate_limiter.acquire()
         start_time = time.time()
 
         try:
