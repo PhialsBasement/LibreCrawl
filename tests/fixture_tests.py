@@ -98,7 +98,7 @@ def make_handler(routes, hits=None, slow_paths=(), slow_seconds=0.0):
     return Handler
 
 
-def crawl(url, timeout=120, **config):
+def crawl(url, timeout=120, url_list=None, **config):
     """Run a crawl to completion and return the crawler for inspection."""
     crawler = WebCrawler()
     crawler.config.update({
@@ -108,7 +108,7 @@ def crawl(url, timeout=120, **config):
     })
     crawler.config.update(config)
 
-    ok, message = crawler.start_crawl(url)
+    ok, message = crawler.start_crawl(url, url_list=url_list)
     assert ok, message
     deadline = time.time() + timeout
     while crawler.is_running and time.time() < deadline:
@@ -639,6 +639,117 @@ def test_crawl_delay_is_honoured():
         srv.shutdown()
 
 
+def test_list_mode_fetches_only_the_list():
+    """List mode fetches the listed URLs across any number of sites,
+    follows no links, skips sitemaps and honours robots.txt."""
+    site_a, site_b = BASE_PORT + 13, BASE_PORT + 14
+    a_hits, b_hits = [], []
+    a = serve(make_handler({
+        '/robots.txt': 'User-agent: *\nDisallow: /private\n',
+        '/a': html('<a href="/b">b</a><a href="/c">c</a><img src="/i.png">'),
+        '/b': html('never listed'),
+        '/c': html('<a href="/b">b</a>'),
+        '/private': html('secret'),
+        '/i.png': png(),
+    }, hits=a_hits), site_a)
+    b = serve(make_handler({
+        '/x': html(f'<a href="http://127.0.0.1:{site_a}/b">b</a>'),
+    }, hits=b_hits), site_b)
+    base_a, base_b = f'http://127.0.0.1:{site_a}', f'http://127.0.0.1:{site_b}'
+    listed = [f'{base_a}/a', f'{base_a}/c', f'{base_b}/x', f'{base_a}/a',
+              '', f'{base_a}/private', f'{base_a}/missing']
+    try:
+        crawler = crawl(listed[0], url_list=listed, respect_robots=True,
+                        discover_sitemaps=True, max_depth=4)
+        rows = {r['url']: r for r in crawler.crawl_results}
+        expected = {f'{base_a}/a', f'{base_a}/c', f'{base_b}/x',
+                    f'{base_a}/private', f'{base_a}/missing'}
+        result('list: one row per listed URL, duplicates and blanks dropped',
+               set(rows) == expected and len(crawler.crawl_results) == 5,
+               str(sorted(rows)))
+        result('list: links are recorded but never followed',
+               'GET /b' not in a_hits
+               and any(l['target_url'].endswith('/b') for l in crawler.link_manager.all_links),
+               str(a_hits))
+        result('list: pages on a second site are crawled too',
+               rows.get(f'{base_b}/x', {}).get('status_code') == 200)
+        result('list: sitemap discovery is skipped',
+               all('sitemap' not in h for h in a_hits + b_hits), str(a_hits))
+        private = rows.get(f'{base_a}/private', {})
+        result('list: robots.txt disallowed URL is reported, not fetched',
+               private.get('error_type') == 'blocked_by_robots'
+               and 'GET /private' not in a_hits, str(private.get('error_type')))
+        result('list: broken listed URL reports its status',
+               rows.get(f'{base_a}/missing', {}).get('status_code') == 404)
+        result('list: crawl is flagged as list mode in the config snapshot',
+               crawler.config.get('list_mode') is True)
+
+        empty = WebCrawler()
+        ok, message = empty.start_crawl('', url_list=['', '   '])
+        result('list: an empty list is rejected', not ok, message)
+    finally:
+        a.shutdown()
+        b.shutdown()
+
+
+def test_custom_extraction():
+    """CSS and XPath rules pull values from every page, show up as one
+    export column each, and bad selectors are refused when saving."""
+    os.environ.setdefault('LOCAL_MODE', 'true')
+    import main as app_module
+    from src.settings_manager import SettingsManager
+
+    site = BASE_PORT + 15
+    product = html(
+        '<h1 class="name">Blue <em>Mug</em></h1>'
+        '<span class="price" data-currency="EUR"> 9.50 </span>'
+        '<ul><li class="tag">kitchen</li><li class="tag">gift</li></ul>'
+        '<a href="/other">other</a>')
+    srv = serve(make_handler({'/': product, '/other': html('<p>no product</p>')}), site)
+    rules = [
+        {'name': 'Name', 'type': 'css', 'selector': 'h1.name', 'mode': 'text'},
+        {'name': 'Name HTML', 'type': 'css', 'selector': 'h1.name', 'mode': 'inner_html'},
+        {'name': 'Currency', 'type': 'xpath', 'mode': 'attribute', 'attribute': 'data-currency',
+         'selector': '//span[@class="price"]'},
+        {'name': 'Price', 'type': 'xpath', 'selector': 'normalize-space(//span[@class="price"])'},
+        {'name': 'Tags', 'type': 'xpath', 'selector': '//li[@class="tag"]/text()'},
+        {'name': 'Tag count', 'type': 'xpath', 'selector': 'count(//li[@class="tag"])'},
+    ]
+    try:
+        crawler = crawl(f'http://127.0.0.1:{site}/', custom_extractors=rules)
+        rows = {r['url'].rsplit('/', 1)[-1]: r for r in crawler.crawl_results}
+        got = rows.get('', {}).get('custom_extraction', {})
+        want = {'Name': ['Blue Mug'], 'Name HTML': ['Blue <em>Mug</em>'],
+                'Currency': ['EUR'], 'Price': ['9.50'], 'Tags': ['kitchen', 'gift'],
+                'Tag count': ['2']}
+        result('extract: css and xpath rules return the expected values', got == want, str(got))
+        other = rows.get('other', {}).get('custom_extraction', {})
+        result('extract: a page without matches gets empty lists, not errors',
+               other.get('Name') == [] and other.get('Tag count') == ['0'], str(other))
+
+        flat, fields = app_module.flatten_custom_extraction(
+            crawler.crawl_results, ['url', 'custom_extraction', 'title'])
+        result('extract: export gets one column per extractor, in rule order',
+               fields == ['url', 'extract_name', 'extract_name_html', 'extract_currency',
+                          'extract_price', 'extract_tags', 'extract_tag_count', 'title'],
+               str(fields))
+        home = next(r for r in flat if r['url'].endswith(f'{site}/'))
+        result('extract: multiple matches are joined in tabular exports',
+               home['extract_tags'] == 'kitchen | gift', home['extract_tags'])
+
+        manager = SettingsManager(tier='admin')
+        settings = manager.get_settings()
+        settings['customExtractors'] = [{'name': 'Bad', 'type': 'xpath', 'selector': '//div['}]
+        ok, message = manager.save_settings(settings)
+        result('extract: an invalid XPath is refused with its name',
+               not ok and '"Bad"' in message, message)
+        settings['customExtractors'] = rules
+        ok, message = manager.save_settings(settings)
+        result('extract: valid rules save', ok, message)
+    finally:
+        srv.shutdown()
+
+
 def _playwright_available():
     try:
         import playwright  # noqa: F401
@@ -659,6 +770,8 @@ TESTS = (
     test_export_formats_apply_to_every_data_type,
     test_empty_alt_is_not_missing_alt,
     test_crawl_delay_is_honoured,
+    test_list_mode_fetches_only_the_list,
+    test_custom_extraction,
 )
 
 

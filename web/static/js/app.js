@@ -35,8 +35,16 @@ let virtualScrollers = {
     external: null,
     internalLinks: null,
     externalLinks: null,
-    issues: null
+    issues: null,
+    extraction: null
 };
+
+// 'spider' follows links from one URL; 'list' checks a pasted list
+let crawlMode = 'spider';
+const MAX_LIST_URLS = 100000;
+
+// Extractor names currently shown as Custom Extraction columns
+let extractionColumns = [];
 
 // Initialize application
 document.addEventListener('DOMContentLoaded', async function() {
@@ -166,8 +174,12 @@ async function initializeApp() {
         }
     }
 
-    // Set initial focus
-    document.getElementById('urlInput').focus();
+    // Restore the crawl mode picked last time in this browser
+    let savedMode = 'spider';
+    try {
+        savedMode = localStorage.getItem('librecrawl_crawl_mode') || 'spider';
+    } catch (e) { /* storage unavailable */ }
+    setCrawlMode(savedMode === 'list' ? 'list' : 'spider');
 
     console.log('LibreCrawl initialized');
 }
@@ -181,7 +193,7 @@ function setupEventListeners() {
 }
 
 function handleUrlKeypress(event) {
-    if (event.key === 'Enter' && !crawlState.isRunning) {
+    if (event.key === 'Enter' && crawlMode === 'spider' && !crawlState.isRunning) {
         toggleCrawl();
     }
 }
@@ -196,7 +208,92 @@ function toggleCrawl() {
     }
 }
 
+// ---- Crawl mode (Spider / List) ----
+
+function setCrawlMode(mode) {
+    if (crawlState.isRunning) return;
+    crawlMode = mode === 'list' ? 'list' : 'spider';
+    try {
+        localStorage.setItem('librecrawl_crawl_mode', crawlMode);
+    } catch (e) { /* storage unavailable */ }
+
+    const isList = crawlMode === 'list';
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+        const active = btn.dataset.mode === crawlMode;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    document.getElementById('urlInput').style.display = isList ? 'none' : '';
+    document.getElementById('listInputGroup').style.display = isList ? 'block' : 'none';
+
+    const label = document.getElementById('urlInputLabel');
+    label.textContent = isList ? 'URLs to Check' : 'URL to Crawl';
+    label.htmlFor = isList ? 'urlListInput' : 'urlInput';
+
+    updateListCount();
+    document.getElementById(isList ? 'urlListInput' : 'urlInput').focus();
+}
+
+// Pull URLs out of pasted text or a .txt/.csv file. Accepts one
+// URL per line or per CSV cell; header cells and other non-URL
+// tokens are skipped. Order is kept, duplicates dropped.
+function parseUrlList(text) {
+    const urls = [];
+    const seen = new Set();
+    let skipped = 0;
+    (text || '').split(/[\s,;]+/).forEach(raw => {
+        const token = raw.trim().replace(/^["']+|["']+$/g, '');
+        if (!token || token.startsWith('#')) return;
+        const looksLikeUrl = /^https?:\/\//i.test(token) ||
+            /^[^\s\/]+\.[a-z]{2,}(:\d+)?(\/|$)/i.test(token) ||
+            /^localhost(:\d+)?(\/|$)/i.test(token);
+        const url = looksLikeUrl ? normalizeUrl(token) : null;
+        if (!url || !isValidUrl(url)) {
+            skipped++;
+            return;
+        }
+        if (!seen.has(url)) {
+            seen.add(url);
+            urls.push(url);
+        }
+    });
+    return { urls, skipped };
+}
+
+function updateListCount() {
+    const countEl = document.getElementById('urlListCount');
+    if (!countEl) return;
+    const { urls, skipped } = parseUrlList(document.getElementById('urlListInput').value);
+    let text = `${urls.length.toLocaleString()} URL${urls.length === 1 ? '' : 's'}`;
+    if (skipped) text += ` (${skipped.toLocaleString()} non-URL entr${skipped === 1 ? 'y' : 'ies'} ignored)`;
+    if (urls.length > MAX_LIST_URLS) text += `, over the ${MAX_LIST_URLS.toLocaleString()} limit`;
+    countEl.textContent = text;
+    countEl.classList.toggle('list-count-over', urls.length > MAX_LIST_URLS);
+}
+
+function loadUrlListFile(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+        const textarea = document.getElementById('urlListInput');
+        const existing = textarea.value.trim();
+        textarea.value = existing ? existing + '\n' + reader.result : reader.result;
+        updateListCount();
+        showNotification(`Loaded ${file.name}`, 'success');
+    };
+    reader.onerror = () => showNotification(`Could not read ${file.name}`, 'error');
+    reader.readAsText(file);
+    // Let the same file be picked again after edits
+    event.target.value = '';
+}
+
 function startCrawl() {
+    if (crawlMode === 'list') {
+        startListCrawl();
+        return;
+    }
+
     const urlInput = document.getElementById('urlInput');
     let url = urlInput.value.trim();
 
@@ -218,6 +315,28 @@ function startCrawl() {
     // Update the input field with the normalized URL
     urlInput.value = url;
 
+    beginCrawl(url, null);
+}
+
+function startListCrawl() {
+    const textarea = document.getElementById('urlListInput');
+    const { urls } = parseUrlList(textarea.value);
+
+    if (urls.length === 0) {
+        alert('Paste or upload at least one URL to check');
+        textarea.focus();
+        return;
+    }
+    if (urls.length > MAX_LIST_URLS) {
+        alert(`List mode accepts up to ${MAX_LIST_URLS.toLocaleString()} URLs; this list has ${urls.length.toLocaleString()}`);
+        return;
+    }
+
+    beginCrawl(urls[0], urls);
+}
+
+// Shared start sequence; urlList is null for a spider crawl
+function beginCrawl(url, urlList) {
     crawlState.isRunning = true;
     crawlState.isPaused = false;
     crawlState.startTime = new Date();
@@ -232,14 +351,14 @@ function startCrawl() {
     // Update UI
     updateCrawlButtons();
     showProgress();
-    updateStatus('Starting crawl...');
+    updateStatus(urlList ? `Starting list check of ${urlList.length.toLocaleString()} URLs...` : 'Starting crawl...');
 
     // Clear previous data
     clearAllTables();
     resetStats();
 
     // Start the actual crawling via Python backend
-    startPythonCrawl(url);
+    startPythonCrawl(url, urlList);
 }
 
 function pauseCrawl() {
@@ -344,25 +463,27 @@ function clearCrawlData() {
     document.getElementById('urlInput').focus();
 }
 
-function startPythonCrawl(url) {
+function startPythonCrawl(url, urlList) {
+    const payload = urlList ? { url: url, mode: 'list', urls: urlList } : { url: url };
+
     // Call Python backend to start crawling
     fetch('/api/start_crawl', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ url: url })
+        body: JSON.stringify(payload)
     })
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            updateStatus('Crawling in progress...');
+            updateStatus(urlList ? 'Checking listed URLs...' : 'Crawling in progress...');
             // Refresh user info to update crawl count
             loadUserInfo();
             // Start polling for updates
             pollCrawlProgress();
         } else {
-            updateStatus('Error: ' + data.error);
+            updateStatus('Error: ' + (data.error || data.message || 'could not start'));
             stopCrawl();
         }
     })
@@ -533,6 +654,10 @@ function overviewUrls() {
 // Rebuild the URL virtual scrollers from crawlState.urls, honoring the
 // active sidebar filter if one is set
 function refreshUrlTables() {
+    if (isExtractionTabActive()) {
+        refreshExtractionTable();
+    }
+
     if (crawlState.filters.active) {
         applyFilter(crawlState.filters.active);
         return;
@@ -607,6 +732,13 @@ function updateCrawlButtons() {
     const clearBtn = document.getElementById('clearBtn');
     const saveCrawlBtn = document.getElementById('saveCrawlBtn');
     const loadCrawlBtn = document.getElementById('loadCrawlBtn');
+
+    // The crawl mode is fixed once a crawl is under way
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+        btn.disabled = crawlState.isRunning;
+    });
+    const listInput = document.getElementById('urlListInput');
+    if (listInput) listInput.readOnly = crawlState.isRunning;
 
     if (crawlState.isRunning) {
         if (crawlState.isPaused) {
@@ -788,6 +920,16 @@ function initializeVirtualScrollers() {
             console.log('External links virtual scroller initialized');
         }
 
+        // Custom extraction table (columns follow the extractors)
+        const extractionContainer = document.querySelector('#extraction-tab .table-container');
+        if (extractionContainer && extractionContainer.querySelector('tbody')) {
+            virtualScrollers.extraction = new VirtualScroller(extractionContainer, {
+                rowHeight: 60,
+                buffer: 25,
+                renderRow: renderExtractionRow
+            });
+        }
+
         // Issues table
         const issuesContainer = document.querySelector('#issues-tab .table-container');
         if (issuesContainer && issuesContainer.querySelector('tbody')) {
@@ -806,6 +948,76 @@ function initializeVirtualScrollers() {
 function isLinksTabActive() {
     const linksTab = document.getElementById('links-tab');
     return linksTab && linksTab.classList.contains('active');
+}
+
+function isExtractionTabActive() {
+    const tab = document.getElementById('extraction-tab');
+    return tab && tab.classList.contains('active');
+}
+
+// Rows with extraction results; the table only redraws while its
+// tab is showing, and catches up when the tab is opened
+function refreshExtractionTable() {
+    const scroller = virtualScrollers.extraction;
+    if (!scroller) return;
+
+    const rows = crawlState.urls.filter(u => u.custom_extraction);
+    const names = [];
+    const seen = new Set();
+    rows.forEach(u => Object.keys(u.custom_extraction).forEach(name => {
+        if (!seen.has(name)) {
+            seen.add(name);
+            names.push(name);
+        }
+    }));
+
+    if (names.join('\u0000') !== extractionColumns.join('\u0000')) {
+        extractionColumns = names;
+        rebuildExtractionHeader();
+    }
+
+    const empty = document.getElementById('extractionEmpty');
+    if (empty) empty.style.display = rows.length ? 'none' : 'block';
+    scroller.setData(rows);
+}
+
+function rebuildExtractionHeader() {
+    const headerRow = document.getElementById('extractionHeaderRow');
+    if (!headerRow) return;
+    headerRow.innerHTML = '';
+    ['Address', 'Status', ...extractionColumns].forEach(label => {
+        const th = document.createElement('th');
+        th.textContent = label;
+        headerRow.appendChild(th);
+    });
+
+    // Spacer rows span the whole table
+    const scroller = virtualScrollers.extraction;
+    if (scroller) {
+        scroller.topSpacer.firstChild.colSpan = extractionColumns.length + 2;
+        scroller.bottomSpacer.firstChild.colSpan = extractionColumns.length + 2;
+    }
+    if (window.ColumnResizer) {
+        new ColumnResizer(document.getElementById('extractionTable'));
+    }
+}
+
+function renderExtractionRow(row, urlData) {
+    const status = urlData.status_code ||
+        getStatusCodeText(0, urlData.error_type);
+    row.appendChild(makeTextCell(urlData.url, 'break-all'));
+    row.appendChild(makeTextCell(status));
+
+    const extracted = urlData.custom_extraction || {};
+    extractionColumns.forEach(name => {
+        const values = extracted[name] || [];
+        const full = values.join(' | ');
+        const shown = full.length > 300 ? full.substring(0, 300) + '…' : full;
+        const cell = makeTextCell(shown, 'break-word');
+        if (shown !== full) cell.title = full;
+        if (values.length > 1) cell.dataset.count = values.length;
+        row.appendChild(cell);
+    });
 }
 
 function isIssuesTabActive() {
@@ -1016,6 +1228,15 @@ function clearAllTables() {
     if (virtualScrollers.issues) {
         virtualScrollers.issues.clear();
     }
+    if (virtualScrollers.extraction) {
+        virtualScrollers.extraction.clear();
+    }
+    if (extractionColumns.length) {
+        extractionColumns = [];
+        rebuildExtractionHeader();
+    }
+    const extractionEmpty = document.getElementById('extractionEmpty');
+    if (extractionEmpty) extractionEmpty.style.display = 'block';
 
     // Clear status codes table (not virtualized)
     const statusCodesBody = document.getElementById('statusCodesTableBody');
@@ -1093,6 +1314,10 @@ function switchTab(tabName) {
     if (tabName === 'links' && crawlState.pendingLinks) {
         updateLinksTable(crawlState.pendingLinks);
         crawlState.pendingLinks = null; // Clear pending data
+    }
+
+    if (tabName === 'extraction') {
+        refreshExtractionTable();
     }
 
     // Load pending issues data if switching to Issues tab
@@ -1485,6 +1710,7 @@ function getStatusCodeText(statusCode, errorType) {
             case 'ssl_error':           return 'SSL/TLS Error';
             case 'connection_error':    return 'Connection Error';
             case 'file_too_large':      return 'Skipped (file too large)';
+            case 'blocked_by_robots':   return 'Blocked by robots.txt';
             default:                    return 'No Response';
         }
     } else {
@@ -1891,6 +2117,19 @@ function showUrlDetails(url) {
                                 ${urlData.error ? `<div><strong>Error:</strong> ${escapeHtml(urlData.error)}</div>` : ''}
                             </div>
                         </div>
+
+                        ${urlData.custom_extraction && Object.keys(urlData.custom_extraction).length ? `
+                        <div class="details-section">
+                            <h4>🧩 Custom Extraction</h4>
+                            <div class="details-grid">
+                                ${Object.entries(urlData.custom_extraction).map(([name, values]) => `
+                                    <div><strong>${escapeHtml(name)}:</strong> ${(values && values.length)
+                                        ? values.map(v => `<span class="extract-value">${escapeHtml(v)}</span>`).join(' ')
+                                        : '<span style="color:#9ca3af">no match</span>'}</div>
+                                `).join('')}
+                            </div>
+                        </div>
+                        ` : ''}
 
                         ${(urlData.linked_from && urlData.linked_from.length > 0) ? `
                         <div class="details-section">

@@ -32,7 +32,15 @@
         <section class="url-section">
             <div class="url-container">
                 <div class="input-group">
-                    <label for="urlInput" class="input-label">URL to Crawl</label>
+                    <div class="input-label-row">
+                        <label for="urlInput" class="input-label" id="urlInputLabel">URL to Crawl</label>
+                        <div class="mode-toggle" role="group" aria-label="Crawl mode">
+                            <button type="button" class="mode-btn active" data-mode="spider" onclick="setCrawlMode('spider')"
+                                    title="Start from one URL and follow its links">Spider</button>
+                            <button type="button" class="mode-btn" data-mode="list" onclick="setCrawlMode('list')"
+                                    title="Check exactly the URLs you paste or upload, without following links">List</button>
+                        </div>
+                    </div>
                     <input
                         type="url"
                         id="urlInput"
@@ -40,6 +48,18 @@
                         placeholder="https://example.com"
                         onkeypress="handleUrlKeypress(event)"
                     >
+                    <div id="listInputGroup" class="list-input-group" style="display: none;">
+                        <textarea id="urlListInput" class="url-input url-list-input" rows="5" spellcheck="false"
+                                  placeholder="Paste URLs, one per line&#10;https://example.com/&#10;https://example.com/pricing"
+                                  oninput="updateListCount()"></textarea>
+                        <div class="list-input-footer">
+                            <span id="urlListCount" class="list-count">0 URLs</span>
+                            <label class="btn btn-secondary btn-small list-upload-btn">
+                                Upload .txt / .csv
+                                <input type="file" id="urlListFile" accept=".txt,.csv,text/plain,text/csv" onchange="loadUrlListFile(event)" hidden>
+                            </label>
+                        </div>
+                    </div>
                 </div>
                 <div class="control-buttons">
                     <button id="startBtn" class="btn btn-primary" onclick="toggleCrawl()">
@@ -193,6 +213,7 @@
                         <button class="tab-btn" onclick="switchTab('status-codes')">Status Codes</button>
                         <button class="tab-btn" onclick="switchTab('links')">Links</button>
                         <button class="tab-btn" onclick="switchTab('issues')">Issues</button>
+                        <button class="tab-btn" onclick="switchTab('extraction')">Custom Extraction</button>
                         <button class="tab-btn" onclick="switchTab('pagespeed')">PageSpeed</button>
                         <button class="tab-btn" onclick="switchTab('visualization')">Visualization</button>
                     </div>
@@ -398,6 +419,26 @@
                             </div>
                         </div>
 
+                        <div id="extraction-tab" class="tab-pane">
+                            <div id="extractionEmpty" class="extraction-empty">
+                                No custom extraction data yet. Add CSS selector or XPath rules under
+                                <strong>Settings &rsaquo; Extraction</strong>, then start a crawl.
+                            </div>
+                            <div class="table-container">
+                                <table class="data-table" id="extractionTable">
+                                    <thead>
+                                        <tr id="extractionHeaderRow">
+                                            <th>Address</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="extractionTableBody">
+                                        <!-- Data will be populated here -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
                         <div id="pagespeed-tab" class="tab-pane">
                             <div class="pagespeed-container">
                                 <div class="pagespeed-header">
@@ -519,6 +560,7 @@
                     <button class="settings-tab-btn" onclick="switchSettingsTab('filters')">Filters</button>
                     <button class="settings-tab-btn" onclick="switchSettingsTab('export')">Export</button>
                     <button class="settings-tab-btn" onclick="switchSettingsTab('javascript')">JavaScript</button>
+                    <button class="settings-tab-btn" onclick="switchSettingsTab('extraction')">Extraction</button>
                     <button class="settings-tab-btn" onclick="switchSettingsTab('issues')">Issue Exclusion</button>
                     <button class="settings-tab-btn" onclick="switchSettingsTab('customcss')">Custom CSS</button>
                     <button class="settings-tab-btn" onclick="switchSettingsTab('advanced')">Advanced</button>
@@ -799,6 +841,10 @@
                                 Robots Meta
                             </label>
                             <label class="checkbox-label">
+                                <input type="checkbox" name="exportFields" value="custom_extraction">
+                                Custom Extraction (one column per extractor)
+                            </label>
+                            <label class="checkbox-label">
                                 <input type="checkbox" name="exportFields" value="issues_detected">
                                 Issues Detected (separate export)
                             </label>
@@ -874,6 +920,34 @@
                         <div style="background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.3); border-radius: 6px; padding: 12px; color: #fbbf24;">
                             <strong>⚠️ Performance Impact</strong><br>
                             JavaScript rendering is significantly slower than HTTP-only crawling. Use for sites with dynamic content or when static crawling produces incomplete results.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Custom Extraction Settings -->
+                <div id="extraction-settings" class="settings-tab-content">
+                    <h3>Custom Extraction</h3>
+                    <p class="setting-help">Pull any value out of every crawled HTML page with a CSS selector or an XPath expression: prices, SKUs, authors, publish dates, schema fields, tracking IDs. Each extractor becomes a column in the Custom Extraction tab and in exports.</p>
+
+                    <div class="setting-group">
+                        <div class="extractor-head">
+                            <span>Name</span><span>Type</span><span>Selector / expression</span><span>Extract</span><span>Attribute</span><span></span>
+                        </div>
+                        <div id="extractorRows" class="extractor-rows"></div>
+                        <div class="extractor-actions">
+                            <button type="button" class="btn btn-secondary btn-small" onclick="addExtractorRow()">+ Add extractor</button>
+                            <span id="extractorError" class="extractor-error" role="alert"></span>
+                        </div>
+                    </div>
+
+                    <div class="setting-group">
+                        <div style="background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 6px; padding: 12px; line-height: 1.7;">
+                            <strong>Examples</strong><br>
+                            CSS <code>.product-price</code> with <em>Text</em> reads the visible price<br>
+                            CSS <code>link[rel=alternate]</code> with <em>Attribute</em> <code>hreflang</code> lists hreflang codes<br>
+                            XPath <code>//meta[@property='article:published_time']/@content</code> reads a publish date<br>
+                            XPath <code>count(//a[contains(@href,'/product/')])</code> counts product links<br>
+                            Selectors run on the raw HTML, or on the rendered DOM when JavaScript rendering is on. Up to 50 matches per extractor are kept.
                         </div>
                     </div>
                 </div>

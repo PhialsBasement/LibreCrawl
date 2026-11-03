@@ -58,6 +58,9 @@ let defaultSettings = {
     // Custom CSS styling
     customCSS: '',
 
+    // Custom extraction rules
+    customExtractors: [],
+
     // Issue exclusion patterns
     issueExclusionPatterns: `# WordPress admin & system paths
 /wp-admin/*
@@ -350,8 +353,8 @@ function applyTierRestrictions(tier) {
     const tierTabs = {
         'guest': [],  // No settings tabs for guests
         'user': ['crawler', 'export', 'issues'],
-        'extra': ['crawler', 'export', 'issues', 'filters', 'requests', 'customcss', 'javascript'],
-        'admin': ['crawler', 'requests', 'filters', 'export', 'javascript', 'issues', 'customcss', 'advanced']
+        'extra': ['crawler', 'export', 'issues', 'filters', 'requests', 'customcss', 'javascript', 'extraction'],
+        'admin': ['crawler', 'requests', 'filters', 'export', 'javascript', 'extraction', 'issues', 'customcss', 'advanced']
     };
 
     const allowedTabs = tierTabs[tier] || [];
@@ -431,6 +434,8 @@ function populateSettingsForm() {
         checkbox.checked = currentSettings.exportFields.includes(checkbox.value);
     });
 
+    renderExtractorRows(currentSettings.customExtractors || []);
+
     // Show/hide proxy settings
     const enableProxy = currentSettings.enableProxy;
     const proxySettings = document.getElementById('proxySettings');
@@ -485,7 +490,138 @@ function collectSettingsFromForm() {
     const exportFieldsCheckboxes = document.querySelectorAll('input[name="exportFields"]:checked');
     settings.exportFields = Array.from(exportFieldsCheckboxes).map(cb => cb.value);
 
+    settings.customExtractors = collectExtractorRows();
+
     return settings;
+}
+
+// ---- Custom extraction rule editor ----
+
+const EXTRACT_MODE_LABELS = {
+    text: 'Text',
+    inner_html: 'Inner HTML',
+    outer_html: 'Outer HTML',
+    attribute: 'Attribute'
+};
+
+function renderExtractorRows(rules) {
+    const container = document.getElementById('extractorRows');
+    if (!container) return;
+    container.innerHTML = '';
+    (rules.length ? rules : [{}]).forEach(rule => addExtractorRow(rule));
+    setExtractorError('');
+}
+
+function addExtractorRow(rule = {}) {
+    const container = document.getElementById('extractorRows');
+    if (!container) return;
+
+    const row = document.createElement('div');
+    row.className = 'extractor-row';
+
+    const name = document.createElement('input');
+    name.type = 'text';
+    name.className = 'ex-name';
+    name.placeholder = 'e.g. Price';
+    name.value = rule.name || '';
+
+    const type = document.createElement('select');
+    type.className = 'ex-type';
+    [['css', 'CSS'], ['xpath', 'XPath']].forEach(([value, label]) => {
+        type.add(new Option(label, value, false, (rule.type || 'css') === value));
+    });
+
+    const selector = document.createElement('input');
+    selector.type = 'text';
+    selector.className = 'ex-selector';
+    selector.spellcheck = false;
+    selector.value = rule.selector || '';
+
+    const mode = document.createElement('select');
+    mode.className = 'ex-mode';
+    Object.entries(EXTRACT_MODE_LABELS).forEach(([value, label]) => {
+        mode.add(new Option(label, value, false, (rule.mode || 'text') === value));
+    });
+
+    const attribute = document.createElement('input');
+    attribute.type = 'text';
+    attribute.className = 'ex-attribute';
+    attribute.placeholder = 'e.g. content';
+    attribute.value = rule.attribute || '';
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'ex-remove';
+    remove.title = 'Remove extractor';
+    remove.textContent = '×';
+    remove.onclick = () => {
+        row.remove();
+        if (!container.children.length) addExtractorRow();
+    };
+
+    const sync = () => {
+        selector.placeholder = type.value === 'xpath'
+            ? "e.g. //span[@class='price']" : 'e.g. .product .price';
+        attribute.disabled = mode.value !== 'attribute';
+    };
+    type.addEventListener('change', sync);
+    mode.addEventListener('change', sync);
+    sync();
+
+    row.append(name, type, selector, mode, attribute, remove);
+    container.appendChild(row);
+}
+
+function collectExtractorRows() {
+    return Array.from(document.querySelectorAll('#extractorRows .extractor-row'))
+        .map(row => ({
+            name: row.querySelector('.ex-name').value.trim(),
+            type: row.querySelector('.ex-type').value,
+            selector: row.querySelector('.ex-selector').value.trim(),
+            mode: row.querySelector('.ex-mode').value,
+            attribute: row.querySelector('.ex-attribute').value.trim()
+        }))
+        .filter(rule => rule.name || rule.selector);
+}
+
+function setExtractorError(message) {
+    const el = document.getElementById('extractorError');
+    if (el) el.textContent = message;
+}
+
+// Browser-side syntax check for instant feedback. The server
+// re-validates with its own parsers (soupsieve, lxml).
+function validateExtractors(rules) {
+    const errors = [];
+    const seen = new Set();
+    rules.forEach(rule => {
+        const label = rule.name || rule.selector;
+        if (!(rule.name && rule.selector)) {
+            errors.push(`Extractor "${label}" needs both a name and a selector`);
+            return;
+        }
+        if (seen.has(rule.name)) {
+            errors.push(`Extractor name "${rule.name}" is used twice`);
+        }
+        seen.add(rule.name);
+        if (rule.mode === 'attribute' && !rule.attribute) {
+            errors.push(`Extractor "${rule.name}" needs an attribute name`);
+        }
+        try {
+            if (rule.type === 'xpath') {
+                document.createExpression(rule.selector);
+            } else {
+                document.createDocumentFragment().querySelector(rule.selector);
+            }
+        } catch (e) {
+            const kind = rule.type === 'xpath' ? 'XPath' : 'CSS selector';
+            errors.push(`Extractor "${rule.name}" has an invalid ${kind}`);
+        }
+    });
+    if (rules.length > 30) {
+        errors.push('At most 30 extractors are allowed');
+    }
+    return errors;
 }
 
 function saveSettings() {
@@ -654,6 +790,10 @@ function validateSettings(settings) {
     if (settings.exportFields.length === 0) {
         errors.push('At least one export field must be selected');
     }
+
+    const extractorErrors = validateExtractors(settings.customExtractors || []);
+    setExtractorError(extractorErrors.join('. '));
+    errors.push(...extractorErrors);
 
     return {
         valid: errors.length === 0,

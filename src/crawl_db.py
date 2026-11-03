@@ -136,6 +136,12 @@ def init_crawl_tables():
         except sqlite3.OperationalError:
             pass  # Column already exists
 
+        # Migration: custom_extraction, JSON {rule name: [values]}
+        try:
+            cursor.execute('ALTER TABLE crawled_urls ADD COLUMN custom_extraction TEXT')
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
         # Links table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS crawl_links (
@@ -314,7 +320,9 @@ def save_url_batch(crawl_id, urls):
                     url_data.get('javascript_rendered', False),
                     url_data.get('error_type'),
                     url_data.get('render_time'),
-                    url_data.get('link_check_only', False)
+                    url_data.get('link_check_only', False),
+                    (json.dumps(url_data['custom_extraction'])
+                     if url_data.get('custom_extraction') is not None else None)
                 )
                 rows.append(row)
 
@@ -326,8 +334,8 @@ def save_url_batch(crawl_id, urls):
                     meta_tags, og_tags, twitter_tags, json_ld, analytics, images,
                     hreflang, schema_org, redirects, linked_from,
                     external_links, internal_links, response_time, javascript_rendered,
-                    error_type, render_time, link_check_only
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    error_type, render_time, link_check_only, custom_extraction
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', rows)
 
             print(f"Saved {len(urls)} URLs to database for crawl {crawl_id}")
@@ -537,6 +545,14 @@ def load_crawled_urls(crawl_id, limit=None, offset=0):
                             url_data[field] = json.loads(url_data[field])
                         except:
                             url_data[field] = []
+
+                # Rows saved without extraction rules keep no key
+                extraction = url_data.pop('custom_extraction', None)
+                if extraction:
+                    try:
+                        url_data['custom_extraction'] = json.loads(extraction)
+                    except ValueError:
+                        pass
 
                 urls.append(url_data)
 

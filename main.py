@@ -9,6 +9,7 @@ import argparse
 import secrets
 import string
 import os
+import re
 import base64
 from io import StringIO, BytesIO
 from datetime import datetime, timedelta
@@ -326,6 +327,46 @@ def start_cleanup_thread():
     cleanup_thread = threading.Thread(target=cleanup_loop, daemon=True)
     cleanup_thread.start()
     print("Started crawler instance cleanup thread")
+
+def flatten_custom_extraction(urls, fields, join=True):
+    """Expand the custom_extraction export field into one column per
+    extractor, named extract_<name>, in the order the rules ran.
+
+    Returns (rows, fields). Rows are shallow per-row dicts holding only
+    the exported fields. Multiple matches are joined with " | " unless
+    ``join`` is False (JSON keeps them as a list).
+    """
+    if 'custom_extraction' not in fields:
+        return urls, fields
+
+    names = []
+    for url_data in urls:
+        for name in (url_data.get('custom_extraction') or {}):
+            if name not in names:
+                names.append(name)
+
+    columns = {}
+    for name in names:
+        slug = re.sub(r'[^0-9A-Za-z]+', '_', name).strip('_').lower() or 'field'
+        key, n = f'extract_{slug}', 2
+        while key in columns.values() or key in fields:
+            key, n = f'extract_{slug}_{n}', n + 1
+        columns[name] = key
+
+    at = fields.index('custom_extraction')
+    plain = [f for f in fields if f != 'custom_extraction']
+    new_fields = fields[:at] + list(columns.values()) + fields[at + 1:]
+
+    def row(url_data):
+        out = {f: url_data.get(f, '') for f in plain}
+        extracted = url_data.get('custom_extraction') or {}
+        for name, key in columns.items():
+            values = extracted.get(name) or []
+            out[key] = ' | '.join(values) if join else values
+        return out
+
+    return [row(u) for u in urls], new_fields
+
 
 def generate_csv_export(urls, fields):
     """Generate CSV export content"""
@@ -782,6 +823,14 @@ def start_crawl():
     data = request.get_json()
     url = data.get('url')
 
+    # List mode: crawl exactly these URLs, follow no links
+    url_list = None
+    if data.get('mode') == 'list':
+        url_list = data.get('urls')
+        if not isinstance(url_list, list) or len(url_list) == 0:
+            return jsonify({'success': False, 'error': 'List mode needs at least one URL'})
+        url = url or str(url_list[0])
+
     if not url:
         return jsonify({'success': False, 'error': 'URL is required'})
 
@@ -822,7 +871,8 @@ def start_crawl():
         crawler.config['demo_memory_limit_bytes'] = int(1.5 * 1024 * 1024 * 1024)  # 1.5GB
 
     # Pass user_id and session_id for database persistence
-    success, message = crawler.start_crawl(url, user_id=user_id, session_id=session_id)
+    success, message = crawler.start_crawl(url, user_id=user_id, session_id=session_id,
+                                           url_list=url_list)
 
     # Store crawl_id in session
     if success and crawler.crawl_id:
@@ -830,7 +880,12 @@ def start_crawl():
         # Also log to old crawl_history for compatibility
         log_crawl_start(user_id, url)
 
-    return jsonify({'success': success, 'message': message, 'crawl_id': crawler.crawl_id})
+    response = {'success': success, 'message': message, 'crawl_id': crawler.crawl_id}
+    if not success:
+        response['error'] = message
+    elif url_list is not None:
+        response['list_count'] = crawler.stats['discovered']
+    return jsonify(response)
 
 @app.route('/api/stop_crawl', methods=['POST'])
 @login_required
@@ -1430,6 +1485,9 @@ def export_stream():
             if not regular_fields:
                 return jsonify({'success': False, 'error': 'No fields selected'}), 400
 
+            urls, regular_fields = flatten_custom_extraction(
+                urls, regular_fields, join=export_format != 'json')
+
             if export_format == 'json':
                 return Response(
                     _stream_urls_json(urls, regular_fields),
@@ -1828,6 +1886,8 @@ def export_data():
 
         # Generate regular export if there are regular fields
         if regular_fields:
+            urls, regular_fields = flatten_custom_extraction(
+                urls, regular_fields, join=export_format != 'json')
             if export_format == 'csv':
                 regular_content = generate_csv_export(urls, regular_fields)
                 regular_mimetype = 'text/csv'

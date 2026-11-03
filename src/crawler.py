@@ -79,6 +79,10 @@ from src.core.issue_detector import IssueDetector
 from src.core.memory_monitor import MemoryMonitor
 from src.core.memory_profiler import UserMemoryTracker
 from src.core.event_log import CrawlEventLog
+from src.core.custom_extractor import CustomExtractor
+
+# Upper bound on URLs accepted for one list-mode crawl
+MAX_LIST_URLS = 100000
 
 
 class WebCrawler:
@@ -105,6 +109,7 @@ class WebCrawler:
         self.js_renderer = None
         self.sitemap_parser = None
         self.issue_detector = None
+        self.custom_extractor = None
         self.seo_extractor = SEOExtractor()
         self.memory_monitor = MemoryMonitor()
         self.user_memory = UserMemoryTracker()
@@ -149,8 +154,11 @@ class WebCrawler:
         # Thread reference
         self.crawl_thread = None
 
-        # Robots.txt cache
+        # Robots.txt cache, with one lock per robots URL so parallel
+        # workers on the same host fetch it once
         self._robots_cache = {}
+        self._robots_locks = {}
+        self._robots_locks_guard = threading.Lock()
 
         # HEAD status cache (avoids re-checking the same URL across pages)
         self._head_status_cache = {}
@@ -225,6 +233,8 @@ class WebCrawler:
             'js_viewport_width': 1920,
             'js_viewport_height': 1080,
             'js_max_concurrent_pages': 3,
+            'custom_extractors': [],
+            'list_mode': False,
             'issue_exclusion_patterns': [
                 # WordPress admin & system paths
                 '/wp-admin/*', '/wp-content/plugins/*', '/wp-content/themes/*', '/wp-content/uploads/*',
@@ -300,12 +310,43 @@ class WebCrawler:
             ]
         }
 
-    def start_crawl(self, url, user_id=None, session_id=None):
-        """Start crawling from the given URL"""
+    @staticmethod
+    def normalize_url_list(urls):
+        """Clean a pasted URL list: add a scheme where missing, drop
+        blanks and duplicates, keep the original order."""
+        cleaned, seen = [], set()
+        for raw in urls or []:
+            u = str(raw).strip()
+            if not u or u.startswith('#'):
+                continue
+            if not u.startswith(('http://', 'https://')):
+                u = 'https://' + u
+            if urlparse(u).netloc and u not in seen:
+                seen.add(u)
+                cleaned.append(u)
+        return cleaned
+
+    def start_crawl(self, url, user_id=None, session_id=None, url_list=None):
+        """Start crawling from the given URL.
+
+        With ``url_list`` the crawl runs in list mode: exactly those URLs
+        are fetched and analysed, links are recorded but never followed,
+        and sitemap discovery is skipped.
+        """
         if self.is_running:
             return False, "Crawl already in progress"
 
         try:
+            list_urls = None
+            if url_list is not None:
+                list_urls = self.normalize_url_list(url_list)
+                if not list_urls:
+                    return False, "The URL list has no valid URLs"
+                if len(list_urls) > MAX_LIST_URLS:
+                    return False, f"List mode accepts at most {MAX_LIST_URLS} URLs"
+                url = list_urls[0]
+            self.config['list_mode'] = list_urls is not None
+
             # Validate and normalize URL
             if not url.startswith(('http://', 'https://')):
                 url = 'https://' + url
@@ -334,14 +375,15 @@ class WebCrawler:
             # Reset state
             self._reset_state()
 
-            # Add initial URL
-            self.link_manager.add_url(url, 0)
-            self.stats['discovered'] = 1
+            # Seed the queue: the start URL, or the whole list
+            for seed in (list_urls or [url]):
+                self.link_manager.add_url(seed, 0)
+            self.stats['discovered'] = self.link_manager.get_stats()['discovered']
 
-            # Discover sitemaps in the background so the crawl (and the UI)
-            # starts immediately — sitemap probes can take many seconds on
-            # slow sites and used to block this request until they finished
-            if self.config.get('discover_sitemaps', True):
+            # Sitemaps are probed in the background so the crawl
+            # starts at once; slow sites took seconds per probe.
+            # List mode fetches only the list, so it skips them.
+            if self.config.get('discover_sitemaps', True) and not list_urls:
                 self._sitemap_discovery_done = False
                 threading.Thread(target=self._discover_sitemaps_background,
                                  args=(url,), daemon=True).start()
@@ -373,6 +415,10 @@ class WebCrawler:
         self.link_manager = LinkManager(self.base_domain, event_log=self.event_log)
         self.sitemap_parser = SitemapParser(self.session, self.base_domain, self.config['timeout'])
         self.issue_detector = IssueDetector(self.config.get('issue_exclusion_patterns', []))
+        extractor = CustomExtractor(self.config.get('custom_extractors') or [])
+        for error in extractor.errors:
+            print(f"Custom extraction rule skipped: {error}")
+        self.custom_extractor = extractor if extractor else None
 
         # Initialize JS renderer if needed
         if self.config.get('enable_javascript', False):
@@ -594,8 +640,11 @@ class WebCrawler:
                 print(f"Restored queue: {len(self.link_manager.discovered_urls)} pending, "
                       f"{len(self.link_manager.visited_urls)} visited")
 
-            # If queue is empty (no checkpoint or crawl crashed early), rebuild queue from links
-            if not self.link_manager.discovered_urls:
+            # If queue is empty (no checkpoint or crawl crashed early),
+            # rebuild it from links. List mode never follows links.
+            queue_empty = len(self.link_manager.discovered_urls) == 0
+            spider_mode = not self.config.get('list_mode')
+            if queue_empty and spider_mode:
                 print("Queue is empty - rebuilding from discovered links")
 
                 # Get all URLs from loaded links that haven't been crawled yet
@@ -793,9 +842,13 @@ class WebCrawler:
 
         try:
             # Get discovered URLs from link manager
+            # Spider mode caps the checkpoint (links rebuild the
+            # rest). A list cannot be rebuilt, so keep all of it.
             discovered_urls = []
             if hasattr(self.link_manager, 'discovered_urls'):
-                discovered_urls = list(self.link_manager.discovered_urls)[:1000]  # Limit to prevent huge checkpoints
+                discovered_urls = list(self.link_manager.discovered_urls)
+                if not self.config.get('list_mode'):
+                    discovered_urls = discovered_urls[:1000]
 
             # Get visited URLs
             visited_urls = []
@@ -1015,8 +1068,42 @@ class WebCrawler:
         else:
             return self._crawl_url_with_requests(url, depth)
 
+    def _robots_blocked_result(self, url, depth):
+        """In list mode, a row for a listed URL robots.txt disallows.
+
+        Spider mode filters these before queueing, but a list is seeded
+        directly, so the check happens at fetch time and the URL still
+        gets a row saying why it was skipped.
+        """
+        if self.config.get('list_mode') and self.config.get('respect_robots', True):
+            if self._check_robots_txt(url):
+                return None
+            result = self.seo_extractor.create_empty_result(
+                url, depth, 0, 'Blocked by robots.txt', error_type='blocked_by_robots')
+            result['is_internal'] = self.link_manager.is_internal(url)
+            return result
+        return None
+
+    def _apply_custom_extraction(self, soup, raw_html, result):
+        if self.custom_extractor:
+            result['custom_extraction'] = self.custom_extractor.extract(soup, raw_html)
+
+    def _should_follow_links(self, depth, content_is_internal):
+        """Whether a fetched page may seed the queue.
+
+        Gated on where the content lives: a page that redirected
+        off-domain is external content.
+        """
+        if self.config.get('list_mode') or depth >= self.config['max_depth']:
+            return False
+        return content_is_internal or self.config['crawl_external']
+
     def _crawl_url_with_requests(self, url, depth):
         """Crawl a single URL using traditional HTTP requests"""
+        blocked = self._robots_blocked_result(url, depth)
+        if blocked:
+            return blocked
+
         print(f"Starting crawl of {url}")
         retries = self.config.get('retries', 3)
 
@@ -1139,6 +1226,7 @@ class WebCrawler:
                 self.seo_extractor.extract_link_counts(soup, result, self.base_domain)
                 self.seo_extractor.extract_hreflang(soup, result)
                 self.seo_extractor.extract_schema_org(soup, result)
+                self._apply_custom_extraction(soup, response.content, result)
 
                 # Collect all links (returns only the ones new to this crawl)
                 new_links = self.link_manager.collect_all_links(soup, url, self.crawl_results,
@@ -1153,16 +1241,7 @@ class WebCrawler:
                     if self.db_save_enabled:
                         self.unsaved_links.extend(new_links)
 
-                # Extract links for further crawling. Gate on where the
-                # content actually lives: a page that redirected off-domain
-                # is external content and shouldn't seed the queue unless
-                # external crawling is enabled
-                should_extract = (
-                    (content_is_internal and depth < self.config['max_depth']) or
-                    (self.config['crawl_external'] and depth < self.config['max_depth'])
-                )
-
-                if should_extract:
+                if self._should_follow_links(depth, content_is_internal):
                     self.link_manager.extract_links(soup, url, depth + 1, self._should_crawl_url,
                                                     include_images=self.config.get('crawl_images', False),
                                                     base_url=final_url)
@@ -1185,7 +1264,9 @@ class WebCrawler:
 
     async def _crawl_url_with_javascript(self, url, depth):
         """Crawl a single URL using JavaScript rendering"""
-        start_time = time.time()
+        blocked = self._robots_blocked_result(url, depth)
+        if blocked:
+            return blocked
 
         try:
             # Render page with JavaScript
@@ -1267,6 +1348,7 @@ class WebCrawler:
             self.seo_extractor.extract_link_counts(soup, result, self.base_domain)
             self.seo_extractor.extract_hreflang(soup, result)
             self.seo_extractor.extract_schema_org(soup, result)
+            self._apply_custom_extraction(soup, html_content, result)
 
             # Collect all links (returns only the ones new to this crawl)
             new_links = self.link_manager.collect_all_links(soup, url, self.crawl_results,
@@ -1281,14 +1363,7 @@ class WebCrawler:
                 if self.db_save_enabled:
                     self.unsaved_links.extend(new_links)
 
-            # Extract links for further crawling. Gated on
-            # where the content lives, as in the HTTP path.
-            should_extract = (
-                (content_is_internal and depth < self.config['max_depth']) or
-                (self.config['crawl_external'] and depth < self.config['max_depth'])
-            )
-
-            if should_extract:
+            if self._should_follow_links(depth, content_is_internal):
                 self.link_manager.extract_links(soup, url, depth + 1, self._should_crawl_url,
                                                 include_images=self.config.get('crawl_images', False),
                                                 base_url=final_url)
@@ -1483,6 +1558,11 @@ class WebCrawler:
                     for l in broken
                 ]
 
+        # List mode checks the list itself, so outbound links
+        # are recorded but left unprobed
+        if self.config.get('list_mode'):
+            return
+
         if not self.config.get('crawl_external', False):
             external_links = [l for l in new_links
                               if l.get('placement') != 'image' and not l.get('is_internal')
@@ -1545,7 +1625,10 @@ class WebCrawler:
                 link['target_status'] = 0
             self._head_status_cache[url] = link['target_status']
 
-            # Skip synthesis for URLs that will be (or were) crawled for real
+            # Skip synthesis for URLs crawled for real. List mode
+            # keeps its rows to exactly the listed URLs.
+            if self.config.get('list_mode'):
+                return
             if not self._should_crawl_url(url):
                 self._record_head_result(url, link['target_status'], content_type, size, depth,
                                          link_check_only)
@@ -1639,6 +1722,17 @@ class WebCrawler:
             parsed = urlparse(url)
             robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
 
+            with self._robots_locks_guard:
+                host_lock = self._robots_locks.setdefault(robots_url, threading.Lock())
+            with host_lock:
+                return self._robots_allows(robots_url, url)
+
+        except Exception:
+            return True
+
+    def _robots_allows(self, robots_url, url):
+        """Fetch (once) and consult robots.txt; caller holds the host lock"""
+        try:
             if robots_url not in self._robots_cache:
                 rp = RobotFileParser()
                 rp.set_url(robots_url)

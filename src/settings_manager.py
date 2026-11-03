@@ -47,7 +47,9 @@ class SettingsManager:
             'enableJavaScript', 'jsWaitTime', 'jsTimeout', 'jsBrowser', 'jsHeadless',
             'jsUserAgent', 'jsViewportWidth', 'jsViewportHeight', 'jsMaxConcurrentPages',
             # Custom CSS tab
-            'customCSS'
+            'customCSS',
+            # Extraction tab
+            'customExtractors'
         ]
 
         # admin: all settings including Advanced tab
@@ -129,6 +131,10 @@ class SettingsManager:
 
             # Custom CSS styling
             'customCSS': '',
+
+            # Custom extraction rules: list of
+            # {name, type: css|xpath, selector, mode, attribute}
+            'customExtractors': [],
 
             # Issue exclusion patterns
             'issueExclusionPatterns': '''# WordPress admin & system paths
@@ -368,6 +374,9 @@ class SettingsManager:
             # Only validate the filtered settings that the user is allowed to change
             test_settings = {**self.default_settings}
             test_settings.update(filtered_settings)
+            extractor_errors = self.extractor_errors(test_settings.get('customExtractors'))
+            if extractor_errors:
+                return False, "Custom extraction: " + "; ".join(extractor_errors)
             if not self.validate_settings(test_settings):
                 return False, "Invalid settings provided"
 
@@ -414,6 +423,13 @@ class SettingsManager:
         # Get fresh defaults from the method to ensure latest patterns are used
         fresh_defaults = self._get_default_settings()
         return self.save_settings(fresh_defaults)
+
+    @staticmethod
+    def extractor_errors(rules):
+        """Problems with the custom extraction rules, as messages"""
+        from src.core.custom_extractor import normalize_rules
+        _, errors = normalize_rules(rules if rules is not None else [])
+        return errors
 
     def validate_settings(self, settings):
         """Validate settings values"""
@@ -514,7 +530,8 @@ class SettingsManager:
             'js_max_concurrent_pages': settings['jsMaxConcurrentPages'],
             'issue_exclusion_patterns': [p.strip() for p in settings['issueExclusionPatterns'].split('\n') if p.strip()],
             'enable_duplication_check': settings['enableDuplicationCheck'],
-            'duplication_threshold': settings['duplicationThreshold']
+            'duplication_threshold': settings['duplicationThreshold'],
+            'custom_extractors': settings.get('customExtractors') or []
         }
 
     def _parse_custom_headers(self, headers_text):
