@@ -750,6 +750,93 @@ def test_custom_extraction():
         srv.shutdown()
 
 
+def test_ngram_analyzer():
+    """N-grams count body text, headings, title, inlink anchors and alt text."""
+    from src.core.ngram_analyzer import NgramAnalyzer
+
+    urls = [
+        {
+            'url': 'http://example.com/',
+            'body_text': 'broken links are broken links',
+            'heading_texts': ['broken links'],
+            'title': 'broken links guide',
+        },
+        {
+            'url': 'http://example.com/other',
+            'body_text': 'broken link',
+            'heading_texts': [],
+            'title': 'other',
+        },
+    ]
+    links = [
+        {'target_url': 'http://example.com/', 'anchor_text': 'broken links', 'anchor_alt': ''},
+        {'target_url': 'http://example.com/', 'anchor_text': '', 'anchor_alt': 'broken links image'},
+    ]
+
+    rows = NgramAnalyzer().aggregate(urls, links, ['http://example.com/'], 2)
+    row = next(r for r in rows if r['gram'] == 'broken links')
+    result('ngrams: body, headings, title, anchor and alt counts',
+           row['body'] == 2 and row['headings'] == 1 and row['title'] == 1
+           and row['inlinks_anchor'] == 1 and row['inlinks_alt'] == 1,
+           str(row))
+    result('ngrams: unlinked body occurrences subtract anchor text',
+           row['body_unlinked'] == 1, str(row['body_unlinked']))
+    result('ngrams: density uses body-text total',
+           row['density'] == 50.0, str(row['density']))
+    result('ngrams: selected URL changes the result set',
+           any(r['gram'] == 'broken link' for r in
+               NgramAnalyzer().aggregate(urls, links, ['http://example.com/other'], 2)))
+
+
+def test_ngram_extraction():
+    """The crawler stores body text, headings, and image-anchor alt text."""
+    from src.core.ngram_analyzer import NgramAnalyzer
+
+    site = BASE_PORT + 20
+    base = f'http://127.0.0.1:{site}'
+    srv = serve(make_handler({
+        '/': (
+            '<html><head><title>Broken links guide</title></head><body>'
+            '<h1>Broken links</h1>'
+            '<p>broken links are broken links</p>'
+            '<a href="/other">other</a>'
+            '<a href="/alt">alt</a>'
+            '</body></html>'
+        ),
+        '/other': html('<a href="/">broken links</a>'),
+        '/alt': html('<a href="/"><img alt="broken links image" src="/pic.png"></a>'),
+        '/pic.png': png(),
+    }), site)
+
+    try:
+        crawler = crawl(base + '/')
+        home = next(r for r in crawler.crawl_results if r['url'] == base + '/')
+        result('ngrams: crawler stores body text', 'broken links' in home.get('body_text', ''))
+        result('ngrams: crawler stores heading text',
+               home.get('heading_texts') == ['Broken links'], str(home.get('heading_texts')))
+
+        alt_link = next(
+            l for l in crawler.link_manager.all_links
+            if l.get('target_url') == base + '/' and l.get('anchor_alt')
+        )
+        result('ngrams: image-only anchor records alt text',
+               alt_link.get('anchor_alt') == 'broken links image',
+               str(alt_link.get('anchor_alt')))
+
+        rows = NgramAnalyzer().aggregate(
+            crawler.crawl_results, crawler.link_manager.all_links, [home['url']], 2
+        )
+        row = next(r for r in rows if r['gram'] == 'broken links')
+        result('ngrams: crawler text feeds analyzer counts',
+               row['body'] == 3 and row['headings'] == 1 and row['title'] == 1
+               and row['inlinks_anchor'] == 1 and row['inlinks_alt'] == 1,
+               str(row))
+        result('ngrams: crawler unlinked count',
+               row['body_unlinked'] == 2, str(row['body_unlinked']))
+    finally:
+        srv.shutdown()
+
+
 def _playwright_available():
     try:
         import playwright  # noqa: F401
@@ -772,6 +859,8 @@ TESTS = (
     test_crawl_delay_is_honoured,
     test_list_mode_fetches_only_the_list,
     test_custom_extraction,
+    test_ngram_analyzer,
+    test_ngram_extraction,
 )
 
 
