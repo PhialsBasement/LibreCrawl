@@ -24,7 +24,7 @@ NGRAM_EXPORT_FIELDS = [
     'gram', 'body', 'density', 'body_unlinked', 'headings',
     'title', 'inlinks_anchor', 'inlinks_alt', 'total', 'url_count'
 ]
-from src.auth_db import init_db, create_user, authenticate_user, get_user_by_id, log_guest_crawl, get_guest_crawls_last_24h, verify_user, set_user_tier, create_verification_token, verify_token, get_user_by_email, get_or_create_zoho_user
+from src.auth_db import init_db, create_user, authenticate_user, get_user_by_id, log_guest_crawl, get_guest_crawls_last_24h, verify_user, set_user_tier, create_verification_token, verify_token, get_user_by_email, get_or_create_zoho_user, get_user_settings, save_user_settings
 from src.email_service import send_verification_email, send_welcome_email
 from src.zoho_oauth import ZohoOAuthConfig, ZohoOAuthError
 
@@ -797,6 +797,65 @@ def user_info():
             'crawls_today': crawls_today,
             'crawls_remaining': max(0, 3 - crawls_today) if tier == 'guest' else -1
         }
+    })
+
+# ------------------------------------------------------------------
+# Per-user table view preferences (hidden columns in Overview/Internal/External)
+# ------------------------------------------------------------------
+UI_TABLES = ('overview', 'internal', 'external')
+
+def sanitize_table_preferences(preferences):
+    """Keep only known table names and string column keys."""
+    clean = {}
+    if not isinstance(preferences, dict):
+        return clean
+    for table in UI_TABLES:
+        entry = preferences.get(table)
+        if not isinstance(entry, dict):
+            continue
+        hidden = entry.get('hidden')
+        if not isinstance(hidden, list):
+            continue
+        clean[table] = {
+            'hidden': [str(key) for key in hidden if isinstance(key, str)]
+        }
+    return clean
+
+@app.route('/api/ui/preferences')
+@login_required
+def get_ui_preferences():
+    """Return the current user's table column preferences."""
+    user_id = session.get('user_id')
+    if user_id:
+        saved = get_user_settings(user_id) or {}
+        preferences = saved.get('uiPreferences', {})
+    else:
+        preferences = session.get('uiPreferences', {})
+    return jsonify({
+        'success': True,
+        'preferences': sanitize_table_preferences(preferences)
+    })
+
+@app.route('/api/ui/preferences', methods=['POST'])
+@login_required
+def save_ui_preferences():
+    """Persist the current user's table column preferences."""
+    data = request.get_json(silent=True) or {}
+    preferences = sanitize_table_preferences(data.get('preferences', data))
+
+    user_id = session.get('user_id')
+    if user_id:
+        saved = get_user_settings(user_id) or {}
+        saved['uiPreferences'] = preferences
+        success, message = save_user_settings(user_id, saved)
+        if not success:
+            return jsonify({'success': False, 'error': message}), 500
+    else:
+        session['uiPreferences'] = preferences
+
+    return jsonify({
+        'success': True,
+        'preferences': preferences
     })
 
 @app.route('/')
