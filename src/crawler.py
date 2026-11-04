@@ -12,7 +12,7 @@ import re
 from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor
-from urllib.robotparser import RobotFileParser
+from protego import Protego
 import nest_asyncio
 
 # Extensions treated as images by the "Crawl Images" setting
@@ -1743,27 +1743,27 @@ class WebCrawler:
         """Fetch (once) and consult robots.txt; caller holds the host lock"""
         try:
             if robots_url not in self._robots_cache:
-                rp = RobotFileParser()
-                rp.set_url(robots_url)
                 try:
-                    # Fetch robots.txt with our session (proper User-Agent)
-                    # instead of rp.read() which uses urllib with Python's
-                    # default UA — many servers return 403 for that, causing
-                    # RobotFileParser to set disallow_all=True and block everything.
+                    # Fetch robots.txt with our session (proper User-Agent):
+                    # many servers return 403 for Python's default UA.
                     response = self.session.get(robots_url, timeout=10)
                     if response.status_code in (401, 403):
-                        rp.disallow_all = True
+                        robots_txt = "User-agent: *\nDisallow: /"
                     elif response.status_code >= 400:
-                        rp.allow_all = True
+                        robots_txt = ""
                     else:
-                        rp.parse(response.text.splitlines())
-                    self._robots_cache[robots_url] = rp
+                        robots_txt = response.text
+                    # Protego applies the most specific matching rule, as RFC 9309
+                    # and Google require. urllib's RobotFileParser applies the first
+                    # matching rule, so a file starting "Allow: /" followed by
+                    # Disallow lines (a common layout) allowed every URL.
+                    self._robots_cache[robots_url] = Protego.parse(robots_txt)
                 except:
                     return True
 
             rp = self._robots_cache[robots_url]
             user_agent = self.config.get('user_agent', '*')
-            return rp.can_fetch(user_agent, url)
+            return rp.can_fetch(url, user_agent)
 
         except Exception:
             return True
