@@ -84,6 +84,8 @@ def init_crawl_tables():
                 h2 TEXT,
                 h3 TEXT,
                 word_count INTEGER,
+                body_text TEXT,
+                heading_texts TEXT,
 
                 canonical_url TEXT,
                 lang TEXT,
@@ -142,6 +144,22 @@ def init_crawl_tables():
         except sqlite3.OperationalError:
             pass  # Column already exists
 
+        # Migration: text sources for n-gram analysis
+        try:
+            cursor.execute('ALTER TABLE crawled_urls ADD COLUMN body_text TEXT')
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        try:
+            cursor.execute('ALTER TABLE crawled_urls ADD COLUMN heading_texts TEXT')
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+        # Migration: anchor_alt for image-only inlinks
+        try:
+            cursor.execute('ALTER TABLE crawl_links ADD COLUMN anchor_alt TEXT')
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
         # Links table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS crawl_links (
@@ -151,6 +169,7 @@ def init_crawl_tables():
                 source_url TEXT NOT NULL,
                 target_url TEXT NOT NULL,
                 anchor_text TEXT,
+                anchor_alt TEXT,
 
                 is_internal BOOLEAN,
                 target_domain TEXT,
@@ -299,6 +318,8 @@ def save_url_batch(crawl_id, urls):
                     json.dumps(url_data.get('h2', [])),
                     json.dumps(url_data.get('h3', [])),
                     url_data.get('word_count'),
+                    url_data.get('body_text', ''),
+                    json.dumps(url_data.get('heading_texts', [])),
                     url_data.get('canonical_url'),
                     url_data.get('lang'),
                     url_data.get('charset'),
@@ -330,12 +351,13 @@ def save_url_batch(crawl_id, urls):
                 INSERT INTO crawled_urls (
                     crawl_id, url, status_code, content_type, size, is_internal, depth,
                     title, meta_description, h1, h2, h3, word_count,
+                    body_text, heading_texts,
                     canonical_url, lang, charset, viewport, robots,
                     meta_tags, og_tags, twitter_tags, json_ld, analytics, images,
                     hreflang, schema_org, redirects, linked_from,
                     external_links, internal_links, response_time, javascript_rendered,
                     error_type, render_time, link_check_only, custom_extraction
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', rows)
 
             print(f"Saved {len(urls)} URLs to database for crawl {crawl_id}")
@@ -363,6 +385,7 @@ def save_links_batch(crawl_id, links):
                     link.get('source_url'),
                     link.get('target_url'),
                     link.get('anchor_text'),
+                    link.get('anchor_alt'),
                     link.get('is_internal'),
                     link.get('target_domain'),
                     link.get('target_status'),
@@ -372,9 +395,9 @@ def save_links_batch(crawl_id, links):
 
             cursor.executemany('''
                 INSERT INTO crawl_links (
-                    crawl_id, source_url, target_url, anchor_text,
+                    crawl_id, source_url, target_url, anchor_text, anchor_alt,
                     is_internal, target_domain, target_status, placement
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', rows)
 
             print(f"Saved {len(links)} links to database for crawl {crawl_id}")
@@ -539,7 +562,7 @@ def load_crawled_urls(crawl_id, limit=None, offset=0):
                 # Parse JSON fields
                 for field in ['h2', 'h3', 'meta_tags', 'og_tags', 'twitter_tags',
                              'json_ld', 'analytics', 'images', 'hreflang',
-                             'schema_org', 'redirects', 'linked_from']:
+                             'schema_org', 'redirects', 'linked_from', 'heading_texts']:
                     if url_data.get(field):
                         try:
                             url_data[field] = json.loads(url_data[field])

@@ -3,6 +3,8 @@ import re
 import json
 from urllib.parse import urljoin, urlparse
 
+from .ngram_analyzer import visible_text, heading_texts
+
 
 class SEOExtractor:
     """Extracts SEO-related data from HTML content"""
@@ -32,6 +34,10 @@ class SEOExtractor:
         text_content = soup.get_text()
         words = re.findall(r'\b\w+\b', text_content)
         result['word_count'] = len(words)
+
+        # Text sources for n-gram analysis
+        result['body_text'] = visible_text(soup)
+        result['heading_texts'] = heading_texts(soup)
 
         # Extract language
         html_tag = soup.find('html')
@@ -280,6 +286,8 @@ class SEOExtractor:
             'h2': [],
             'h3': [],
             'word_count': 0,
+            'body_text': '',
+            'heading_texts': [],
             'meta_tags': {},
             'og_tags': {},
             'twitter_tags': {},

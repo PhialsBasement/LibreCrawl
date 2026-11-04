@@ -214,6 +214,7 @@
                         <button class="tab-btn" onclick="switchTab('links')">Links</button>
                         <button class="tab-btn" onclick="switchTab('issues')">Issues</button>
                         <button class="tab-btn" onclick="switchTab('extraction')">Custom Extraction</button>
+                        <button class="tab-btn" onclick="switchTab('ngrams')">N-Grams</button>
                         <button class="tab-btn" onclick="switchTab('pagespeed')">PageSpeed</button>
                         <button class="tab-btn" onclick="switchTab('visualization')">Visualization</button>
                     </div>
@@ -436,6 +437,53 @@
                                         <!-- Data will be populated here -->
                                     </tbody>
                                 </table>
+                            </div>
+                        </div>
+
+                        <div id="ngrams-tab" class="tab-pane">
+                            <div class="filter-bar" style="margin-bottom: 15px; display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; align-items: center;">
+                                <label style="color: #cbd5e1; font-size: 14px;">
+                                    N-gram size
+                                    <select id="ngramSize" onchange="loadNgrams()" style="padding: 6px 10px; border-radius: 6px; border: 1px solid #4b5563; background: #1f2937; color: white;">
+                                        <option value="1">1</option>
+                                        <option value="2">2</option>
+                                        <option value="3">3</option>
+                                        <option value="4">4</option>
+                                        <option value="5">5</option>
+                                        <option value="6">6</option>
+                                    </select>
+                                </label>
+                                <input id="ngramUrlFilter" type="text" placeholder="Filter by exact URL (optional)" style="padding: 6px 12px; border-radius: 6px; border: 1px solid #4b5563; background: #1f2937; color: white; font-size: 13px; min-width: 300px;">
+                                <input id="ngramSearch" type="text" placeholder="Search n-gram" oninput="filterNgrams()" style="padding: 6px 12px; border-radius: 6px; border: 1px solid #4b5563; background: #1f2937; color: white; font-size: 13px;">
+                                <button onclick="loadNgrams()" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #4b5563; background: #374151; color: white; cursor: pointer; font-size: 14px;">Analyze</button>
+                                <button onclick="exportNgrams()" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #4b5563; background: #1f2937; color: white; cursor: pointer; font-size: 14px;">Export CSV</button>
+                                <span id="ngramStatus" style="color: #94a3b8; font-size: 13px;"></span>
+                            </div>
+                            <div class="table-container">
+                                <table class="data-table" id="ngramsTable">
+                                    <thead>
+                                        <tr>
+                                            <th>N-gram</th>
+                                            <th>Body Text</th>
+                                            <th>Density</th>
+                                            <th>Body Text (Unlinked)</th>
+                                            <th>Headings</th>
+                                            <th>Title</th>
+                                            <th>Inlinks Anchor Text</th>
+                                            <th>Inlinks Alt Text</th>
+                                            <th>Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="ngramsTableBody">
+                                        <!-- Data will be populated here -->
+                                    </tbody>
+                                </table>
+                                <div class="empty-state" id="ngramsEmptyState" style="display: none;">
+                                    <div class="empty-state-content">
+                                        <h3>No N-grams Found</h3>
+                                        <p>Start a crawl with HTML pages, then analyze body text, headings, titles, and inlink anchor text.</p>
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
@@ -847,6 +895,10 @@
                             <label class="checkbox-label">
                                 <input type="checkbox" name="exportFields" value="issues_detected">
                                 Issues Detected (separate export)
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="exportFields" value="ngrams">
+                                N-Grams (separate export)
                             </label>
                         </div>
                     </div>

@@ -36,7 +36,8 @@ let virtualScrollers = {
     internalLinks: null,
     externalLinks: null,
     issues: null,
-    extraction: null
+    extraction: null,
+    ngrams: null
 };
 
 // 'spider' follows links from one URL; 'list' checks a pasted list
@@ -930,6 +931,17 @@ function initializeVirtualScrollers() {
             });
         }
 
+        // N-grams table
+        const ngramsContainer = document.querySelector('#ngrams-tab .table-container');
+        if (ngramsContainer && ngramsContainer.querySelector('tbody')) {
+            virtualScrollers.ngrams = new VirtualScroller(ngramsContainer, {
+                rowHeight: 60,
+                buffer: 25,
+                renderRow: renderNgramRow
+            });
+            console.log('N-grams virtual scroller initialized');
+        }
+
         // Issues table
         const issuesContainer = document.querySelector('#issues-tab .table-container');
         if (issuesContainer && issuesContainer.querySelector('tbody')) {
@@ -1018,6 +1030,96 @@ function renderExtractionRow(row, urlData) {
         if (values.length > 1) cell.dataset.count = values.length;
         row.appendChild(cell);
     });
+}
+
+// TIL: Its n-gram not engram. Thanks Cyberpunk
+// N-gram analysis
+let ngramRows = [];
+
+function isNgramsTabActive() {
+    const tab = document.getElementById('ngrams-tab');
+    return tab && tab.classList.contains('active');
+}
+
+async function loadNgrams() {
+    const sizeSelect = document.getElementById('ngramSize');
+    const urlFilter = document.getElementById('ngramUrlFilter');
+    const statusEl = document.getElementById('ngramStatus');
+    const n = sizeSelect ? parseInt(sizeSelect.value, 10) : 1;
+    const activeFilter = crawlState.filters.active;
+
+    statusEl.textContent = 'Analyzing…';
+    const params = new URLSearchParams({ n: String(n) });
+    if (activeFilter) {
+        params.set('filter', activeFilter);
+    }
+    if (urlFilter && urlFilter.value.trim()) {
+        params.set('url', urlFilter.value.trim());
+    }
+
+    try {
+        const response = await fetch('/api/ngrams?' + params.toString());
+        const data = await response.json();
+        if (!data.success) {
+            statusEl.textContent = data.error || 'N-gram analysis failed';
+            return;
+        }
+        ngramRows = data.ngrams || [];
+        statusEl.textContent = `${data.url_count} URL(s), ${ngramRows.length} n-gram(s)`
+            + (activeFilter ? ` [filter: ${activeFilter}]` : '');
+        renderNgrams(ngramRows);
+    } catch (error) {
+        statusEl.textContent = 'N-gram analysis failed';
+    }
+}
+
+function renderNgrams(rows) {
+    const scroller = virtualScrollers.ngrams;
+    const empty = document.getElementById('ngramsEmptyState');
+    if (!scroller) return;
+
+    if (!rows.length) {
+        empty.style.display = 'block';
+        scroller.setData([]);
+        return;
+    }
+    empty.style.display = 'none';
+    scroller.setData(rows);
+}
+
+function renderNgramRow(row, ngram) {
+    row.appendChild(makeTextCell(ngram.gram, 'break-word'));
+    row.appendChild(makeTextCell(ngram.body));
+    row.appendChild(makeTextCell(ngram.density + '%'));
+    row.appendChild(makeTextCell(ngram.body_unlinked));
+    row.appendChild(makeTextCell(ngram.headings));
+    row.appendChild(makeTextCell(ngram.title));
+    row.appendChild(makeTextCell(ngram.inlinks_anchor));
+    row.appendChild(makeTextCell(ngram.inlinks_alt));
+    row.appendChild(makeTextCell(ngram.total));
+}
+
+function filterNgrams() {
+    const query = document.getElementById('ngramSearch').value.trim().toLowerCase();
+    renderNgrams(query ? ngramRows.filter(r => r.gram.toLowerCase().includes(query)) : ngramRows);
+}
+
+function exportNgrams() {
+    if (!ngramRows.length) return;
+    const headers = ['gram', 'body', 'density', 'body_unlinked', 'headings', 'title', 'inlinks_anchor', 'inlinks_alt', 'total', 'url_count'];
+    const lines = [headers.join(',')];
+    ngramRows.forEach(row => {
+        lines.push(headers.map(key => {
+            const value = row[key] === undefined ? '' : String(row[key]);
+            return '"' + value.replace(/"/g, '""') + '"';
+        }).join(','));
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'ngrams.csv';
+    link.click();
+    URL.revokeObjectURL(link.href);
 }
 
 function isIssuesTabActive() {
@@ -1238,6 +1340,13 @@ function clearAllTables() {
     const extractionEmpty = document.getElementById('extractionEmpty');
     if (extractionEmpty) extractionEmpty.style.display = 'block';
 
+    ngramRows = [];
+    if (virtualScrollers.ngrams) {
+        virtualScrollers.ngrams.clear();
+    }
+    const ngramEmpty = document.getElementById('ngramsEmptyState');
+    if (ngramEmpty) ngramEmpty.style.display = 'block';
+
     // Clear status codes table (not virtualized)
     const statusCodesBody = document.getElementById('statusCodesTableBody');
     if (statusCodesBody) statusCodesBody.innerHTML = '';
@@ -1318,6 +1427,10 @@ function switchTab(tabName) {
 
     if (tabName === 'extraction') {
         refreshExtractionTable();
+    }
+
+    if (tabName === 'ngrams') {
+        loadNgrams();
     }
 
     // Load pending issues data if switching to Issues tab
@@ -1445,6 +1558,10 @@ function applyFilter(filterType) {
     // Update Status Codes table with filtered data
     updateStatusCodesTable(filterType);
 
+    if (isNgramsTabActive()) {
+        loadNgrams();
+    }
+
     console.log('Applied filter:', filterType);
 }
 
@@ -1466,6 +1583,10 @@ function clearActiveFilters() {
 
     // Reset Status Codes table to show all data
     updateStatusCodesTable();
+
+    if (isNgramsTabActive()) {
+        loadNgrams();
+    }
 }
 
 function filterVirtualScrollerData(scrollerName, filterType) {
@@ -1872,7 +1993,10 @@ async function exportData() {
         // Determine which data types to export based on settings
         const hasIssues = exportFields.includes('issues_detected');
         const hasLinks = exportFields.includes('links_detailed');
-        const regularFields = exportFields.filter(f => f !== 'issues_detected' && f !== 'links_detailed');
+        const hasNgrams = exportFields.includes('ngrams');
+        const regularFields = exportFields.filter(
+            f => f !== 'issues_detected' && f !== 'links_detailed' && f !== 'ngrams'
+        );
 
         // Use streaming endpoint — downloads directly, no memory blow-up
         const downloads = [];
@@ -1899,6 +2023,17 @@ async function exportData() {
                 format: exportFormat,
                 type: 'issues'
             });
+            downloads.push('/api/export_stream?' + params.toString());
+        }
+
+        if (hasNgrams) {
+            const params = new URLSearchParams({
+                format: exportFormat,
+                type: 'ngrams'
+            });
+            if (crawlState.filters.active) {
+                params.set('filter', crawlState.filters.active);
+            }
             downloads.push('/api/export_stream?' + params.toString());
         }
 

@@ -27,6 +27,7 @@ LibreCrawl crawls websites and gives you detailed information about pages, links
 - 📈 **PageSpeed Insights integration** - Analyze Core Web Vitals
 - 💾 **Multiple export formats** - CSV, Excel (XLSX), JSON, or XML
 - 🔍 **Issue detection** - Automated SEO issue identification
+- 🧩 **N-gram analysis** - Phrase frequency across body text, headings, titles, and inlink anchor text, with a CSV export
 - ⚡ **Real-time crawling progress** with live statistics
 
 ## Getting started

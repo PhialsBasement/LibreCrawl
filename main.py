@@ -17,7 +17,13 @@ from flask import Flask, render_template, request, jsonify, session, redirect, u
 from flask_compress import Compress
 from functools import wraps
 from src.crawler import WebCrawler
+from src.core.ngram_analyzer import NgramAnalyzer
 from src.settings_manager import SettingsManager
+
+NGRAM_EXPORT_FIELDS = [
+    'gram', 'body', 'density', 'body_unlinked', 'headings',
+    'title', 'inlinks_anchor', 'inlinks_alt', 'total', 'url_count'
+]
 from src.auth_db import init_db, create_user, authenticate_user, get_user_by_id, log_guest_crawl, get_guest_crawls_last_24h, verify_user, set_user_tier, create_verification_token, verify_token, get_user_by_email, get_or_create_zoho_user
 from src.email_service import send_verification_email, send_welcome_email
 from src.zoho_oauth import ZohoOAuthConfig, ZohoOAuthError
@@ -1045,6 +1051,69 @@ def visualization_data():
             'edges': []
         })
 
+def filter_crawl_urls(urls, filter_type):
+    """Apply the left-side URL filters to n-gram analysis."""
+    if not filter_type:
+        return urls
+    result = []
+    for u in urls:
+        status = u.get('status_code')
+        content_type = (u.get('content_type') or '').lower()
+        if filter_type == 'internal':
+            keep = u.get('is_internal')
+        elif filter_type == 'external':
+            keep = not u.get('is_internal')
+        elif filter_type == '2xx':
+            keep = status is not None and 200 <= status < 300
+        elif filter_type == '3xx':
+            keep = status is not None and 300 <= status < 400
+        elif filter_type == '4xx':
+            keep = status is not None and 400 <= status < 500
+        elif filter_type == '5xx':
+            keep = status is not None and status >= 500
+        elif filter_type == 'no_response':
+            keep = status in (0, None) and u.get('error_type') != 'file_too_large'
+        elif filter_type == 'html':
+            keep = 'html' in content_type
+        elif filter_type == 'css':
+            keep = 'css' in content_type
+        elif filter_type == 'js':
+            keep = 'javascript' in content_type
+        elif filter_type == 'images':
+            keep = 'image' in content_type
+        else:
+            keep = True
+        if keep:
+            result.append(u)
+    return result
+
+@app.route('/api/ngrams')
+@login_required
+def get_ngrams():
+    """Aggregate n-gram frequency across crawled pages and inlinks."""
+    try:
+        crawler = get_or_create_crawler()
+        n = request.args.get('n', 1, type=int)
+        url_filter = request.args.get('url', '').strip()
+        filter_type = request.args.get('filter', '').strip()
+
+        urls = filter_crawl_urls(crawler.crawl_results, filter_type)
+        selected = [u['url'] for u in urls if not url_filter or u.get('url') == url_filter]
+        links = crawler.link_manager.all_links if crawler.link_manager else []
+
+        rows = NgramAnalyzer().aggregate(urls, links, selected, n)
+        return jsonify({
+            'success': True,
+            'n': max(1, min(6, n)),
+            'url_count': len(selected),
+            'ngrams': rows
+        })
+    except Exception as e:
+        print(f"Error generating n-grams: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/debug/memory')
 @login_required
 def debug_memory():
@@ -1472,6 +1541,57 @@ def export_stream():
                     _stream_issues_csv(issues),
                     mimetype='text/csv',
                     headers={'Content-Disposition': f'attachment; filename=librecrawl_issues_{timestamp}.csv'}
+                )
+
+        elif data_type == 'ngrams':
+            n = request.args.get('n', 1, type=int)
+            filter_type = request.args.get('filter', '').strip()
+            url_filter = request.args.get('url', '').strip()
+            urls = filter_crawl_urls(crawler.crawl_results, filter_type)
+            selected = [u['url'] for u in urls if not url_filter or u.get('url') == url_filter]
+            links = crawler.link_manager.all_links if crawler.link_manager else []
+            rows = NgramAnalyzer().aggregate(urls, links, selected, n)
+
+            if export_format == 'json':
+                return Response(
+                    json.dumps({'export_date': time.strftime('%Y-%m-%d %H:%M:%S'), 'ngrams': rows}),
+                    mimetype='application/json',
+                    headers={'Content-Disposition': f'attachment; filename=librecrawl_ngrams_{timestamp}.json'}
+                )
+            elif export_format == 'xml':
+                root = ET.Element('librecrawl_ngrams')
+                root.set('export_date', time.strftime('%Y-%m-%d %H:%M:%S'))
+                root.set('total_ngrams', str(len(rows)))
+                for row in rows:
+                    item = ET.SubElement(root, 'ngram')
+                    for field in NGRAM_EXPORT_FIELDS:
+                        value = ET.SubElement(item, field)
+                        value.text = str(row.get(field, ''))
+                return Response(
+                    ET.tostring(root, encoding='utf-8'),
+                    mimetype='application/xml',
+                    headers={'Content-Disposition': f'attachment; filename=librecrawl_ngrams_{timestamp}.xml'}
+                )
+            elif export_format == 'xlsx':
+                return Response(
+                    _build_xlsx(
+                        'N-Grams',
+                        NGRAM_EXPORT_FIELDS,
+                        ([row.get(f, '') for f in NGRAM_EXPORT_FIELDS] for row in rows)
+                    ),
+                    mimetype=XLSX_MIMETYPE,
+                    headers={'Content-Disposition': f'attachment; filename=librecrawl_ngrams_{timestamp}.xlsx'}
+                )
+            else:
+                output = StringIO()
+                writer = csv.DictWriter(output, fieldnames=NGRAM_EXPORT_FIELDS)
+                writer.writeheader()
+                for row in rows:
+                    writer.writerow({f: row.get(f, '') for f in NGRAM_EXPORT_FIELDS})
+                return Response(
+                    output.getvalue(),
+                    mimetype='text/csv',
+                    headers={'Content-Disposition': f'attachment; filename=librecrawl_ngrams_{timestamp}.csv'}
                 )
 
         else:

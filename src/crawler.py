@@ -613,7 +613,7 @@ class WebCrawler:
 
             # Rebuild the event log so polling clients resync the loaded data
             self.event_log.new_epoch()
-            self.event_log.emit_many('url', self.crawl_results)
+            self.event_log.emit_many('url', [self._client_url_data(u) for u in self.crawl_results])
             self.event_log.emit_many('link', loaded_links)
             self.event_log.emit_many('issue', loaded_issues)
 
@@ -691,6 +691,7 @@ class WebCrawler:
         Rebuilds the event log under a new epoch, so any polling client
         drops its accumulated state and replays the loaded data.
         """
+        self.crawl_id = crawl.get('id')
         self.base_url = crawl['base_url']
         self.base_domain = crawl['base_domain']
 
@@ -724,7 +725,7 @@ class WebCrawler:
             self.user_memory.track_issues(issues)
 
         self.event_log.new_epoch()
-        self.event_log.emit_many('url', urls)
+        self.event_log.emit_many('url', [self._client_url_data(u) for u in urls])
         self.event_log.emit_many('link', links)
         self.event_log.emit_many('issue', issues)
 
@@ -776,10 +777,14 @@ class WebCrawler:
     def get_status(self):
         """Full status snapshot including data arrays (initial load, save, export)"""
         status_data = self.get_status_light()
-        status_data['urls'] = self.crawl_results.copy()
+        status_data['urls'] = [self._client_url_data(u) for u in self.crawl_results]
         status_data['links'] = self.link_manager.all_links.copy() if self.link_manager else []
         status_data['issues'] = self.issue_detector.get_issues() if self.issue_detector else []
         return status_data
+
+    def _client_url_data(self, data):
+        """Strip crawl-only text fields before sending a URL row to the UI."""
+        return {k: v for k, v in data.items() if k not in ('body_text', 'heading_texts')}
 
     def _save_batch_to_db(self, force=False):
         """Save batched data to database"""
@@ -967,7 +972,7 @@ class WebCrawler:
                                         self.pages_crawled += 1
                                         self.stats['depth'] = max(self.stats['depth'], result.get('depth', 0))
                                         print(f"Added URL to results: {result['url']} - Total in results: {len(self.crawl_results)}")
-                                        self.event_log.emit('url', result)
+                                        self.event_log.emit('url', self._client_url_data(result))
                                         if self.db_save_enabled:
                                             self.unsaved_urls.append(result)
 
@@ -1172,6 +1177,8 @@ class WebCrawler:
                 'h2': [],
                 'h3': [],
                 'word_count': 0,
+                'body_text': '',
+                'heading_texts': [],
                 'meta_tags': {},
                 'og_tags': {},
                 'twitter_tags': {},
@@ -1301,6 +1308,8 @@ class WebCrawler:
                 'h2': [],
                 'h3': [],
                 'word_count': 0,
+                'body_text': '',
+                'heading_texts': [],
                 'meta_tags': {},
                 'og_tags': {},
                 'twitter_tags': {},
@@ -1433,7 +1442,7 @@ class WebCrawler:
                                     self.pages_crawled += 1
                                     self.stats['depth'] = max(self.stats['depth'], result.get('depth', 0))
                                     print(f"Added URL to results (JS): {result['url']} - Total in results: {len(self.crawl_results)}")
-                                    self.event_log.emit('url', result)
+                                    self.event_log.emit('url', self._client_url_data(result))
                                     if self.db_save_enabled:
                                         self.unsaved_urls.append(result)
 
@@ -1534,7 +1543,7 @@ class WebCrawler:
                 updated.append(result)
 
         if updated:
-            self.event_log.emit_many('url_update', updated)
+            self.event_log.emit_many('url_update', [self._client_url_data(u) for u in updated])
         print(f"Updated linked_from data for {len(updated)} URLs")
 
     def _head_check_new_links(self, new_links, result, depth):
@@ -1665,7 +1674,7 @@ class WebCrawler:
             self.stats['crawled'] += 1
             # a result counts as discovered (issue #94)
             self.link_manager.mark_discovered(url)
-            self.event_log.emit('url', result)
+            self.event_log.emit('url', self._client_url_data(result))
             if self.db_save_enabled:
                 self.unsaved_urls.append(result)
 

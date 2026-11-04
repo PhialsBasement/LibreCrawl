@@ -138,6 +138,12 @@ class LinkManager:
             # Get anchor text
             anchor_text = link.get_text().strip()[:100]
 
+            # Image-only anchors carry their alt text as the inlink label
+            anchor_alt = ''
+            img = link.find('img')
+            if img and img.get('alt'):
+                anchor_alt = img.get('alt').strip()[:100]
+
             # Handle special link types
             if href.startswith('mailto:') or href.startswith('tel:'):
                 continue
@@ -162,6 +168,7 @@ class LinkManager:
                     'source_url': source_url,
                     'target_url': clean_url,
                     'anchor_text': anchor_text or '(no text)',
+                    'anchor_alt': anchor_alt,
                     'is_internal': is_internal,
                     'target_domain': parsed_target.netloc,
                     'target_status': None,  # filled in by _commit_links
