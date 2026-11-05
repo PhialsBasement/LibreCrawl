@@ -47,6 +47,57 @@ const MAX_LIST_URLS = 100000;
 // Extractor names currently shown as Custom Extraction columns
 let extractionColumns = [];
 
+// URL table column definitions. Keeping the value/sorting logic centralized
+// lets hidden columns and header sorting stay in sync with the renderers.
+const TABLE_COLUMNS = {
+    overview: [
+        { key: 'url', label: 'Address', sortable: true },
+        { key: 'status_code', label: 'Status', sortable: true },
+        { key: 'title', label: 'Title', sortable: true },
+        { key: 'meta_description', label: 'Meta Desc', sortable: true },
+        { key: 'h1', label: 'H1', sortable: true },
+        { key: 'keywords', label: 'Keywords', sortable: true },
+        { key: 'word_count', label: 'Words', sortable: true },
+        { key: 'response_time', label: 'Response (ms)', sortable: true },
+        { key: 'analytics', label: 'Analytics', sortable: true },
+        { key: 'og_tags', label: 'OG Tags', sortable: true },
+        { key: 'json_ld', label: 'JSON-LD', sortable: true },
+        { key: 'links', label: 'Links (Int/Ext)', sortable: true },
+        { key: 'images', label: 'Images', sortable: true },
+        { key: 'javascript_rendered', label: 'JS', sortable: true },
+        { key: 'details', label: 'Details', sortable: false }
+    ],
+    internal: [
+        { key: 'url', label: 'Address', sortable: true },
+        { key: 'status_code', label: 'Status', sortable: true },
+        { key: 'content_type', label: 'Content Type', sortable: true },
+        { key: 'size', label: 'Size', sortable: true },
+        { key: 'title', label: 'Title', sortable: true }
+    ],
+    external: [
+        { key: 'url', label: 'Address', sortable: true },
+        { key: 'status_code', label: 'Status', sortable: true },
+        { key: 'content_type', label: 'Content Type', sortable: true },
+        { key: 'size', label: 'Size', sortable: true },
+        { key: 'title', label: 'Title', sortable: true }
+    ]
+};
+
+// Columns the current user has chosen to hide, and the current sort per table.
+const tableHiddenColumns = {
+    overview: new Set(),
+    internal: new Set(),
+    external: new Set()
+};
+
+const tableSortState = {
+    overview: null,
+    internal: null,
+    external: null
+};
+
+const tableColumnMenus = {};
+
 // Initialize application
 document.addEventListener('DOMContentLoaded', async function() {
     await initializeApp();
@@ -61,6 +112,9 @@ async function initializeApp() {
 
     // Setup event listeners
     setupEventListeners();
+
+    // Load each user's hidden-column choices before the tables are built
+    await loadTablePreferences();
 
     // Initialize tables
     initializeTables();
@@ -103,6 +157,7 @@ async function initializeApp() {
             // Add each URL to tables
             if (data.urls && data.urls.length > 0) {
                 data.urls.forEach(url => addUrlToTable(url));
+                refreshUrlTables();
             }
 
             // Load links if present
@@ -665,13 +720,17 @@ function refreshUrlTables() {
     }
 
     if (virtualScrollers.overview) {
-        virtualScrollers.overview.setData(overviewUrls());
+        virtualScrollers.overview.setData(sortTableData(overviewUrls(), 'overview'));
     }
     if (virtualScrollers.internal) {
-        virtualScrollers.internal.setData(crawlState.urls.filter(url => url.is_internal));
+        virtualScrollers.internal.setData(
+            sortTableData(crawlState.urls.filter(url => url.is_internal), 'internal')
+        );
     }
     if (virtualScrollers.external) {
-        virtualScrollers.external.setData(crawlState.urls.filter(url => !url.is_internal));
+        virtualScrollers.external.setData(
+            sortTableData(crawlState.urls.filter(url => !url.is_internal), 'external')
+        );
     }
 }
 
@@ -850,12 +909,377 @@ function updateTimer() {
     }
 }
 
+// ------------------------------------------------------------------
+// Per-user column visibility + header sorting for the URL tables
+// ------------------------------------------------------------------
+
+const TABLE_NAMES = ['overview', 'internal', 'external'];
+
+async function loadTablePreferences() {
+    let preferences = {};
+    try {
+        const response = await fetch('/api/ui/preferences');
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success && data.preferences) {
+                preferences = data.preferences;
+            }
+        }
+    } catch (error) {
+        console.warn('Could not load table column preferences:', error);
+    }
+
+    TABLE_NAMES.forEach(tableName => {
+        const entry = preferences[tableName];
+        const hidden = entry && Array.isArray(entry.hidden) ? entry.hidden : [];
+        const validKeys = new Set(TABLE_COLUMNS[tableName].map(column => column.key));
+        const hiddenSet = new Set(hidden.filter(key => validKeys.has(key)));
+
+        // Never hide every column - the table would become unusable.
+        if (hiddenSet.size === TABLE_COLUMNS[tableName].length) {
+            hiddenSet.delete(TABLE_COLUMNS[tableName][0].key);
+        }
+        tableHiddenColumns[tableName] = hiddenSet;
+    });
+}
+
+async function saveTablePreferences() {
+    const preferences = {};
+    TABLE_NAMES.forEach(tableName => {
+        preferences[tableName] = {
+            hidden: Array.from(tableHiddenColumns[tableName])
+        };
+    });
+
+    try {
+        const response = await fetch('/api/ui/preferences', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ preferences })
+        });
+        const data = await response.json();
+        if (!data.success) {
+            showNotification('Column preferences could not be saved', 'warning');
+        }
+    } catch (error) {
+        console.error('Could not save table column preferences:', error);
+        showNotification('Column preferences could not be saved', 'warning');
+    }
+}
+
+function rawOverviewValue(urlData, key) {
+    switch (key) {
+        case 'url': return urlData.url || '';
+        case 'status_code': return urlData.status_code;
+        case 'title': return urlData.title || '';
+        case 'meta_description': return urlData.meta_description || '';
+        case 'h1': return urlData.h1 || '';
+        case 'keywords': return urlData.keywords || '';
+        case 'word_count': return Number(urlData.word_count || 0);
+        case 'response_time': return Number(urlData.response_time || 0);
+        case 'analytics': return formatAnalyticsInfo(urlData.analytics || {});
+        case 'og_tags': return Object.keys(urlData.og_tags || {}).length;
+        case 'json_ld': return (urlData.json_ld || []).length;
+        case 'links': return Number(urlData.internal_links || 0) + Number(urlData.external_links || 0);
+        case 'images': return (urlData.images || []).length;
+        case 'javascript_rendered': return urlData.javascript_rendered ? 1 : 0;
+        default: return '';
+    }
+}
+
+function rawUrlValue(urlData, key) {
+    switch (key) {
+        case 'url': return urlData.url || '';
+        case 'status_code': return urlData.status_code;
+        case 'content_type': return urlData.content_type || '';
+        case 'size': return Number(urlData.size || 0);
+        case 'title': return urlData.title || '';
+        default: return '';
+    }
+}
+
+function rawColumnValue(tableName, urlData, key) {
+    if (tableName === 'overview') {
+        return rawOverviewValue(urlData, key);
+    }
+    return rawUrlValue(urlData, key);
+}
+
+function displayColumnValue(tableName, urlData, key) {
+    const raw = rawColumnValue(tableName, urlData, key);
+
+    if (tableName === 'overview') {
+        if (key === 'meta_description') {
+            return raw.length > 50 ? raw.substring(0, 50) + '...' : raw;
+        }
+        if (key === 'og_tags') return raw ? `${raw} tags` : '';
+        if (key === 'json_ld') return raw ? `${raw} scripts` : '';
+        if (key === 'links') {
+            return `${urlData.internal_links || 0}/${urlData.external_links || 0}`;
+        }
+        if (key === 'images') return raw ? `${raw} images` : '';
+        if (key === 'javascript_rendered') return raw ? '✅ JS' : '';
+    }
+
+    return String(raw);
+}
+
+function sortTableData(data, tableName) {
+    const sort = tableSortState[tableName];
+    if (!sort) return data;
+
+    const column = TABLE_COLUMNS[tableName].find(c => c.key === sort.key);
+    if (!column || !column.sortable) return data;
+
+    const direction = sort.direction === 'desc' ? -1 : 1;
+
+    return data.slice().sort((a, b) => {
+        const aValue = rawColumnValue(tableName, a, sort.key);
+        const bValue = rawColumnValue(tableName, b, sort.key);
+
+        if (aValue == null && bValue == null) {
+            return String(a.url || '').localeCompare(String(b.url || '')) * direction;
+        }
+        if (aValue == null) return 1;
+        if (bValue == null) return -1;
+
+        let result;
+        if (typeof aValue === 'number' && typeof bValue === 'number') {
+            result = aValue - bValue;
+        } else {
+            result = String(aValue).localeCompare(String(bValue), undefined, { sensitivity: 'base' });
+        }
+
+        if (result === 0) {
+            result = String(a.url || '').localeCompare(String(b.url || ''));
+        }
+        return result * direction;
+    });
+}
+
+function setupTableHeader(tableName) {
+    const table = document.getElementById(`${tableName}Table`);
+    if (!table) return;
+
+    const headers = table.querySelectorAll('thead th');
+    headers.forEach((th, index) => {
+        const column = TABLE_COLUMNS[tableName][index];
+        if (!column) return;
+
+        th.dataset.col = column.key;
+
+        if (column.sortable) {
+            th.classList.add('sortable');
+            th.addEventListener('click', event => {
+                if (event.target.classList.contains('column-resize-grip')) return;
+                handleTableSort(tableName, column.key);
+            });
+
+            const indicator = document.createElement('span');
+            indicator.className = 'sort-indicator';
+            indicator.setAttribute('aria-hidden', 'true');
+            th.appendChild(indicator);
+        }
+
+        if (tableHiddenColumns[tableName].has(column.key)) {
+            th.classList.add('column-hidden');
+        }
+    });
+}
+
+function createTableColumnToolbar(tableName) {
+    const pane = document.getElementById(`${tableName}-tab`);
+    if (!pane) return;
+
+    const container = pane.querySelector('.table-container');
+    if (!container) return;
+
+    const toolbar = document.createElement('div');
+    toolbar.className = 'table-toolbar';
+
+    const row = document.createElement('div');
+    row.className = 'table-toolbar-row';
+
+    const left = document.createElement('div');
+    left.className = 'table-toolbar-left';
+
+    const columnsButton = document.createElement('button');
+    columnsButton.type = 'button';
+    columnsButton.className = 'column-toggle-btn';
+    columnsButton.setAttribute('aria-haspopup', 'true');
+    columnsButton.setAttribute('aria-expanded', 'false');
+    columnsButton.innerHTML =
+        '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">' +
+        '<rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1.5"/><path d="M6 2.75v10.5M10 2.75v10.5"/></svg>' +
+        '<span>Columns</span>' +
+        '<svg class="caret" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true">' +
+        '<path d="M4.5 6.5 8 10l3.5-3.5"/></svg>';
+
+    const hint = document.createElement('span');
+    hint.className = 'table-toolbar-hint';
+    hint.textContent = 'Click a column header to sort ascending/descending';
+
+    const menu = document.createElement('div');
+    menu.className = 'column-menu';
+    menu.hidden = true;
+
+    left.appendChild(columnsButton);
+    left.appendChild(menu);
+    row.appendChild(left);
+    row.appendChild(hint);
+
+    TABLE_COLUMNS[tableName].forEach(column => {
+        const label = document.createElement('label');
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.dataset.col = column.key;
+        checkbox.checked = !tableHiddenColumns[tableName].has(column.key);
+
+        checkbox.addEventListener('change', () => {
+            if (checkbox.checked) {
+                tableHiddenColumns[tableName].delete(column.key);
+            } else {
+                tableHiddenColumns[tableName].add(column.key);
+            }
+
+            // Keep at least one visible column.
+            if (tableHiddenColumns[tableName].size === TABLE_COLUMNS[tableName].length) {
+                tableHiddenColumns[tableName].delete(column.key);
+                checkbox.checked = true;
+            }
+
+            applyColumnVisibility(tableName);
+            saveTablePreferences();
+        });
+
+        label.appendChild(checkbox);
+        label.appendChild(document.createTextNode(' ' + column.label));
+        menu.appendChild(label);
+    });
+
+    const resetButton = document.createElement('button');
+    resetButton.type = 'button';
+    resetButton.className = 'column-menu-reset';
+    resetButton.textContent = 'Show all columns';
+    resetButton.addEventListener('click', () => {
+        tableHiddenColumns[tableName].clear();
+        menu.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+            cb.checked = true;
+        });
+        applyColumnVisibility(tableName);
+        saveTablePreferences();
+    });
+    menu.appendChild(resetButton);
+
+    const setMenuOpen = open => {
+        menu.hidden = !open;
+        columnsButton.setAttribute('aria-expanded', String(open));
+    };
+
+    columnsButton.addEventListener('click', () => {
+        setMenuOpen(menu.hidden);
+    });
+
+    // Close the dropdown on outside click or Escape.
+    document.addEventListener('click', event => {
+        if (!menu.hidden && !left.contains(event.target)) setMenuOpen(false);
+    });
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && !menu.hidden) setMenuOpen(false);
+    });
+
+    toolbar.appendChild(row);
+    pane.insertBefore(toolbar, container);
+    tableColumnMenus[tableName] = menu;
+}
+
+function setupTableColumnControls() {
+    TABLE_NAMES.forEach(tableName => {
+        setupTableHeader(tableName);
+        createTableColumnToolbar(tableName);
+    });
+
+    TABLE_NAMES.forEach(tableName => {
+        applyColumnVisibility(tableName);
+    });
+}
+
+function applyColumnVisibility(tableName) {
+    const table = document.getElementById(`${tableName}Table`);
+    if (!table) return;
+
+    const hidden = tableHiddenColumns[tableName];
+
+    table.querySelectorAll('thead th[data-col]').forEach(th => {
+        th.classList.toggle('column-hidden', hidden.has(th.dataset.col));
+    });
+
+    table.querySelectorAll('tbody td[data-col]').forEach(cell => {
+        cell.classList.toggle('column-hidden', hidden.has(cell.dataset.col));
+    });
+
+    updateScrollerColumnCount(tableName);
+}
+
+function updateScrollerColumnCount(tableName) {
+    const scroller = virtualScrollers[tableName];
+    if (!scroller) return;
+
+    const visibleCount = TABLE_COLUMNS[tableName].filter(
+        column => !tableHiddenColumns[tableName].has(column.key)
+    ).length || 1;
+
+    if (scroller.topSpacer && scroller.topSpacer.firstChild) {
+        scroller.topSpacer.firstChild.colSpan = visibleCount;
+    }
+    if (scroller.bottomSpacer && scroller.bottomSpacer.firstChild) {
+        scroller.bottomSpacer.firstChild.colSpan = visibleCount;
+    }
+}
+
+function handleTableSort(tableName, key) {
+    const column = TABLE_COLUMNS[tableName].find(c => c.key === key);
+    if (!column || !column.sortable) return;
+
+    const current = tableSortState[tableName];
+    if (current && current.key === key) {
+        tableSortState[tableName] = {
+            key,
+            direction: current.direction === 'asc' ? 'desc' : 'asc'
+        };
+    } else {
+        tableSortState[tableName] = { key, direction: 'asc' };
+    }
+
+    updateSortIndicators(tableName);
+    refreshUrlTables();
+}
+
+function updateSortIndicators(tableName) {
+    const table = document.getElementById(`${tableName}Table`);
+    if (!table) return;
+
+    const sort = tableSortState[tableName];
+    table.querySelectorAll('thead th').forEach(th => {
+        const indicator = th.querySelector('.sort-indicator');
+        if (!indicator) return;
+
+        const active = sort && sort.key === th.dataset.col;
+        indicator.textContent = active
+            ? (sort.direction === 'asc' ? ' ↑' : ' ↓')
+            : '';
+        th.classList.toggle('sorted', active);
+    });
+}
+
 // Table Management
 function initializeTables() {
     // Clear any existing data first
     clearAllTables();
     // Initialize virtual scrollers for all tables
     initializeVirtualScrollers();
+    // Attach column controls and sorting to the URL tables
+    setupTableColumnControls();
     // Initialize column resizers after virtual scrollers
     setTimeout(() => {
         if (window.initializeColumnResizers) {
@@ -1570,15 +1994,15 @@ function clearActiveFilters() {
 
     // Reset all virtual scrollers to show full data
     if (virtualScrollers.overview) {
-        virtualScrollers.overview.setData(overviewUrls());
+        virtualScrollers.overview.setData(sortTableData(overviewUrls(), 'overview'));
     }
     if (virtualScrollers.internal) {
         const internalUrls = crawlState.urls.filter(url => url.is_internal);
-        virtualScrollers.internal.setData(internalUrls);
+        virtualScrollers.internal.setData(sortTableData(internalUrls, 'internal'));
     }
     if (virtualScrollers.external) {
         const externalUrls = crawlState.urls.filter(url => !url.is_internal);
-        virtualScrollers.external.setData(externalUrls);
+        virtualScrollers.external.setData(sortTableData(externalUrls, 'external'));
     }
 
     // Reset Status Codes table to show all data
@@ -1637,7 +2061,7 @@ function filterVirtualScrollerData(scrollerName, filterType) {
         });
     }
 
-    scroller.setData(filteredData);
+    scroller.setData(sortTableData(filteredData, scrollerName));
 }
 
 // Legacy function - kept for compatibility but no longer used
@@ -2833,74 +3257,48 @@ function loadCrawl() {
 // ========================================
 
 function renderOverviewRow(row, urlData, index) {
-    const analyticsInfo = formatAnalyticsInfo(urlData.analytics || {});
-    const ogTagsCount = Object.keys(urlData.og_tags || {}).length;
-    const jsonLdCount = (urlData.json_ld || []).length;
-    const linksInfo = `${urlData.internal_links || 0}/${urlData.external_links || 0}`;
-    const imagesCount = (urlData.images || []).length;
-    const jsRendered = urlData.javascript_rendered ? '✅ JS' : '';
-
-    const keywordsInfo = urlData.keywords || '';
-
-    const cells = [
-        urlData.url,
-        urlData.status_code,
-        urlData.title || '',
-        (urlData.meta_description || '').substring(0, 50) + (urlData.meta_description && urlData.meta_description.length > 50 ? '...' : ''),
-        urlData.h1 || '',
-        keywordsInfo,
-        urlData.word_count || 0,
-        urlData.response_time || 0,
-        analyticsInfo,
-        ogTagsCount > 0 ? `${ogTagsCount} tags` : '',
-        jsonLdCount > 0 ? `${jsonLdCount} scripts` : '',
-        linksInfo,
-        imagesCount > 0 ? `${imagesCount} images` : '',
-        jsRendered,
-        `<button class="details-btn" onclick="showUrlDetails('${urlData.url.replace(/'/g, "\\'")}')">📊 Details</button>`
-    ];
-
-    cells.forEach(cellData => {
+    TABLE_COLUMNS.overview.forEach(column => {
         const cell = document.createElement('td');
-        if (typeof cellData === 'string' && cellData.includes('<button')) {
-            cell.innerHTML = cellData;
-        } else {
-            cell.textContent = cellData;
+        cell.dataset.col = column.key;
+
+        if (tableHiddenColumns.overview.has(column.key)) {
+            cell.classList.add('column-hidden');
         }
+
+        if (column.key === 'details') {
+            const button = document.createElement('button');
+            button.className = 'details-btn';
+            button.textContent = '📊 Details';
+            button.addEventListener('click', () => showUrlDetails(urlData.url));
+            cell.appendChild(button);
+        } else {
+            cell.textContent = displayColumnValue('overview', urlData, column.key);
+        }
+
+        row.appendChild(cell);
+    });
+}
+
+function renderUrlRow(row, urlData, tableName) {
+    TABLE_COLUMNS[tableName].forEach(column => {
+        const cell = document.createElement('td');
+        cell.dataset.col = column.key;
+
+        if (tableHiddenColumns[tableName].has(column.key)) {
+            cell.classList.add('column-hidden');
+        }
+
+        cell.textContent = displayColumnValue(tableName, urlData, column.key);
         row.appendChild(cell);
     });
 }
 
 function renderInternalRow(row, urlData, index) {
-    const cells = [
-        urlData.url,
-        urlData.status_code,
-        urlData.content_type || '',
-        urlData.size || 0,
-        urlData.title || ''
-    ];
-
-    cells.forEach(cellData => {
-        const cell = document.createElement('td');
-        cell.textContent = cellData;
-        row.appendChild(cell);
-    });
+    renderUrlRow(row, urlData, 'internal');
 }
 
 function renderExternalRow(row, urlData, index) {
-    const cells = [
-        urlData.url,
-        urlData.status_code,
-        urlData.content_type || '',
-        urlData.size || 0,
-        urlData.title || ''
-    ];
-
-    cells.forEach(cellData => {
-        const cell = document.createElement('td');
-        cell.textContent = cellData;
-        row.appendChild(cell);
-    });
+    renderUrlRow(row, urlData, 'external');
 }
 
 // Build a <td> with text set via textContent so crawled-page content
