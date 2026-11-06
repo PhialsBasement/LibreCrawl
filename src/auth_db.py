@@ -181,7 +181,7 @@ def create_user(username, email, password):
                 VALUES (?, ?, ?, 0)
             ''', (username, email, password_hash))
 
-            return True, "Registration successful! Please wait for admin verification.", cursor.lastrowid
+            return True, "Account created.", cursor.lastrowid
 
     except sqlite3.IntegrityError as e:
         if 'username' in str(e):
@@ -192,10 +192,28 @@ def create_user(username, email, password):
         print(f"Registration error: {e}")
         return False, "An error occurred during registration", None
 
-def authenticate_user(username, password):
+UNVERIFIED_EMAIL_MESSAGE = (
+    "Please verify your email address first: check your inbox (and spam folder) "
+    "for the link we sent. Registering again with the same email sends a new one."
+)
+
+UNVERIFIED_NO_EMAIL_MESSAGE = (
+    "Your account hasn't been approved yet. This LibreCrawl server can't send "
+    "verification emails, so whoever runs it needs to approve the account "
+    "(python manage.py approve <username>)."
+)
+
+
+def authenticate_user(username, password, email_configured=True):
     """
     Authenticate a user login attempt
     Returns (success, message, user_data)
+
+    email_configured: whether this server can send verification emails. When it
+    can't, an unverified account can only be approved by an admin, so if the
+    instance has no admin yet, the account logging in claims it (see
+    claim_first_admin). That un-sticks self-hosted installs where the owner
+    registered before this existed.
     """
     try:
         with get_db() as conn:
@@ -215,10 +233,19 @@ def authenticate_user(username, password):
             if not verify_password(password, user['password_hash']):
                 return False, "Invalid username or password", None
 
-            # Check if user is verified
-            if user['verified'] != 1:
-                return False, "Account not verified yet. Please wait for admin approval.", None
+        # Check if user is verified
+        tier = user['tier']
+        if user['verified'] != 1:
+            if email_configured:
+                return False, UNVERIFIED_EMAIL_MESSAGE, None
+            if not claim_first_admin(user['id']):
+                return False, UNVERIFIED_NO_EMAIL_MESSAGE, None
+            tier = 'admin'
+            print(f"No admin account existed and email is not configured: "
+                  f"'{user['username']}' is now the admin of this instance")
 
+        with get_db() as conn:
+            cursor = conn.cursor()
             # Update last login time
             cursor.execute('''
                 UPDATE users
@@ -230,7 +257,7 @@ def authenticate_user(username, password):
                 'id': user['id'],
                 'username': user['username'],
                 'email': user['email'],
-                'tier': user['tier'] or 'guest'
+                'tier': tier or 'guest'
             }
 
             return True, "Login successful", user_data
@@ -287,6 +314,54 @@ def verify_user(user_id):
     except Exception as e:
         print(f"Error verifying user: {e}")
         return False, str(e)
+
+# Accounts the app creates for itself in local mode (local@localhost) and
+# skip-auth mode (<name>@skipauth.local) are admins nobody can log in to with a
+# password, so they don't count as "this instance already has an admin".
+_SYNTHETIC_ADMIN_EMAIL_PATTERNS = ('%@localhost', '%@skipauth.local')
+
+
+def has_admin(exclude_user_id=None):
+    """True if a verified admin account exists that a person can log in to."""
+    with get_db() as conn:
+        return _has_admin(conn.cursor(), exclude_user_id)
+
+
+def _has_admin(cursor, exclude_user_id=None):
+    cursor.execute('''
+        SELECT 1 FROM users
+        WHERE tier = 'admin' AND verified = 1
+          AND email NOT LIKE ? AND email NOT LIKE ?
+          AND id != ?
+        LIMIT 1
+    ''', (*_SYNTHETIC_ADMIN_EMAIL_PATTERNS, exclude_user_id if exclude_user_id is not None else -1))
+    return cursor.fetchone() is not None
+
+
+def claim_first_admin(user_id):
+    """
+    Make `user_id` a verified admin if the instance has no admin yet.
+
+    Self-hosted installs without SMTP can't verify anyone by email, and there is
+    no admin UI, so without this the owner's own account is stuck unverified on
+    the guest tier forever. Only the first account gets this: the check and the
+    update run under one write lock, so two simultaneous registrations can't
+    both become admin. Callers only use it when email is NOT configured, so
+    servers that verify by email (e.g. a public instance) are unaffected.
+
+    Returns True if the user was promoted.
+    """
+    try:
+        with get_db() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            cursor = conn.cursor()
+            if _has_admin(cursor, exclude_user_id=user_id):
+                return False
+            cursor.execute("UPDATE users SET verified = 1, tier = 'admin' WHERE id = ?", (user_id,))
+            return cursor.rowcount == 1
+    except Exception as e:
+        print(f"Error claiming first admin: {e}")
+        return False
 
 def save_user_settings(user_id, settings_dict):
     """Save settings for a user (stores as JSON)"""

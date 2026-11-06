@@ -24,6 +24,21 @@ SMTP_FROM_NAME = get_env('SMTP_FROM_NAME', 'LibreCrawl')
 MAIN_APP_URL = get_env('MAIN_APP_URL', 'https://crawl.librecrawl.com')
 WORKSHOP_APP_URL = get_env('WORKSHOP_APP_URL', 'https://workshop.librecrawl.com')
 
+# Values shipped in .env.example. Copying that file without filling these in
+# must count as "not configured", otherwise every registration tries to log in
+# to Gmail as your-email@gmail.com and the account is stuck unverified.
+_PLACEHOLDER_SMTP_VALUES = {'your-email@gmail.com', 'your-app-password'}
+
+
+def is_email_configured() -> bool:
+    """True when SMTP credentials are set to something other than the
+    .env.example placeholders, i.e. verification emails can actually be sent."""
+    for value in (SMTP_USER, SMTP_PASSWORD):
+        value = (value or '').strip()
+        if not value or value in _PLACEHOLDER_SMTP_VALUES:
+            return False
+    return True
+
 def send_verification_email(to_email: str, username: str, token: str, app_source: str = 'main', is_resend: bool = False) -> Tuple[bool, str]:
     """
     Send verification email to user
@@ -37,7 +52,7 @@ def send_verification_email(to_email: str, username: str, token: str, app_source
     Returns:
         (success, message)
     """
-    if not SMTP_USER or not SMTP_PASSWORD:
+    if not is_email_configured():
         print("Warning: SMTP credentials not configured. Email not sent.")
         print(f"Verification link would be: {MAIN_APP_URL}/verify?token={token}")
         return False, "Email service not configured"
@@ -208,7 +223,7 @@ def send_welcome_email(to_email: str, username: str, app_source: str = 'main') -
     Returns:
         (success, message)
     """
-    if not SMTP_USER or not SMTP_PASSWORD:
+    if not is_email_configured():
         return False, "Email service not configured"
 
     try:

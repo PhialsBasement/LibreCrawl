@@ -837,6 +837,98 @@ def test_ngram_extraction():
         srv.shutdown()
 
 
+def test_self_hosted_accounts_without_email():
+    """Discussion #100: on a self-hosted server without SMTP, a registered
+    account sat unverified on the guest tier forever, with a login message
+    telling the owner to wait for an admin that didn't exist."""
+    import tempfile
+    import manage
+    from src import auth_db, crawl_db, email_service
+
+    saved = (auth_db.DB_FILE, crawl_db.DB_FILE, email_service.SMTP_USER, email_service.SMTP_PASSWORD)
+    tmp = tempfile.TemporaryDirectory()
+    try:
+        # Placeholder values from .env.example are "not configured".
+        email_service.SMTP_USER, email_service.SMTP_PASSWORD = 'your-email@gmail.com', 'your-app-password'
+        placeholders_off = not email_service.is_email_configured()
+        email_service.SMTP_USER, email_service.SMTP_PASSWORD = 'me@example.com', 'hunter22'
+        real_on = email_service.is_email_configured()
+        email_service.SMTP_USER, email_service.SMTP_PASSWORD = '', ''
+        result('placeholder SMTP values count as not configured', placeholders_off and real_on)
+
+        def fresh_db(name):
+            auth_db.DB_FILE = crawl_db.DB_FILE = os.path.join(tmp.name, name)
+            auth_db.init_db()
+
+        def row(username):
+            with auth_db.get_db() as conn:
+                return conn.execute('SELECT verified, tier FROM users WHERE username = ?',
+                                    (username,)).fetchone()
+
+        # A fresh install that once ran in local mode: the synthetic
+        # local@localhost admin must not count as "already has an admin".
+        fresh_db('fresh.db')
+        with auth_db.get_db() as conn:
+            conn.execute("INSERT INTO users (username, email, password_hash, verified, tier) "
+                         "VALUES ('local', 'local@localhost', 'x', 1, 'admin')")
+        ok, _, owner_id = auth_db.create_user('owner', 'owner@example.com', 'password123')
+        claimed = ok and auth_db.claim_first_admin(owner_id)
+        r = row('owner')
+        result('first account becomes a verified admin',
+               claimed and r['verified'] == 1 and r['tier'] == 'admin', str(dict(r)))
+
+        ok, msg, user = auth_db.authenticate_user('owner', 'password123', email_configured=False)
+        result('first admin can log in', ok and user['tier'] == 'admin', msg)
+
+        _, _, second_id = auth_db.create_user('second', 'second@example.com', 'password123')
+        second_claimed = auth_db.claim_first_admin(second_id)
+        ok, msg, _ = auth_db.authenticate_user('second', 'password123', email_configured=False)
+        result('later accounts are not promoted and get an honest message',
+               not second_claimed and not ok and msg == auth_db.UNVERIFIED_NO_EMAIL_MESSAGE
+               and 'admin approval' not in msg, msg)
+
+        manage.main(['approve', 'second'])
+        ok, msg, user = auth_db.authenticate_user('second', 'password123', email_configured=False)
+        result('manage.py approve lets the account log in as tier user',
+               ok and user['tier'] == 'user', msg)
+
+        # An install that registered before this fix: the owner's account is
+        # unverified with no admin anywhere. Logging in claims admin.
+        fresh_db('stuck.db')
+        auth_db.create_user('stuck', 'stuck@example.com', 'password123')
+        ok, msg, user = auth_db.authenticate_user('stuck', 'password123', email_configured=False)
+        r = row('stuck')
+        result('existing stuck account claims admin on login',
+               ok and user['tier'] == 'admin' and r['verified'] == 1, msg)
+
+        # Servers that verify by email are unaffected.
+        fresh_db('smtp.db')
+        auth_db.create_user('mailer', 'mailer@example.com', 'password123')
+        ok, msg, _ = auth_db.authenticate_user('mailer', 'password123', email_configured=True)
+        r = row('mailer')
+        result('with SMTP, unverified accounts are told to check email and stay unverified',
+               not ok and msg == auth_db.UNVERIFIED_EMAIL_MESSAGE and r['verified'] == 0, msg)
+
+        # Two registrations racing for the empty admin seat: exactly one wins.
+        fresh_db('race.db')
+        ids = [auth_db.create_user(f'racer{i}', f'racer{i}@example.com', 'password123')[2]
+               for i in range(8)]
+        wins = []
+        threads = [threading.Thread(target=lambda uid=uid: wins.append(auth_db.claim_first_admin(uid)))
+                   for uid in ids]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        with auth_db.get_db() as conn:
+            admins = conn.execute("SELECT count(*) FROM users WHERE tier = 'admin'").fetchone()[0]
+        result('concurrent registrations produce exactly one admin',
+               wins.count(True) == 1 and admins == 1, f'{wins.count(True)} claims, {admins} admins')
+    finally:
+        auth_db.DB_FILE, crawl_db.DB_FILE, email_service.SMTP_USER, email_service.SMTP_PASSWORD = saved
+        tmp.cleanup()
+
+
 def _playwright_available():
     try:
         import playwright  # noqa: F401
@@ -861,6 +953,7 @@ TESTS = (
     test_custom_extraction,
     test_ngram_analyzer,
     test_ngram_extraction,
+    test_self_hosted_accounts_without_email,
 )
 
 

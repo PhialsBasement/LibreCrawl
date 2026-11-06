@@ -13,6 +13,12 @@ import re
 import base64
 from io import StringIO, BytesIO
 from datetime import datetime, timedelta
+
+# Load .env before importing src modules: several of them (email_service's
+# SMTP settings, for one) read environment variables at import time.
+from dotenv import load_dotenv
+load_dotenv()
+
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for
 from flask_compress import Compress
 from functools import wraps
@@ -24,13 +30,9 @@ NGRAM_EXPORT_FIELDS = [
     'gram', 'body', 'density', 'body_unlinked', 'headings',
     'title', 'inlinks_anchor', 'inlinks_alt', 'total', 'url_count'
 ]
-from src.auth_db import init_db, create_user, authenticate_user, get_user_by_id, log_guest_crawl, get_guest_crawls_last_24h, verify_user, set_user_tier, create_verification_token, verify_token, get_user_by_email, get_or_create_zoho_user, get_user_settings, save_user_settings
-from src.email_service import send_verification_email, send_welcome_email
+from src.auth_db import init_db, create_user, authenticate_user, get_user_by_id, log_guest_crawl, get_guest_crawls_last_24h, verify_user, set_user_tier, create_verification_token, verify_token, get_user_by_email, get_or_create_zoho_user, get_user_settings, save_user_settings, claim_first_admin
+from src.email_service import send_verification_email, send_welcome_email, is_email_configured
 from src.zoho_oauth import ZohoOAuthConfig, ZohoOAuthError
-
-# Load environment variables from .env file
-from dotenv import load_dotenv
-load_dotenv()
 
 # Parse command line arguments
 parser = argparse.ArgumentParser(description='LibreCrawl - SEO Spider Tool')
@@ -188,6 +190,18 @@ if DISABLE_GUEST:
     print("=" * 60)
     print("GUEST MODE DISABLED")
     print("Guest login is not allowed")
+    print("=" * 60)
+
+if not LOCAL_MODE and not SKIP_AUTH and not is_email_configured():
+    from src.auth_db import has_admin
+    print("=" * 60)
+    print("EMAIL NOT CONFIGURED (no SMTP_USER / SMTP_PASSWORD)")
+    print("Accounts can't be verified by email.")
+    if has_admin():
+        print("New accounts need approval: python manage.py approve <username>")
+    else:
+        print("No admin account yet: the first account to register (or an")
+        print("existing unverified account logging in) becomes the admin.")
     print("=" * 60)
 
 if DEMO_MODE:
@@ -694,6 +708,16 @@ def register():
             print(f"Error during local mode auto-verification: {e}")
             # Don't fail the registration, just log the error
             # The account is still created successfully
+    elif success and not is_email_configured():
+        # No SMTP: nobody can verify by email. The first account on the
+        # instance is its owner and becomes admin; anyone after that needs the
+        # admin to approve them (python manage.py approve <username>).
+        if claim_first_admin(user_id):
+            print(f"Email is not configured: '{username}' is the first account and is now the admin of this instance")
+            message = 'Account created! As the first account on this server, you are its admin. You can log in now.'
+        else:
+            message = ("Account created, but this server can't send verification emails, "
+                       "so whoever runs it needs to approve your account before you can log in.")
     elif success:
         # Not in local mode - send verification email
         is_resend = (message == 'resend')
@@ -737,7 +761,8 @@ def login():
         success, message = skip_auth_login(username)
         return jsonify({'success': success, 'message': message})
 
-    success, message, user_data = authenticate_user(username, password)
+    success, message, user_data = authenticate_user(username, password,
+                                                    email_configured=is_email_configured())
 
     if success:
         session['user_id'] = user_data['id']

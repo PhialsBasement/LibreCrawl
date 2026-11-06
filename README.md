@@ -94,7 +94,7 @@ docker compose up -d
 
 # Open browser to http://localhost:5000
 ```
-By default, LibreCrawl runs in local mode for easy personal use. The `.env` file controls this:
+Docker starts in **standard mode** (accounts and login) unless you set `LOCAL_MODE=true`. The start scripts above use local mode. For personal use on your own machine, set this in `.env` to skip accounts entirely:
 
 ```bash
 # .env file
@@ -102,6 +102,8 @@ LOCAL_MODE=true
 HOST_BINDING=127.0.0.1
 REGISTRATION_DISABLED=false
 ```
+
+In standard mode without email (SMTP) set up, **the first account you register becomes the admin** and can log in straight away. Accounts registered after that need approving, see [Managing accounts](#managing-accounts).
 
 For production deployment with user authentication, edit your `.env` file:
 
@@ -301,6 +303,25 @@ Check out these example plugins to get started:
 - No rate limits or tier restrictions
 - Perfect for personal use or single-user self-hosting
 - Recommended for local development and testing
+
+### Managing accounts
+
+In standard mode, new accounts are verified by email when SMTP is configured (`SMTP_*` in `.env`). Without SMTP:
+
+- The **first account** registered on the server becomes the **admin** and can log in immediately. If you registered before this existed, just log in: an unverified account claims admin if the server has none yet.
+- Later accounts can't log in until the admin approves them.
+
+There's no admin page yet, so use `manage.py`:
+
+```bash
+python manage.py users                       # list accounts, verified status and tier
+python manage.py approve <username>          # let an account log in (tier "user")
+python manage.py approve <username> --tier extra
+python manage.py set-tier <username> admin   # guest, user, extra or admin
+
+# Docker
+docker compose exec librecrawl python manage.py users
+```
 
 ## Configuration
 
