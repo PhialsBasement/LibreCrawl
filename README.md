@@ -10,7 +10,24 @@ A web-based multi-tenant crawler for SEO analysis and website auditing.
 
 **Browse plugins other people have built, or share your own, at the [Plugin Workshop](https://workshop.librecrawl.com)**.
 
-LibreCrawl will ***always*** be free and open source. If it's replacing your $279/year Screaming Frog license, deepcrawl license or sitebulb license, [buy me a coffee](https://www.paypal.com/donate/?business=7H9HFA3385JS8&no_recurring=0&item_name=Continue+the+development+of+LibreCrawl&currency_code=AUD).
+LibreCrawl will ***always*** be free and open source. It's built and maintained by one person, with no paid tier and no investors.
+
+### 💼 Using LibreCrawl at an agency or company?
+
+If LibreCrawl is replacing a $279/year Screaming Frog, Deepcrawl or Sitebulb license for each of your seats, please consider putting some of that budget toward the tool you're actually using. Sponsorship pays for new features, bug fixes and keeping the project alive.
+
+| Tier | Suggested | You get |
+|---|---|---|
+| ☕ Individual | Any amount | My thanks, and a faster LibreCrawl |
+| 🥈 Freelancer / small agency | $20/month | Your name in the Sponsors section below |
+| 🥇 Agency | $100/month | Your logo and link in the Sponsors section below |
+| 🏆 Enterprise | $500/month | Large logo at the top of this README, plus priority on your bug reports and feature requests |
+
+**[Become a sponsor on GitHub](https://github.com/sponsors/PhialsBasement)** (monthly or one-time, and companies can pay through their GitHub billing). You can also give through [PayPal](https://www.paypal.com/donate/?business=7H9HFA3385JS8&no_recurring=0&item_name=Continue+the+development+of+LibreCrawl&currency_code=AUD). Need an invoice for your accounts team? [Open an issue](https://github.com/PhialsBasement/LibreCrawl/issues) or contact me through [librecrawl.com](https://librecrawl.com).
+
+### ❤️ Sponsors
+
+*No sponsors yet. Your agency's logo could be first here.*
 
 ## What it does
 
