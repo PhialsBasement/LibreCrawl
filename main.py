@@ -1165,6 +1165,10 @@ def filter_crawl_urls(urls, filter_type):
             keep = 'javascript' in content_type
         elif filter_type == 'images':
             keep = 'image' in content_type
+        elif filter_type == 'indexable':
+            keep = u.get('indexability') == 'Indexable'
+        elif filter_type == 'non_indexable':
+            keep = u.get('indexability') == 'Non-Indexable'
         else:
             keep = True
         if keep:
@@ -1538,6 +1542,101 @@ def crawl_stats():
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+
+COMPARE_MAX_ROWS = 50000
+
+def _can_access_crawl(crawl):
+    """Owners see their crawls; a guest only the crawls of its own session."""
+    if not crawl:
+        return False
+    user_id = session.get('user_id')
+    if user_id:
+        return crawl.get('user_id') == user_id
+    return crawl.get('session_id') == session.get('session_id')
+
+@app.route('/api/crawls/compare')
+@login_required
+def compare_crawls_endpoint():
+    """Diff two saved crawls: ?previous=<id>&current=<id>.
+
+    current defaults to the crawl loaded in this session. format=csv streams
+    every change; JSON returns the summary plus up to COMPARE_MAX_ROWS rows.
+    """
+    from flask import Response
+    from src.crawl_db import get_crawl_by_id, load_compare_rows, load_issue_names
+    from src.core.crawl_compare import compare_crawls, CHANGE_KINDS
+
+    try:
+        previous_id = request.args.get('previous', type=int)
+        current_id = request.args.get('current', type=int)
+        if current_id is None:
+            current_id = get_or_create_crawler().crawl_id
+        if not previous_id or not current_id:
+            return jsonify({'success': False,
+                            'error': 'Pick a saved crawl to compare against the current one'}), 400
+        if previous_id == current_id:
+            return jsonify({'success': False, 'error': 'Pick two different crawls'}), 400
+
+        previous, current = get_crawl_by_id(previous_id), get_crawl_by_id(current_id)
+        if not previous or not current:
+            return jsonify({'success': False, 'error': 'Crawl not found'}), 404
+        if not _can_access_crawl(previous) or not _can_access_crawl(current):
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+
+        # Issues hidden by the exclusion patterns stay hidden here too
+        exclusion_patterns = get_exclusion_patterns(get_session_settings())
+
+        def issues_for(crawl_id):
+            issues = load_issue_names(crawl_id)
+            if not exclusion_patterns:
+                return issues
+            return [i for i in issues
+                    if not issue_matches_exclusion({'url': i[0]}, exclusion_patterns)]
+
+        diff = compare_crawls(load_compare_rows(previous_id), load_compare_rows(current_id),
+                              issues_for(previous_id), issues_for(current_id))
+
+        def describe(crawl):
+            return {'id': crawl['id'], 'base_url': crawl.get('base_url'),
+                    'started_at': crawl.get('started_at'), 'status': crawl.get('status'),
+                    'urls_crawled': crawl.get('urls_crawled')}
+
+        if request.args.get('format') == 'csv':
+            labels = dict(CHANGE_KINDS)
+
+            def generate():
+                out = StringIO()
+                writer = csv.writer(out)
+                writer.writerow(['url', 'change', 'previous', 'current'])
+                for change in diff['changes']:
+                    writer.writerow([change['url'], labels.get(change['change'], change['change']),
+                                     change['previous'], change['current']])
+                    if out.tell() > 65536:
+                        yield out.getvalue()
+                        out.seek(0)
+                        out.truncate()
+                yield out.getvalue()
+
+            filename = f'librecrawl_compare_{previous_id}_vs_{current_id}.csv'
+            return Response(generate(), mimetype='text/csv',
+                            headers={'Content-Disposition': f'attachment; filename={filename}'})
+
+        changes = diff['changes']
+        return jsonify({
+            'success': True,
+            'previous': describe(previous),
+            'current': describe(current),
+            'summary': diff['summary'],
+            'issue_changes': diff['issue_changes'],
+            'change_kinds': [{'key': k, 'label': label} for k, label in CHANGE_KINDS],
+            'changes': changes[:COMPARE_MAX_ROWS],
+            'truncated': len(changes) > COMPARE_MAX_ROWS,
+            'total_changes': len(changes),
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/export_stream')
 @login_required

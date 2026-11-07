@@ -6,6 +6,30 @@ from urllib.parse import urljoin, urlparse
 from .ngram_analyzer import visible_text, heading_texts
 
 
+# Content inside these belongs to an embedded document or graphic, not to
+# the page: an <svg> or <object> carries its own <title>. (html.parser keeps
+# <iframe> content as raw text already, and <embed> is void, but both are
+# listed so a parser change cannot start counting them.)
+EMBEDDED_CONTAINERS = frozenset({'svg', 'iframe', 'embed', 'object'})
+
+# Most canonical declarations kept per page (HTML tags plus Link headers)
+MAX_CANONICALS = 10
+
+
+def is_embedded(tag):
+    """True when the tag sits inside an embedded document or graphic."""
+    return any(parent.name in EMBEDDED_CONTAINERS for parent in tag.parents)
+
+
+def rel_tokens(tag):
+    """A link's rel attribute as lower-cased tokens (rel is multi-valued:
+    rel="alternate canonical", and HTML is case-insensitive)."""
+    rel = tag.get('rel') or []
+    if isinstance(rel, str):
+        rel = rel.split()
+    return {token.lower() for token in rel}
+
+
 class SEOExtractor:
     """Extracts SEO-related data from HTML content"""
 
@@ -13,16 +37,21 @@ class SEOExtractor:
     def extract_basic_seo_data(soup, result):
         """Extract basic SEO data (title, headings, meta description, etc.)"""
         # Extract title
-        title_tag = soup.find('title')
-        result['title'] = title_tag.get_text().strip() if title_tag else ''
+        # Every <title> in the document counts (a second <head>, or one
+        # stray in the body, is still a title search engines see) except
+        # those of embedded graphics/documents (SVG icons, <object>)
+        titles = [t for t in soup.find_all('title') if not is_embedded(t)]
+        result['title'] = titles[0].get_text().strip() if titles else ''
+        result['title_count'] = len(titles)
 
         # Extract meta description
         meta_desc = soup.find('meta', attrs={'name': 'description'})
         result['meta_description'] = meta_desc.get('content', '').strip() if meta_desc else ''
 
-        # Extract headings
-        h1_tag = soup.find('h1')
-        result['h1'] = h1_tag.get_text().strip() if h1_tag else ''
+        # Extract headings (find_all walks the tree once, same as find)
+        h1_tags = soup.find_all('h1')
+        result['h1'] = h1_tags[0].get_text().strip() if h1_tags else ''
+        result['h1_count'] = len(h1_tags)
 
         h2_tags = soup.find_all('h2')
         result['h2'] = [h2.get_text().strip() for h2 in h2_tags[:10]]
@@ -58,6 +87,7 @@ class SEOExtractor:
     def extract_meta_tags(soup, result):
         """Extract all meta tags"""
         meta_tags = soup.find_all('meta')
+        description_count = 0
 
         for meta in meta_tags:
             name = meta.get('name', '').lower()
@@ -67,7 +97,9 @@ class SEOExtractor:
                 result['meta_tags'][name] = content
 
                 # Extract specific important meta tags
-                if name == 'viewport':
+                if name == 'description':
+                    description_count += 1
+                elif name == 'viewport':
                     result['viewport'] = content
                 elif name == 'robots':
                     result['robots'] = content
@@ -80,9 +112,15 @@ class SEOExtractor:
                 elif name == 'theme-color':
                     result['theme_color'] = content
 
-        # Extract canonical URL
-        canonical = soup.find('link', attrs={'rel': 'canonical'})
-        result['canonical_url'] = canonical.get('href', '') if canonical else ''
+        result['meta_description_count'] = description_count
+
+        # Canonical declarations: all of them, so several (conflicting or
+        # not) can be reported. The first is the page's canonical.
+        hrefs = [(link.get('href') or '').strip() for link in soup.find_all('link')
+                 if 'canonical' in rel_tokens(link) and not is_embedded(link)]
+        result['canonical_url'] = hrefs[0] if hrefs else ''
+        result['canonicals'] = hrefs[:MAX_CANONICALS]
+        result['canonical_count'] = len(hrefs)
 
     @staticmethod
     def extract_opengraph_tags(soup, result):
@@ -175,13 +213,16 @@ class SEOExtractor:
 
             if src:
                 # Convert relative URLs to absolute
-                if src.startswith('//'):
-                    src = 'https:' + src
-                elif src.startswith('/'):
-                    parsed_base = urlparse(base_url)
-                    src = f"{parsed_base.scheme}://{parsed_base.netloc}{src}"
-                elif not src.startswith(('http://', 'https://')):
-                    src = urljoin(base_url, src)
+                try:
+                    if src.startswith('//'):
+                        src = 'https:' + src
+                    elif src.startswith('/'):
+                        parsed_base = urlparse(base_url)
+                        src = f"{parsed_base.scheme}://{parsed_base.netloc}{src}"
+                    elif not src.startswith(('http://', 'https://')):
+                        src = urljoin(base_url, src)
+                except ValueError:
+                    pass  # malformed src: keep it as written
 
                 result['images'].append({
                     'src': src,
@@ -199,8 +240,10 @@ class SEOExtractor:
         for link in links:
             href = link.get('href', '')
             if href and not href.startswith(('#', 'mailto:', 'tel:', 'javascript:')):
-                absolute_url = urljoin(result['url'], href)
-                parsed_url = urlparse(absolute_url)
+                try:
+                    parsed_url = urlparse(urljoin(result['url'], href))
+                except ValueError:
+                    continue  # malformed href, e.g. "http://[bad/"
 
                 # Handle www vs non-www domains
                 url_domain_clean = parsed_url.netloc.replace('www.', '', 1)

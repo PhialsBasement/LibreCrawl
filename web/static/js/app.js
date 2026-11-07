@@ -37,7 +37,8 @@ let virtualScrollers = {
     externalLinks: null,
     issues: null,
     extraction: null,
-    ngrams: null
+    ngrams: null,
+    compare: null
 };
 
 // 'spider' follows links from one URL; 'list' checks a pasted list
@@ -65,6 +66,11 @@ const TABLE_COLUMNS = {
         { key: 'links', label: 'Links (Int/Ext)', sortable: true },
         { key: 'images', label: 'Images', sortable: true },
         { key: 'javascript_rendered', label: 'JS', sortable: true },
+        { key: 'indexability', label: 'Indexability', sortable: true },
+        { key: 'indexability_status', label: 'Indexability Status', sortable: true },
+        { key: 'inlinks', label: 'Inlinks', sortable: true },
+        { key: 'link_score', label: 'Link Score', sortable: true },
+        { key: 'in_sitemap', label: 'In Sitemap', sortable: true },
         { key: 'details', label: 'Details', sortable: false }
     ],
     internal: [
@@ -72,7 +78,10 @@ const TABLE_COLUMNS = {
         { key: 'status_code', label: 'Status', sortable: true },
         { key: 'content_type', label: 'Content Type', sortable: true },
         { key: 'size', label: 'Size', sortable: true },
-        { key: 'title', label: 'Title', sortable: true }
+        { key: 'title', label: 'Title', sortable: true },
+        { key: 'indexability', label: 'Indexability', sortable: true },
+        { key: 'inlinks', label: 'Inlinks', sortable: true },
+        { key: 'link_score', label: 'Link Score', sortable: true }
     ],
     external: [
         { key: 'url', label: 'Address', sortable: true },
@@ -983,6 +992,30 @@ function rawOverviewValue(urlData, key) {
         case 'links': return Number(urlData.internal_links || 0) + Number(urlData.external_links || 0);
         case 'images': return (urlData.images || []).length;
         case 'javascript_rendered': return urlData.javascript_rendered ? 1 : 0;
+        default: return rawAnalysisValue(urlData, key);
+    }
+}
+
+// Unique inlinks. The exact count arrives with the end-of-crawl analysis;
+// until then the live linked_from length is a close stand-in (O(1), as
+// this runs inside sort comparators).
+function inlinkCount(urlData) {
+    if (typeof urlData.inlinks === 'number') return urlData.inlinks;
+    if (!urlData.is_internal) return null;
+    return (urlData.linked_from || []).length;
+}
+
+// Columns shared by the Overview and Internal tables
+function rawAnalysisValue(urlData, key) {
+    switch (key) {
+        case 'indexability': return urlData.indexability || '';
+        case 'indexability_status': return urlData.indexability_status || '';
+        case 'inlinks': return inlinkCount(urlData);
+        case 'link_score': return typeof urlData.link_score === 'number' ? urlData.link_score : null;
+        case 'in_sitemap':
+            if (urlData.in_sitemap === true) return 'Yes';
+            if (urlData.in_sitemap === false) return 'No';
+            return '';
         default: return '';
     }
 }
@@ -994,7 +1027,7 @@ function rawUrlValue(urlData, key) {
         case 'content_type': return urlData.content_type || '';
         case 'size': return Number(urlData.size || 0);
         case 'title': return urlData.title || '';
-        default: return '';
+        default: return rawAnalysisValue(urlData, key);
     }
 }
 
@@ -1021,6 +1054,7 @@ function displayColumnValue(tableName, urlData, key) {
         if (key === 'javascript_rendered') return raw ? '✅ JS' : '';
     }
 
+    if (raw === null || raw === undefined) return '';
     return String(raw);
 }
 
@@ -1366,6 +1400,16 @@ function initializeVirtualScrollers() {
             console.log('N-grams virtual scroller initialized');
         }
 
+        // Crawl comparison table
+        const compareContainer = document.querySelector('#compare-tab .table-container');
+        if (compareContainer && compareContainer.querySelector('tbody')) {
+            virtualScrollers.compare = new VirtualScroller(compareContainer, {
+                rowHeight: 60,
+                buffer: 25,
+                renderRow: renderCompareRow
+            });
+        }
+
         // Issues table
         const issuesContainer = document.querySelector('#issues-tab .table-container');
         if (issuesContainer && issuesContainer.querySelector('tbody')) {
@@ -1544,6 +1588,237 @@ function exportNgrams() {
     link.download = 'ngrams.csv';
     link.click();
     URL.revokeObjectURL(link.href);
+}
+
+// ========================================
+// Crawl comparison
+// ========================================
+let compareResult = null;
+let compareKindFilter = 'all';
+let compareLabels = {};
+const compareState = { currentId: null, previousId: null };
+
+async function loadCompareOptions() {
+    const select = document.getElementById('compareCrawlSelect');
+    const statusEl = document.getElementById('compareStatus');
+    if (!select) return;
+
+    try {
+        const [statusResponse, listResponse] = await Promise.all([
+            fetch('/api/crawl_status?stats_only=1'),
+            fetch('/api/crawls/list?limit=200')
+        ]);
+        const status = await statusResponse.json();
+        const list = await listResponse.json();
+        const currentId = status.crawl_id;
+        compareState.currentId = currentId;
+
+        if (!list.success) {
+            statusEl.textContent = list.error || 'Could not load saved crawls';
+            return;
+        }
+
+        const current = (list.crawls || []).find(c => c.id === currentId);
+        const currentDomain = current ? current.base_domain : null;
+        const others = (list.crawls || []).filter(c => c.id !== currentId);
+        // Same site first, newest first within each group (the list is
+        // already newest first)
+        others.sort((a, b) => (b.base_domain === currentDomain) - (a.base_domain === currentDomain));
+
+        const previous = select.value;
+        select.innerHTML = '';
+        if (!currentId) {
+            statusEl.textContent = 'Run or load a crawl first; it becomes the "current" side.';
+        } else if (!others.length) {
+            statusEl.textContent = 'No other saved crawls to compare with yet.';
+        } else {
+            statusEl.textContent = '';
+        }
+        others.forEach(c => {
+            const option = document.createElement('option');
+            option.value = c.id;
+            const when = c.started_at ? String(c.started_at).replace('T', ' ').slice(0, 16) : '';
+            option.textContent = `#${c.id} ${c.base_url} · ${when} · ${c.urls_crawled || 0} URLs` +
+                (c.status && c.status !== 'completed' ? ` (${c.status})` : '');
+            select.appendChild(option);
+        });
+        if (previous && others.some(c => String(c.id) === previous)) {
+            select.value = previous;
+        }
+    } catch (error) {
+        statusEl.textContent = 'Could not load saved crawls';
+    }
+}
+
+async function runCompare() {
+    const select = document.getElementById('compareCrawlSelect');
+    const statusEl = document.getElementById('compareStatus');
+    if (!select || !select.value) {
+        statusEl.textContent = 'Pick a crawl to compare with.';
+        return;
+    }
+
+    statusEl.textContent = 'Comparing…';
+    const params = new URLSearchParams({ previous: select.value });
+    try {
+        const response = await fetch('/api/crawls/compare?' + params.toString());
+        const data = await response.json();
+        if (!data.success) {
+            statusEl.textContent = data.error || 'Comparison failed';
+            return;
+        }
+        compareResult = data;
+        compareLabels = {};
+        data.change_kinds.forEach(kind => { compareLabels[kind.key] = kind.label; });
+        compareState.previousId = data.previous.id;
+        compareState.currentId = data.current.id;
+        compareKindFilter = 'all';
+
+        const filter = document.getElementById('compareChangeFilter');
+        filter.innerHTML = '<option value="all">All changes</option>';
+        data.change_kinds.forEach(kind => {
+            const option = document.createElement('option');
+            option.value = kind.key;
+            option.textContent = `${kind.label} (${data.summary.changes[kind.key] || 0})`;
+            filter.appendChild(option);
+        });
+
+        statusEl.textContent = `#${data.previous.id} → #${data.current.id}: ` +
+            `${data.total_changes.toLocaleString()} change(s)` +
+            (data.truncated ? ` (showing the first ${data.changes.length.toLocaleString()}; export CSV for all)` : '');
+        renderCompareSummary(data);
+        filterCompareChanges();
+    } catch (error) {
+        statusEl.textContent = 'Comparison failed';
+    }
+}
+
+function renderCompareSummary(data) {
+    const container = document.getElementById('compareSummary');
+    container.innerHTML = '';
+
+    const cards = document.createElement('div');
+    cards.className = 'compare-cards';
+
+    const totals = document.createElement('div');
+    totals.className = 'compare-card';
+    totals.style.cursor = 'default';
+    const strong = document.createElement('strong');
+    strong.textContent = `${data.summary.previous_urls.toLocaleString()} → ${data.summary.current_urls.toLocaleString()}`;
+    totals.appendChild(strong);
+    totals.appendChild(document.createTextNode('URLs'));
+    cards.appendChild(totals);
+
+    data.change_kinds.forEach(kind => {
+        const count = data.summary.changes[kind.key] || 0;
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = 'compare-card' + (count ? '' : ' zero');
+        card.dataset.kind = kind.key;
+        const value = document.createElement('strong');
+        value.textContent = count.toLocaleString();
+        card.appendChild(value);
+        card.appendChild(document.createTextNode(kind.label));
+        card.addEventListener('click', () => {
+            const filter = document.getElementById('compareChangeFilter');
+            filter.value = filter.value === kind.key ? 'all' : kind.key;
+            filterCompareChanges();
+        });
+        cards.appendChild(card);
+    });
+    container.appendChild(cards);
+
+    // Only issue types whose count moved; unchanged ones are noise here
+    const movedIssues = (data.issue_changes || []).filter(change => change.delta !== 0);
+    if (movedIssues.length) {
+        const wrap = document.createElement('div');
+        wrap.className = 'compare-issues';
+        const table = document.createElement('table');
+        const head = table.createTHead().insertRow();
+        ['Issue', 'Type', 'Previous', 'Current', 'Change'].forEach(label => {
+            const th = document.createElement('th');
+            th.textContent = label;
+            head.appendChild(th);
+        });
+        const body = table.createTBody();
+        movedIssues.forEach(change => {
+            const row = body.insertRow();
+            [change.issue, change.type, change.previous, change.current].forEach(value => {
+                row.insertCell().textContent = value;
+            });
+            const delta = row.insertCell();
+            delta.textContent = change.delta > 0 ? `+${change.delta}` : String(change.delta);
+            if (change.delta > 0) delta.className = 'compare-delta-up';
+            else if (change.delta < 0) delta.className = 'compare-delta-down';
+        });
+        wrap.appendChild(table);
+        container.appendChild(wrap);
+    }
+}
+
+function filterCompareChanges() {
+    const scroller = virtualScrollers.compare;
+    const empty = document.getElementById('compareEmptyState');
+    if (!scroller) return;
+    if (!compareResult) {
+        scroller.setData([]);
+        return;
+    }
+
+    compareKindFilter = document.getElementById('compareChangeFilter').value;
+    const query = document.getElementById('compareSearch').value.trim().toLowerCase();
+
+    let rows = compareResult.changes;
+    if (compareKindFilter !== 'all') {
+        rows = rows.filter(c => c.change === compareKindFilter);
+    }
+    if (query) {
+        rows = rows.filter(c =>
+            c.url.toLowerCase().includes(query) ||
+            String(c.previous).toLowerCase().includes(query) ||
+            String(c.current).toLowerCase().includes(query));
+    }
+
+    document.querySelectorAll('#compareSummary .compare-card[data-kind]').forEach(card => {
+        card.classList.toggle('active', card.dataset.kind === compareKindFilter);
+    });
+
+    if (empty) {
+        empty.style.display = rows.length ? 'none' : 'flex';
+        const title = empty.querySelector('h3');
+        const text = empty.querySelector('p');
+        if (title) title.textContent = 'No Changes';
+        if (text) text.textContent = compareResult.total_changes
+            ? 'Nothing matches the current filter.'
+            : 'These two crawls match on every compared field.';
+    }
+    scroller.setData(rows);
+}
+
+function exportCompareCsv() {
+    if (!compareState.previousId || !compareState.currentId) {
+        showNotification('Run a comparison first', 'warning');
+        return;
+    }
+    const params = new URLSearchParams({
+        previous: compareState.previousId,
+        current: compareState.currentId,
+        format: 'csv'
+    });
+    window.location.href = '/api/crawls/compare?' + params.toString();
+}
+
+function renderCompareRow(row, change) {
+    const urlCell = makeTextCell(change.url, 'break-all');
+    urlCell.title = change.url;
+    row.appendChild(urlCell);
+    row.appendChild(makeTextCell(compareLabels[change.change] || change.change));
+    const previous = makeTextCell(change.previous, 'break-word');
+    previous.title = change.previous;
+    row.appendChild(previous);
+    const current = makeTextCell(change.current, 'break-word');
+    current.title = change.current;
+    row.appendChild(current);
 }
 
 function isIssuesTabActive() {
@@ -1768,6 +2043,17 @@ function clearAllTables() {
     if (virtualScrollers.ngrams) {
         virtualScrollers.ngrams.clear();
     }
+
+    // A new crawl changes the "current" side, so a shown diff is stale
+    compareResult = null;
+    compareState.previousId = null;
+    if (virtualScrollers.compare) {
+        virtualScrollers.compare.clear();
+    }
+    const compareSummary = document.getElementById('compareSummary');
+    if (compareSummary) compareSummary.innerHTML = '';
+    const compareStatus = document.getElementById('compareStatus');
+    if (compareStatus) compareStatus.textContent = '';
     const ngramEmpty = document.getElementById('ngramsEmptyState');
     if (ngramEmpty) ngramEmpty.style.display = 'block';
 
@@ -1855,6 +2141,10 @@ function switchTab(tabName) {
 
     if (tabName === 'ngrams') {
         loadNgrams();
+    }
+
+    if (tabName === 'compare') {
+        loadCompareOptions();
     }
 
     // Load pending issues data if switching to Issues tab
@@ -2055,6 +2345,10 @@ function filterVirtualScrollerData(scrollerName, filterType) {
                     return (url.content_type || '').toLowerCase().includes('javascript');
                 case 'images':
                     return (url.content_type || '').toLowerCase().includes('image');
+                case 'indexable':
+                    return url.indexability === 'Indexable';
+                case 'non_indexable':
+                    return url.indexability === 'Non-Indexable';
                 default:
                     return true;
             }
@@ -2109,7 +2403,9 @@ function updateFilterCounts() {
         html: 0,
         css: 0,
         js: 0,
-        images: 0
+        images: 0,
+        indexable: 0,
+        non_indexable: 0
     };
 
     crawlState.urls.forEach(url => {
@@ -2134,6 +2430,9 @@ function updateFilterCounts() {
         else if (contentType.includes('css')) counts.css++;
         else if (contentType.includes('javascript')) counts.js++;
         else if (contentType.includes('image')) counts.images++;
+
+        if (url.indexability === 'Indexable') counts.indexable++;
+        else if (url.indexability === 'Non-Indexable') counts.non_indexable++;
     });
 
     // Update DOM
@@ -2191,6 +2490,10 @@ function updateStatusCodesTable(filterType = null) {
         filteredUrls = filteredUrls.filter(url => (url.content_type || '').includes('javascript'));
     } else if (filterType === 'images') {
         filteredUrls = filteredUrls.filter(url => (url.content_type || '').includes('image'));
+    } else if (filterType === 'indexable') {
+        filteredUrls = filteredUrls.filter(url => url.indexability === 'Indexable');
+    } else if (filterType === 'non_indexable') {
+        filteredUrls = filteredUrls.filter(url => url.indexability === 'Non-Indexable');
     }
 
     let totalUrls = filteredUrls.length;
@@ -2614,7 +2917,39 @@ function showUrlDetails(url) {
                                 <div><strong>Charset:</strong> ${safeCharset}</div>
                                 <div><strong>Canonical URL:</strong> ${safeCanonical}</div>
                                 <div><strong>Robots Meta:</strong> ${safeRobots}</div>
+                                ${urlData.h1_count > 1 ? `<div><strong>H1 Count:</strong> ${urlData.h1_count}</div>` : ''}
+                                ${urlData.title_count > 1 ? `<div><strong>Title Tags:</strong> ${urlData.title_count}</div>` : ''}
+                                ${urlData.canonical_header ? `<div><strong>Canonical (Link header):</strong> ${escapeHtml(urlData.canonical_header)}</div>` : ''}
                             </div>
+                            ${urlData.canonical_count > 1 ? `
+                                <div class="details-subsection">
+                                    <h5>${urlData.canonical_count} canonical declarations:</h5>
+                                    ${(urlData.canonicals || []).map(href =>
+                                        `<div style="word-break: break-all;">${escapeHtml(href) || '<span style="color:#9ca3af">(empty href)</span>'}</div>`
+                                    ).join('')}
+                                </div>
+                            ` : ''}
+                        </div>
+
+                        <div class="details-section">
+                            <h4>🧭 Indexability</h4>
+                            <div class="details-grid">
+                                <div><strong>Indexability:</strong> ${escapeHtml(urlData.indexability) || 'N/A'}${urlData.indexability_status ? ' (' + escapeHtml(urlData.indexability_status) + ')' : ''}</div>
+                                <div><strong>X-Robots-Tag:</strong> ${escapeHtml(urlData.x_robots_tag) || 'N/A'}</div>
+                                <div><strong>Unique Inlinks:</strong> ${inlinkCount(urlData) ?? 'N/A'}</div>
+                                <div><strong>Internal Outlinks:</strong> ${typeof urlData.outlinks === 'number' ? urlData.outlinks : 'N/A'}</div>
+                                <div><strong>Link Score:</strong> ${typeof urlData.link_score === 'number' ? urlData.link_score + ' / 100' : 'N/A'}</div>
+                                <div><strong>In Sitemap:</strong> ${urlData.in_sitemap === true ? 'Yes' : urlData.in_sitemap === false ? 'No' : 'No sitemap found'}</div>
+                            </div>
+                            ${(urlData.redirects && urlData.redirects.length) ? `
+                                <div class="details-subsection">
+                                    <h5>Redirect chain (${urlData.redirects.length} hop${urlData.redirects.length !== 1 ? 's' : ''}):</h5>
+                                    ${urlData.redirects.map(hop =>
+                                        `<div style="word-break: break-all;">${escapeHtml(String(hop.status_code || '3xx'))} ${escapeHtml(hop.url)}</div>`
+                                    ).join('')}
+                                    <div style="word-break: break-all;">→ ${escapeHtml(urlData.redirected_to || '')} (${escapeHtml(String(urlData.status_code))})</div>
+                                </div>
+                            ` : ''}
                         </div>
 
                         <div class="details-section">

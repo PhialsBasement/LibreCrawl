@@ -62,6 +62,17 @@ class IncrementalPoller {
                     changed.urls = true;
                     break;
                 }
+                case 'url_patch': {
+                    // End-of-crawl analysis: only the changed fields of a
+                    // row already sent. A fresh object, so code holding the
+                    // old row (sorted copies, open details) sees no mutation.
+                    const i = this.urlIndex.get(d.url);
+                    if (i !== undefined) {
+                        this.allUrls[i] = Object.assign({}, this.allUrls[i], d);
+                        changed.urls = true;
+                    }
+                    break;
+                }
                 case 'link':
                 case 'link_update': {
                     const key = d.source_url + '|' + d.target_url;

@@ -57,7 +57,8 @@ def png():
 
 
 def make_handler(routes, hits=None, slow_paths=(), slow_seconds=0.0):
-    """Build a handler serving `routes`: path -> html str, bytes, or (code, location)."""
+    """Build a handler serving `routes`: path -> html str, bytes, (code, location),
+    or {'body': html str, 'headers': {name: value}} for extra response headers."""
 
     class Handler(http.server.BaseHTTPRequestHandler):
         protocol_version = 'HTTP/1.1'
@@ -90,6 +91,16 @@ def make_handler(routes, hits=None, slow_paths=(), slow_seconds=0.0):
             elif isinstance(route, bytes):
                 ctype = 'image/png' if self.path.endswith('.png') else 'application/octet-stream'
                 self._send(200, route, ctype)
+            elif isinstance(route, dict):
+                body = route['body'].encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html')
+                self.send_header('Content-Length', str(len(body)))
+                for name, value in route.get('headers', {}).items():
+                    self.send_header(name, value)
+                self.end_headers()
+                if self.command == 'GET':
+                    self.wfile.write(body)
             else:
                 self._send(200, route.encode())
 
@@ -929,6 +940,480 @@ def test_self_hosted_accounts_without_email():
         tmp.cleanup()
 
 
+def _page(title, body='', head=''):
+    return f'<html><head><title>{title}</title>{head}</head><body>{body}</body></html>'
+
+
+def _analysis_site(port, external_port):
+    """Routes for the site-wide analysis fixtures. Returned as a dict so a
+    test can change the site between two crawls."""
+    links = ''.join(f'<a href="{p}">{p}</a>' for p in (
+        '/a', '/b', '/dup1', '/dup2', '/noindex-hdr', '/canon', '/canon2', '/canon-target',
+        '/redir1', '/redir-bad', '/loop1', '/broken', '/multi-h1'))
+    dup_head = '<meta name="description" content="The same description on two pages">'
+    return {
+        '/': _page('Home', '<h1>Home</h1>' + links
+                   + f'<a href="http://127.0.0.1:{external_port}/gone">gone</a>'),
+        '/a': _page('Page A', '<h1>A</h1><a href="/">home</a>'),
+        '/b': _page('Page B', '<h1>B</h1><a href="/a">a</a>'),
+        '/dup1': _page('Same Title Here', '<h1>Same H1</h1>', dup_head),
+        '/dup2': _page('Same Title Here', '<h1>Same H1</h1>', dup_head),
+        '/noindex-hdr': {'body': _page('Header Noindex', '<h1>N</h1>'),
+                         'headers': {'X-Robots-Tag': 'googlebot: noindex'}},
+        '/canon': _page('Canon', '<h1>C</h1>', '<link rel="canonical" href="/canon-target">'),
+        '/canon2': _page('Canon Two', '<h1>C2</h1>', '<link rel="canonical" href="/canon">'),
+        '/redir1': (301, '/redir2'),
+        '/redir2': (301, '/a'),
+        '/redir-bad': (301, '/nowhere'),
+        '/loop1': (302, '/loop2'),
+        '/loop2': (302, '/loop1'),
+        '/multi-h1': _page('Multi', '<h1>One</h1><h1>Two</h1>'),
+        '/orphan': _page('Orphan', '<h1>O</h1>'),
+        '/sitemap.xml': ('<?xml version="1.0" encoding="UTF-8"?>'
+                         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+                         + ''.join(f'<url><loc>http://127.0.0.1:{port}{p}</loc></url>'
+                                   for p in ('/', '/a', '/orphan', '/noindex-hdr', '/redir1'))
+                         + '</urlset>'),
+    }
+
+
+def test_site_wide_analysis():
+    """Screaming Frog style crawl analysis: indexability (incl. X-Robots-Tag),
+    duplicate title/meta/H1, redirect chains and loops, inlinks and Link
+    Score, broken-link sources, canonical and sitemap checks."""
+    from collections import Counter
+
+    site, external = BASE_PORT + 16, BASE_PORT + 17
+    a = serve(make_handler(_analysis_site(site, external)), site)
+    b = serve(make_handler({}), external)
+    base = f'http://127.0.0.1:{site}'
+    try:
+        crawler = crawl(base + '/', discover_sitemaps=True)
+        rows = {r['url']: r for r in crawler.crawl_results}
+        issues = crawler.issue_detector.get_issues()
+
+        def has(path, name, contains=''):
+            return any(i['url'] == base + path and i['issue'] == name and contains in i['details']
+                       for i in issues)
+
+        def flagged(name):
+            return sorted(i['url'].replace(base, '') for i in issues if i['issue'] == name)
+
+        def index_of(path):
+            r = rows.get(base + path, {})
+            return r.get('indexability'), r.get('indexability_status')
+
+        result('indexability: plain page is indexable', index_of('/a') == ('Indexable', ''),
+               str(index_of('/a')))
+        result('indexability: X-Robots-Tag noindex is read',
+               index_of('/noindex-hdr') == ('Non-Indexable', 'noindex (X-Robots-Tag)'),
+               str(index_of('/noindex-hdr')))
+        result('indexability: canonicalised, redirected and 404 pages',
+               index_of('/canon')[1] == 'Canonicalised' and index_of('/redir1')[1] == 'Redirected'
+               and index_of('/broken')[1] == 'Client Error',
+               f"{index_of('/canon')} {index_of('/redir1')} {index_of('/broken')}")
+        result('X-Robots-Tag noindex raises the noindex issue',
+               has('/noindex-hdr', 'Noindex Tag Present', 'X-Robots-Tag'))
+
+        result('duplicate title: exactly the two pages sharing it',
+               flagged('Duplicate Title') == ['/dup1', '/dup2'], str(flagged('Duplicate Title')))
+        result('duplicate meta description and H1 are reported too',
+               flagged('Duplicate Meta Description') == ['/dup1', '/dup2']
+               and flagged('Duplicate H1') == ['/dup1', '/dup2'],
+               f"{flagged('Duplicate Meta Description')} {flagged('Duplicate H1')}")
+        result('multiple H1 tags', flagged('Multiple H1 Tags') == ['/multi-h1']
+               and rows[base + '/multi-h1'].get('h1_count') == 2, str(flagged('Multiple H1 Tags')))
+
+        result('redirect chain of two hops', has('/redir1', 'Redirect Chain', '2 hops'),
+               str(flagged('Redirect Chain')))
+        result('redirect to a broken URL', flagged('Redirect to Broken URL') == ['/redir-bad'],
+               str(flagged('Redirect to Broken URL')))
+        result('redirect loop', flagged('Redirect Loop') == ['/loop1'], str(flagged('Redirect Loop')))
+
+        # /canon-target, /broken and /redir-bad end in 404, /loop1 never answers
+        result('broken internal links reported on the linking page',
+               flagged('Broken Internal Links') == ['/'] and has('/', 'Broken Internal Links', '4 links'),
+               next((i['details'] for i in issues if i['issue'] == 'Broken Internal Links'), 'none'))
+        result('broken external links reported on the linking page',
+               has('/', 'Broken External Links', '/gone'), str(flagged('Broken External Links')))
+        result('internal links to redirects reported on the linking page',
+               has('/', 'Internal Links to Redirects', '/redir1'))
+
+        result('canonical pointing at a 404', flagged('Canonical Points to Non-Indexable URL') == ['/canon'],
+               str(flagged('Canonical Points to Non-Indexable URL')))
+        result('canonical chain', flagged('Canonical Chain') == ['/canon2'], str(flagged('Canonical Chain')))
+
+        inlinks_a = rows[base + '/a'].get('inlinks')
+        result('unique inlinks counted (redirect rows pass on no links)',
+               inlinks_a == 2 and rows[base + '/'].get('inlinks') == 1,
+               f"/a={inlinks_a} /={rows[base + '/'].get('inlinks')}")
+        scores = [r.get('link_score') for r in rows.values()
+                  if r.get('is_internal') and r.get('link_score') is not None]
+        result('link score is 0-100 and favours better linked pages',
+               scores and max(scores) == 100 and min(scores) >= 0
+               and rows[base + '/a']['link_score'] > rows[base + '/multi-h1']['link_score'],
+               f"/a={rows[base + '/a'].get('link_score')} /multi-h1={rows[base + '/multi-h1'].get('link_score')}")
+
+        result('sitemap membership recorded',
+               rows[base + '/'].get('in_sitemap') is True and rows[base + '/b'].get('in_sitemap') is False)
+        result('orphan page found from the sitemap only', flagged('Orphan Page (Sitemap Only)') == ['/orphan'],
+               str(flagged('Orphan Page (Sitemap Only)')))
+        result('non-indexable URLs in the sitemap',
+               flagged('Non-Indexable URL in Sitemap') == ['/noindex-hdr', '/redir1'],
+               str(flagged('Non-Indexable URL in Sitemap')))
+        result('indexable pages missing from the sitemap include /b',
+               '/b' in flagged('Indexable Page Not in Sitemap')
+               and '/a' not in flagged('Indexable Page Not in Sitemap'))
+
+        repeated = [k for k, n in Counter((i['url'], i['issue']) for i in issues).items() if n > 1]
+        result('no issue repeated for the same URL', not repeated, str(repeated[:3]))
+
+        # Journal: analysis results go out as small patches, never for a
+        # row the client has not been sent
+        sent, bad, patches = set(), [], 0
+        for event in crawler.event_log._events:
+            if event['kind'] == 'url':
+                sent.add(event['data']['url'])
+            elif event['kind'] == 'url_patch':
+                patches += 1
+                if event['data']['url'] not in sent:
+                    bad.append(event['data']['url'])
+        result('analysis patches follow their rows in the journal', patches > 0 and not bad,
+               f'{patches} patches, {len(bad)} orphaned')
+
+        # Redirects not followed: chains and loops traced through the rows
+        listed = [base + p for p in ('/redir1', '/redir2', '/a', '/loop1', '/loop2',
+                                     '/redir-bad', '/nowhere')]
+        crawler = crawl(base + '/', url_list=listed, follow_redirects=False)
+        issues = crawler.issue_detector.get_issues()
+        result('unfollowed: chain traced through the 3xx rows', has('/redir1', 'Redirect Chain', '2 hops'),
+               str(flagged('Redirect Chain')))
+        result('unfollowed: loop traced through the 3xx rows',
+               flagged('Redirect Loop') == ['/loop1', '/loop2'], str(flagged('Redirect Loop')))
+        result('unfollowed: redirect ending in a 404',
+               flagged('Redirect to Broken URL') == ['/redir-bad'], str(flagged('Redirect to Broken URL')))
+    finally:
+        a.shutdown()
+        b.shutdown()
+
+
+def test_crawl_analysis_scales_linearly():
+    """The end-of-crawl analysis must not hold a large crawl in "finishing
+    up": 20,000 pages and ~200,000 links, all templated alike."""
+    from src.core.crawl_analysis import CrawlAnalyzer
+
+    count = 20000
+    rows = [{'url': f'https://x.au/p{i}', 'status_code': 200, 'content_type': 'text/html',
+             'is_internal': True, 'title': f'Product {i % 500}', 'meta_description': 'Same for all',
+             'h1': f'Product {i}', 'canonical_url': f'https://x.au/p{i}'} for i in range(count)]
+    links = []
+    for i in range(count):
+        for step in (1, 7, 31, 101, 499, 997, 1999, 4999, 9973, 13):
+            links.append({'source_url': f'https://x.au/p{i}', 'target_url': f'https://x.au/p{(i + step) % count}',
+                          'is_internal': True, 'placement': 'body', 'target_status': 200})
+    started = time.time()
+    analyzer = CrawlAnalyzer()
+    patches, issues = analyzer.analyze(rows, links, sitemap_urls={f'https://x.au/p{i}' for i in range(0, count, 2)},
+                                       start_url='https://x.au/p0')
+    elapsed = time.time() - started
+    # ~2s on a laptop; an O(group²) slip (examples listed per duplicate
+    # page) once made this 27s
+    result('20k pages / 200k links analysed quickly', elapsed < 10 and not analyzer.link_score_truncated,
+           f'{elapsed:.1f}s, {len(patches)} patches, {len(issues)} issues')
+    per_page = sum(1 for i in issues if i['issue'] == 'Duplicate Meta Description')
+    result('one duplicate issue per page, not per pair', per_page == count, f'{per_page}')
+
+
+def test_analysis_persists_and_crawls_compare():
+    """Analysis fields survive a save and reload, and two saved crawls of a
+    site can be compared through the API."""
+    import tempfile
+    os.environ.setdefault('LOCAL_MODE', 'true')
+    import main as app_module
+    from src import auth_db, crawl_db
+
+    site, external = BASE_PORT + 18, BASE_PORT + 19
+    routes = _analysis_site(site, external)
+    a = serve(make_handler(routes), site)
+    b = serve(make_handler({}), external)
+    base = f'http://127.0.0.1:{site}'
+    saved = (auth_db.DB_FILE, crawl_db.DB_FILE)
+    tmp = tempfile.TemporaryDirectory()
+    try:
+        auth_db.DB_FILE = crawl_db.DB_FILE = os.path.join(tmp.name, 'compare.db')
+        auth_db.init_db()
+
+        def saved_crawl():
+            crawler = WebCrawler()
+            crawler.config.update({
+                'delay': 0.02, 'concurrency': 5, 'max_urls': 200, 'max_depth': 4,
+                'crawl_external': False, 'discover_sitemaps': True, 'respect_robots': False})
+            # Save every row as it arrives, so rows are in SQLite before the
+            # analysis runs and only the end-of-crawl UPDATE can fill it in
+            crawler.batch_save_size = 1
+            ok, message = crawler.start_crawl(base + '/', user_id=1, session_id='fixture-session')
+            assert ok, message
+            deadline = time.time() + 120
+            while crawler.is_running and time.time() < deadline:
+                time.sleep(0.1)
+            return crawler
+
+        first = saved_crawl()
+        loaded = {r['url']: r for r in crawl_db.load_crawled_urls(first.crawl_id)}
+        page_a = loaded.get(base + '/a', {})
+        result('reloaded rows keep indexability, inlinks, link score, sitemap flag',
+               page_a.get('indexability') == 'Indexable' and page_a.get('inlinks') == 2
+               and isinstance(page_a.get('link_score'), int) and page_a.get('in_sitemap') is True,
+               str({k: page_a.get(k) for k in ('indexability', 'inlinks', 'link_score', 'in_sitemap')}))
+        result('reloaded rows keep X-Robots-Tag and the final linked_from',
+               loaded.get(base + '/noindex-hdr', {}).get('x_robots_tag') == 'googlebot: noindex'
+               and sorted(page_a.get('linked_from') or []) == sorted([base + '/', base + '/b']),
+               str(page_a.get('linked_from')))
+
+        # The site changes: a page goes, one appears, a title changes, a page
+        # turns noindex and the homepage gains a broken link
+        routes['/'] = routes['/'].replace('<a href="/b">/b</a>', '<a href="/new">/new</a>'
+                                           '<a href="/also-broken">x</a>')
+        routes['/new'] = _page('New Page', '<h1>New</h1>')
+        routes['/a'] = _page('Page A Renamed', '<h1>A</h1><a href="/">home</a>')
+        routes['/multi-h1'] = _page('Multi', '<h1>One</h1>', '<meta name="robots" content="noindex">')
+        second = saved_crawl()
+
+        client = app_module.app.test_client()
+        with client.session_transaction() as s:
+            s['user_id'] = 1
+            s['username'] = 'fixture'
+            s['tier'] = 'admin'
+        resp = client.get(f'/api/crawls/compare?previous={first.crawl_id}&current={second.crawl_id}')
+        data = resp.get_json() or {}
+        changes = data.get('changes') or []
+
+        def changed(kind, path):
+            return [c for c in changes if c['change'] == kind and c['url'] == base + path]
+
+        result('compare: added and removed URLs',
+               bool(changed('added', '/new')) and bool(changed('removed', '/b')),
+               str(data.get('summary', data.get('error'))))
+        title = changed('title', '/a')
+        result('compare: title change with both values',
+               bool(title) and title[0]['previous'] == 'Page A' and title[0]['current'] == 'Page A Renamed',
+               str(title))
+        result('compare: indexability change',
+               any(c['current'].startswith('Non-Indexable (noindex)') for c in changed('indexability', '/multi-h1')),
+               str(changed('indexability', '/multi-h1')))
+        result('compare: new issue on an existing URL',
+               any(c['current'] == 'Noindex Tag Present' for c in changed('new_issue', '/multi-h1')),
+               str(changed('new_issue', '/multi-h1')))
+        result('compare: resolved issue on an existing URL',
+               any(c['previous'] == 'Multiple H1 Tags' for c in changed('resolved_issue', '/multi-h1')))
+        result('compare: issue totals per issue name',
+               any(i['issue'] == 'Noindex Tag Present' and i['delta'] == 1
+                   for i in data.get('issue_changes') or []))
+        result('compare: unchanged pages produce no rows', not [c for c in changes
+                                                               if c['url'] == base + '/dup1'])
+
+        csv_resp = client.get(f'/api/crawls/compare?previous={first.crawl_id}'
+                              f'&current={second.crawl_id}&format=csv')
+        lines = csv_resp.data.decode().strip().splitlines()
+        result('compare: CSV has a header and one line per change',
+               csv_resp.status_code == 200 and lines[0] == 'url,change,previous,current'
+               and len(lines) == data.get('total_changes', -1) + 1, f'{len(lines)} lines')
+
+        with client.session_transaction() as s:
+            s['user_id'] = 2
+        denied = client.get(f'/api/crawls/compare?previous={first.crawl_id}&current={second.crawl_id}')
+        result("compare: another user's crawls are refused", denied.status_code == 403,
+               str(denied.status_code))
+
+        # Resuming a crawl whose analysis already ran recomputes the
+        # site-wide issues instead of saving them a second time
+        from collections import Counter
+        before = Counter((i['url'], i['issue']) for i in crawl_db.load_crawl_issues(second.crawl_id))
+        crawl_db.set_crawl_status(second.crawl_id, 'paused')
+        resumed = WebCrawler()
+        ok, message = resumed.resume_from_database(second.crawl_id, user_id=1)
+        deadline = time.time() + 120
+        while ok and resumed.is_running and time.time() < deadline:
+            time.sleep(0.1)
+        after = Counter((i['url'], i['issue']) for i in crawl_db.load_crawl_issues(second.crawl_id))
+        repeated = [k for k, n in after.items() if n > 1 and before.get(k, 0) < n]
+        result('resume: site-wide issues are recomputed, not duplicated',
+               ok and not repeated and after[(base + '/', 'Broken Internal Links')] == 1,
+               message if not ok else str(repeated[:3]))
+    finally:
+        auth_db.DB_FILE, crawl_db.DB_FILE = saved
+        a.shutdown()
+        b.shutdown()
+        tmp.cleanup()
+
+
+def test_hostile_input_regressions():
+    """Bugs found by fuzzing the crawler and the analysis with malformed input."""
+    import tempfile
+    from src.crawler import _header_text
+    from src.core.crawl_analysis import CrawlAnalyzer, indexability
+    from src.core.crawl_compare import compare_crawls
+    from src import auth_db, crawl_db
+
+    site = BASE_PORT + 20
+    base = f'http://127.0.0.1:{site}'
+    routes = {
+        '/': html('<a href="http://[bad/">bad</a><a href="/after">after</a>'
+                  '<a href="/bad-location">r</a><a href="/nocontent">n</a><a href="/jscanon">j</a>'),
+        '/after': html('after'),
+        '/bad-location': (302, 'http://[bad/x'),
+        '/jscanon': '<html><head><title>J</title><link rel="canonical" href="javascript:void(0)"></head></html>',
+        '/sitemap.xml': ('<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+                         '<url><loc>http://[bad</loc></url>'
+                         f'<url><loc>{base}/listed-only</loc></url></urlset>'),
+        '/listed-only': html('listed'),
+    }
+
+    class NoContent(make_handler(routes)):
+        def do_GET(self):
+            if self.path == '/nocontent':
+                self.send_response(204)
+                self.end_headers()
+                return
+            super().do_GET()
+        do_HEAD = do_GET
+
+    srv = serve(NoContent, site)
+    try:
+        crawler = crawl(base + '/', follow_redirects=False, discover_sitemaps=True)
+        rows = {r['url']: r for r in crawler.crawl_results}
+        home = rows.get(base + '/', {})
+        result('a malformed href does not turn the page into a failed fetch',
+               home.get('status_code') == 200 and base + '/after' in rows,
+               f"{home.get('status_code')} {home.get('error')}")
+        bad = rows.get(base + '/bad-location', {})
+        result('a malformed Location is kept, not turned into an error row',
+               bad.get('status_code') == 302 and bad.get('redirect_target') == 'http://[bad/x',
+               f"{bad.get('status_code')} {bad.get('error')}")
+        result('204 No Content is not indexable',
+               rows.get(base + '/nocontent', {}).get('indexability_status') == 'Non-200 Status (204)')
+        result('a javascript: canonical does not canonicalise the page',
+               rows.get(base + '/jscanon', {}).get('indexability') == 'Indexable')
+        result('a malformed sitemap <loc> does not stop the rest being queued',
+               base + '/listed-only' in rows and all(u.startswith('http') for u in crawler.sitemap_urls),
+               str(sorted(crawler.sitemap_urls)))
+    finally:
+        srv.shutdown()
+
+    result('UTF-8 header bytes are decoded as UTF-8', _header_text('nÃ¶index') == 'nöindex'
+           and _header_text('noindex') == 'noindex' and _header_text('ü') == 'ü')
+
+    def scores(n, edges):
+        rows = [{'url': f'https://x.au/{i}', 'status_code': 200, 'content_type': 'text/html',
+                 'is_internal': True} for i in range(n)]
+        links = [{'source_url': f'https://x.au/{a}', 'target_url': f'https://x.au/{b}',
+                  'is_internal': True, 'placement': 'body'} for a, b in edges]
+        CrawlAnalyzer().analyze(rows, links)
+        return [r['link_score'] for r in rows]
+    complete = scores(7, [(a, b) for a in range(7) for b in range(7) if a != b])
+    result('equally linked pages share one Link Score, not 0', set(complete) == {100}, str(complete))
+
+    try:
+        compare_crawls([{'url': 'https://x.au/a'}], [{'url': 'https://x.au/a'}, {'url': None}],
+                       [('https://x.au/a', None, None)], [('https://x.au/a', 'X', 'error')])
+        result('compare tolerates NULL issue names and URL-less rows', True)
+    except Exception as e:
+        result('compare tolerates NULL issue names and URL-less rows', False, repr(e))
+
+    result('indexability of a row with no status is "No Response"',
+           indexability({'url': 'https://x.au/', 'status_code': None}) == ('Non-Indexable', 'No Response'))
+
+    saved = (auth_db.DB_FILE, crawl_db.DB_FILE)
+    tmp = tempfile.TemporaryDirectory()
+    try:
+        auth_db.DB_FILE = crawl_db.DB_FILE = os.path.join(tmp.name, 'corrupt.db')
+        auth_db.init_db()
+        cid = crawl_db.create_crawl(1, 's', 'https://x.au', 'x.au', {})
+        crawl_db.save_url_batch(cid, [{'url': f'https://x.au/{i}', 'status_code': 200} for i in range(3)])
+        with crawl_db.get_db() as conn:
+            conn.execute("UPDATE crawled_urls SET analysis = 'null' WHERE url = 'https://x.au/0'")
+            conn.execute("""UPDATE crawled_urls SET analysis = '{"url": "https://evil/"}' WHERE url = 'https://x.au/1'""")
+        loaded = crawl_db.load_crawled_urls(cid)
+        result('a corrupt analysis value loses nothing and overrides nothing',
+               sorted(r['url'] for r in loaded) == ['https://x.au/0', 'https://x.au/1', 'https://x.au/2'],
+               str([r['url'] for r in loaded]))
+    finally:
+        auth_db.DB_FILE, crawl_db.DB_FILE = saved
+        tmp.cleanup()
+
+
+def test_canonicals_and_titles():
+    """Multiple and conflicting canonicals (HTML tags and Link headers), and
+    title counting that skips embedded documents/graphics."""
+    site = BASE_PORT + 21
+    base = f'http://127.0.0.1:{site}'
+
+    def canon(*hrefs, rel='canonical'):
+        return ''.join(f'<link rel="{rel}" href="{h}">' for h in hrefs)
+
+    pages = {
+        '/same': _page('Same', head=canon('/same', f'{base}/same')),
+        '/conflict': _page('Conflict', head=canon('/a', '/b')),
+        '/mixed': {'body': _page('Mixed', head=canon('/a')),
+                   'headers': {'Link': f'<{base}/b>; rel="canonical"'}},
+        '/header-only': {'body': _page('Header only'),
+                         'headers': {'Link': f'<{base}/a>; rel="canonical", <{base}/x.css>; rel="preload"'}},
+        '/junk-first': _page('Junk first', head=canon('', '/a')),
+        '/case': _page('Case', head=canon('/a', rel='CANONICAL') + canon('/a', rel='alternate canonical')),
+        '/twohead': '<html><head><title>One</title></head><head><title>Two</title></head><body></body></html>',
+        '/embedded': _page('Real', '<svg><title>icon</title></svg><object><title>obj</title></object>'
+                                   '<iframe><title>frame</title></iframe>'),
+        # <embed> is a void element: nothing can be inside it, so a title
+        # written after it is an ordinary (second) title, in browsers too
+        '/after-embed': _page('Real', '<embed src="x.swf"><title>stray</title>'),
+        '/svg-only': '<html><head></head><body><svg><title>icon</title></svg></body></html>',
+        '/a': _page('A'), '/b': _page('B'),
+    }
+    pages['/'] = _page('Home', ''.join(f'<a href="{p}">{p}</a>' for p in pages))
+    srv = serve(make_handler(pages), site)
+    try:
+        crawler = crawl(base + '/')
+        rows = {r['url'].replace(base, ''): r for r in crawler.crawl_results}
+        issues = crawler.issue_detector.get_issues()
+
+        def flagged(name):
+            return sorted(i['url'].replace(base, '') for i in issues if i['issue'] == name)
+
+        result('same URL declared twice: info, page stays indexable',
+               flagged('Multiple Canonical Tags') == ['/case', '/junk-first', '/same']
+               and rows['/same']['indexability'] == 'Indexable',
+               str(flagged('Multiple Canonical Tags')))
+        result('conflicting tags, and tag vs Link header, are errors',
+               flagged('Conflicting Canonicals') == ['/conflict', '/mixed'],
+               str(flagged('Conflicting Canonicals')))
+        result('conflicting canonicals are ignored, as search engines do',
+               rows['/conflict']['indexability'] == 'Indexable'
+               and '/conflict' not in flagged('Canonical URL Different'),
+               str((rows['/conflict']['indexability'], rows['/conflict']['indexability_status'])))
+        result('Link header canonical is used when the HTML has none',
+               rows['/header-only'].get('canonical_url') == f'{base}/a'
+               and rows['/header-only']['indexability_status'] == 'Canonicalised'
+               and '/header-only' not in flagged('Missing Canonical URL')
+               and rows['/mixed'].get('canonical_header') == f'{base}/b',
+               str(rows['/header-only'].get('canonical_url')))
+        result('an empty href among canonicals defers to the valid one',
+               rows['/junk-first']['indexability_status'] == 'Canonicalised')
+        result('rel is matched case-insensitively and as a token list',
+               rows['/case'].get('canonical_count') == 2)
+
+        result('titles in a second <head> count', rows['/twohead'].get('title_count') == 2
+               and '/twohead' in flagged('Multiple Title Tags'))
+        result('titles inside svg, object and iframe do not count',
+               rows['/embedded'].get('title_count') == 1 and rows['/embedded']['title'] == 'Real',
+               str(rows['/embedded'].get('title_count')))
+        result('a title after a (void) <embed> is a real second title',
+               rows['/after-embed'].get('title_count') == 2)
+        result('an SVG title is not the page title',
+               rows['/svg-only']['title'] == '' and '/svg-only' in flagged('Missing Title Tag'))
+    finally:
+        srv.shutdown()
+
+
 def _playwright_available():
     try:
         import playwright  # noqa: F401
@@ -954,6 +1439,11 @@ TESTS = (
     test_ngram_analyzer,
     test_ngram_extraction,
     test_self_hosted_accounts_without_email,
+    test_site_wide_analysis,
+    test_crawl_analysis_scales_linearly,
+    test_analysis_persists_and_crawls_compare,
+    test_hostile_input_regressions,
+    test_canonicals_and_titles,
 )
 
 

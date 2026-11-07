@@ -13,6 +13,36 @@ from contextlib import contextmanager
 import os
 DB_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'users.db')
 
+# Row fields stored together in the crawled_urls.analysis JSON column rather
+# than one column each: indexing directives, tag counts, redirect details and
+# the end-of-crawl analysis (inlinks, Link Score, sitemap membership).
+ANALYSIS_KEYS = (
+    'x_robots_tag', 'title_count', 'meta_description_count', 'h1_count',
+    'canonicals', 'canonical_count', 'canonical_header',
+    'redirected_to', 'redirect_target',
+    'indexability', 'indexability_status',
+    'inlinks', 'outlinks', 'link_score', 'in_sitemap',
+)
+
+
+def _load_analysis(text):
+    """The analysis column as a dict of known keys. Anything unreadable
+    yields {} for that row: one bad value must not lose a whole crawl."""
+    if not text:
+        return {}
+    try:
+        value = json.loads(text)
+    except (ValueError, TypeError):
+        return {}
+    if not isinstance(value, dict):
+        return {}
+    return {k: value[k] for k in ANALYSIS_KEYS if k in value}
+
+
+def _analysis_json(url_data):
+    values = {k: url_data[k] for k in ANALYSIS_KEYS if url_data.get(k) is not None}
+    return json.dumps(values) if values else None
+
 @contextmanager
 def get_db():
     """Context manager for database connections"""
@@ -151,6 +181,12 @@ def init_crawl_tables():
             pass  # Column already exists
         try:
             cursor.execute('ALTER TABLE crawled_urls ADD COLUMN heading_texts TEXT')
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+        # Migration: analysis, JSON of ANALYSIS_KEYS
+        try:
+            cursor.execute('ALTER TABLE crawled_urls ADD COLUMN analysis TEXT')
         except sqlite3.OperationalError:
             pass  # Column already exists
 
@@ -343,7 +379,8 @@ def save_url_batch(crawl_id, urls):
                     url_data.get('render_time'),
                     url_data.get('link_check_only', False),
                     (json.dumps(url_data['custom_extraction'])
-                     if url_data.get('custom_extraction') is not None else None)
+                     if url_data.get('custom_extraction') is not None else None),
+                    _analysis_json(url_data)
                 )
                 rows.append(row)
 
@@ -356,8 +393,8 @@ def save_url_batch(crawl_id, urls):
                     meta_tags, og_tags, twitter_tags, json_ld, analytics, images,
                     hreflang, schema_org, redirects, linked_from,
                     external_links, internal_links, response_time, javascript_rendered,
-                    error_type, render_time, link_check_only, custom_extraction
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    error_type, render_time, link_check_only, custom_extraction, analysis
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', rows)
 
             print(f"Saved {len(urls)} URLs to database for crawl {crawl_id}")
@@ -440,6 +477,77 @@ def save_issues_batch(crawl_id, issues):
     except Exception as e:
         print(f"Error saving issues batch: {e}")
         return False
+
+def update_url_analysis(crawl_id, urls, chunk_size=5000):
+    """Rewrite the analysis JSON and linked_from of rows already saved.
+
+    Called once when a crawl finishes. Uses the (crawl_id, url) index and
+    commits per chunk, so a large crawl never holds the write lock for long
+    while request handlers are reading.
+    """
+    if not urls:
+        return True
+    try:
+        for start in range(0, len(urls), chunk_size):
+            chunk = urls[start:start + chunk_size]
+            rows = [(_analysis_json(u), json.dumps(u.get('linked_from', [])), crawl_id, u.get('url'))
+                    for u in chunk if u.get('url')]
+            with get_db() as conn:
+                conn.executemany(
+                    'UPDATE crawled_urls SET analysis = ?, linked_from = ? '
+                    'WHERE crawl_id = ? AND url = ?', rows)
+        print(f"Saved crawl analysis for {len(urls)} URLs (crawl {crawl_id})")
+        return True
+    except Exception as e:
+        print(f"Error saving crawl analysis: {e}")
+        return False
+
+
+def delete_issues_by_name(crawl_id, issue_names):
+    """Delete a crawl's issues with the given names (recomputed ones)."""
+    names = list(issue_names)
+    if not names:
+        return True
+    try:
+        with get_db() as conn:
+            placeholders = ','.join('?' * len(names))
+            conn.execute(f'DELETE FROM crawl_issues WHERE crawl_id = ? AND issue IN ({placeholders})',
+                         [crawl_id, *names])
+        return True
+    except Exception as e:
+        print(f"Error deleting issues: {e}")
+        return False
+
+
+def load_compare_rows(crawl_id):
+    """The columns crawl comparison needs, one dict per crawled URL.
+
+    Reads only these columns (never body text, JSON blobs or links), so
+    comparing two large crawls stays cheap.
+    """
+    with get_db() as conn:
+        cursor = conn.execute('''
+            SELECT url, status_code, content_type, is_internal, title, meta_description,
+                   h1, canonical_url, word_count, error_type, link_check_only, analysis
+            FROM crawled_urls WHERE crawl_id = ?
+        ''', (crawl_id,))
+        rows = []
+        for row in cursor:
+            data = dict(row)
+            analysis = _load_analysis(data.pop('analysis', None))
+            data['indexability'] = analysis.get('indexability')
+            data['indexability_status'] = analysis.get('indexability_status')
+            rows.append(data)
+        return rows
+
+
+def load_issue_names(crawl_id):
+    """(url, issue, type) for every issue of a crawl."""
+    with get_db() as conn:
+        cursor = conn.execute('SELECT url, issue, type FROM crawl_issues WHERE crawl_id = ?',
+                              (crawl_id,))
+        return [(r['url'], r['issue'], r['type']) for r in cursor]
+
 
 def save_checkpoint(crawl_id, checkpoint_data):
     """Save queue checkpoint for crash recovery"""
@@ -576,6 +684,11 @@ def load_crawled_urls(crawl_id, limit=None, offset=0):
                         url_data['custom_extraction'] = json.loads(extraction)
                     except ValueError:
                         pass
+
+                # Analysis fields go back onto the row as plain keys
+                analysis = _load_analysis(url_data.pop('analysis', None))
+                if analysis:
+                    url_data.update(analysis)
 
                 urls.append(url_data)
 

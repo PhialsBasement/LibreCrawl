@@ -108,6 +108,23 @@ class JavaScriptRenderer:
             pass
         return navigation_ms
 
+    @staticmethod
+    async def _redirect_chain(response):
+        """HTTP redirect hops before the final response, oldest first, in the
+        same shape the requests path records: [{'url', 'status_code'}]."""
+        hops = []
+        try:
+            request = response.request.redirected_from if response else None
+            while request is not None and len(hops) < 30:
+                hop_response = await request.response()
+                hops.append({'url': request.url,
+                             'status_code': hop_response.status if hop_response else None})
+                request = request.redirected_from
+        except Exception:
+            return []
+        hops.reverse()
+        return hops
+
     async def render_page(self, url):
         """
         Render a page with JavaScript and return the HTML content
@@ -146,8 +163,14 @@ class JavaScriptRenderer:
                 status_code = response.status if response else 200
                 render_ms = (time.monotonic() - started) * 1000
 
+                # Besides timings, carry the response details the crawler
+                # needs for indexability: X-Robots-Tag and redirect hops
+                headers = response.headers if response else {}
                 return html_content, status_code, None, page.url, {
-                    'response_ms': response_ms, 'render_ms': render_ms}
+                    'response_ms': response_ms, 'render_ms': render_ms,
+                    'x_robots_tag': headers.get('x-robots-tag', ''),
+                    'link_header': headers.get('link', ''),
+                    'redirects': await self._redirect_chain(response)}
 
             except PlaywrightTimeoutError:
                 return None, 0, "JavaScript rendering timeout", None, empty_timing

@@ -22,6 +22,73 @@ IMAGE_EXTENSIONS = {'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'ico', 'avif', '
 HEAD_CHECK_WORKERS = 5
 
 
+class _CrawlSession(requests.Session):
+    """requests.Session that treats an unfollowable Location as the end of
+    the redirect chain.
+
+    requests parses the next hop even with allow_redirects=False (it fills
+    response.next), so a Location such as "http://[bad/" or
+    "javascript:alert(1)" raised and the 3xx response was lost: the URL was
+    reported as a failed fetch. Stopping there keeps the 3xx as the result,
+    which is what it is: a redirect nobody can follow. Network errors on a
+    followable target and too-many-redirects still raise as before.
+    """
+
+    _UNFOLLOWABLE = (ValueError, requests.exceptions.InvalidURL,
+                     requests.exceptions.InvalidSchema, requests.exceptions.MissingSchema)
+
+    def resolve_redirects(self, resp, req, *args, **kwargs):
+        generator = super().resolve_redirects(resp, req, *args, **kwargs)
+        while True:
+            try:
+                yield next(generator)
+            except StopIteration:
+                return
+            except self._UNFOLLOWABLE:
+                return
+
+
+def _header_text(value):
+    """A response header as the server meant it. http.client decodes headers
+    as latin-1, but non-ASCII header bytes are nearly always UTF-8 (requests
+    applies the same repair to Location when it follows a redirect)."""
+    if not value:
+        return ''
+    try:
+        return value.encode('latin-1').decode('utf-8')
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return value
+
+
+def _header_canonicals(link_header):
+    """URLs a Link response header declares canonical, e.g.
+    Link: <https://example.com/page>; rel="canonical"."""
+    if not link_header:
+        return []
+    try:
+        # requests joins repeated headers with ", ", Playwright with "\n"
+        links = requests.utils.parse_header_links(
+            _header_text(link_header).replace('\n', ', '))
+    except Exception:
+        return []
+    return [link['url'].strip() for link in links
+            if link.get('url') and 'canonical' in str(link.get('rel', '')).lower().split()]
+
+
+def _apply_header_canonicals(result, link_header):
+    """Merge canonicals from the Link header into the row: they count
+    towards multiple/conflicting canonicals, and stand in for the HTML
+    tag when the page has none (PDFs can only declare one this way)."""
+    urls = _header_canonicals(link_header)
+    if not urls:
+        return
+    result['canonical_header'] = urls[0]
+    result['canonicals'] = ((result.get('canonicals') or []) + urls)[:MAX_CANONICALS]
+    result['canonical_count'] = (result.get('canonical_count') or 0) + len(urls)
+    if not result.get('canonical_url'):
+        result['canonical_url'] = urls[0]
+
+
 def classify_fetch_error(exc_or_msg):
     """Classify a failed-fetch error into a coarse error_type.
 
@@ -30,13 +97,15 @@ def classify_fetch_error(exc_or_msg):
     Falls back to message inspection.
 
     Returns one of: 'dns_not_found', 'timeout', 'connection_refused',
-    'ssl_error', 'connection_error'.
+    'ssl_error', 'redirect_loop', 'connection_error'.
     """
     if isinstance(exc_or_msg, BaseException):
         seen = set()
         cur = exc_or_msg
         while cur is not None and id(cur) not in seen:
             seen.add(id(cur))
+            if isinstance(cur, requests.exceptions.TooManyRedirects):
+                return 'redirect_loop'
             if isinstance(cur, socket.gaierror):
                 return 'dns_not_found'
             if isinstance(cur, ssl.SSLError) or isinstance(cur, requests.exceptions.SSLError):
@@ -48,6 +117,8 @@ def classify_fetch_error(exc_or_msg):
             cur = getattr(cur, '__cause__', None) or getattr(cur, '__context__', None)
 
     msg = str(exc_or_msg).lower()
+    if 'too many redirects' in msg or 'err_too_many_redirects' in msg or 'exceeded 30 redirects' in msg:
+        return 'redirect_loop'
     dns_markers = (
         'getaddrinfo failed',
         'name or service not known',
@@ -80,9 +151,15 @@ from src.core.memory_monitor import MemoryMonitor
 from src.core.memory_profiler import UserMemoryTracker
 from src.core.event_log import CrawlEventLog
 from src.core.custom_extractor import CustomExtractor
+from src.core.crawl_analysis import CrawlAnalyzer, ANALYSIS_ISSUES, apply_indexability
+from src.core.link_manager import normalize_url
+from src.core.seo_extractor import MAX_CANONICALS
 
 # Upper bound on URLs accepted for one list-mode crawl
 MAX_LIST_URLS = 100000
+
+# Issues produced once the crawl finishes; a resumed crawl recomputes them
+RECOMPUTED_AT_FINISH = ANALYSIS_ISSUES | {'Duplicate Content Detected'}
 
 
 class WebCrawler:
@@ -93,7 +170,7 @@ class WebCrawler:
 
     def __init__(self, crawl_id=None, resume_from_db=False):
         # HTTP session
-        self.session = requests.Session()
+        self.session = _CrawlSession()
         self.session.headers.update({
             'User-Agent': 'LibreCrawl/1.0 (Web Crawler)'
         })
@@ -102,6 +179,7 @@ class WebCrawler:
         # Base URL tracking
         self.base_url = None
         self.base_domain = None
+        self.start_url = None  # the seed; never reported as an orphan
 
         # Component instances (initialized on demand)
         self.rate_limiter = None
@@ -159,6 +237,11 @@ class WebCrawler:
         self._robots_cache = {}
         self._robots_locks = {}
         self._robots_locks_guard = threading.Lock()
+
+        # Every URL listed in the site's XML sitemaps (normalised), for the
+        # sitemap audit. Filled by background discovery; empty when no
+        # sitemap was found or discovery is off.
+        self.sitemap_urls = set()
 
         # HEAD status cache (avoids re-checking the same URL across pages)
         self._head_status_cache = {}
@@ -354,6 +437,7 @@ class WebCrawler:
             parsed = urlparse(url)
             self.base_url = f"{parsed.scheme}://{parsed.netloc}"
             self.base_domain = parsed.netloc
+            self.start_url = normalize_url(url)
 
             # Create database crawl record if session_id provided
             if session_id:
@@ -436,6 +520,7 @@ class WebCrawler:
         self.event_log.new_epoch()
         self._head_status_cache.clear()
         self._synthesized_urls.clear()
+        self.sitemap_urls = set()
         self.stats = {
             'discovered': 0,
             'crawled': 0,
@@ -466,12 +551,29 @@ class WebCrawler:
         """Discover sitemaps and add URLs to crawl queue"""
         sitemap_urls = self.sitemap_parser.discover_sitemaps(base_url)
 
+        # Keep the full list (filtered URLs included) for the sitemap audit
+        listed = set()
+        for url in sitemap_urls:
+            try:
+                url = normalize_url(url.strip())
+            except ValueError:
+                continue
+            if url.startswith(('http://', 'https://')):
+                listed.add(url)
+        self.sitemap_urls = listed
+
         added_count = 0
         filtered_count = 0
 
         for url in sitemap_urls:
-            if self._should_crawl_url(url):
-                self.link_manager.add_url(url, 0)
+            # One malformed <loc> must not stop the rest being queued
+            try:
+                allowed = self._should_crawl_url(url)
+                if allowed:
+                    self.link_manager.add_url(url, 0)
+            except ValueError:
+                allowed = False
+            if allowed:
                 added_count += 1
             else:
                 filtered_count += 1
@@ -560,6 +662,7 @@ class WebCrawler:
             self.crawl_id = crawl_id
             self.base_url = crawl_data['base_url']
             self.base_domain = crawl_data['base_domain']
+            self.start_url = normalize_url(self.base_url)
             # Preserve demo keys across config restore
             demo_mode = self.config.get('demo_mode', False)
             demo_limit = self.config.get('demo_memory_limit_bytes', 0)
@@ -593,8 +696,16 @@ class WebCrawler:
                     link_key = f"{link['source_url']}|{link['target_url']}"
                     self.link_manager.links_set.add(link_key)
 
-            # Load issues and restore to issue detector
+            # Load issues and restore to issue detector. Issues computed at
+            # the end of a crawl (site-wide analysis, duplicate content) are
+            # recomputed when the resumed crawl finishes, so the ones from
+            # the earlier run are dropped rather than saved a second time.
             loaded_issues = load_crawl_issues(crawl_id)
+            recomputed = RECOMPUTED_AT_FINISH
+            if any(i.get('issue') in recomputed for i in loaded_issues):
+                from src.crawl_db import delete_issues_by_name
+                delete_issues_by_name(crawl_id, recomputed)
+                loaded_issues = [i for i in loaded_issues if i.get('issue') not in recomputed]
             if loaded_issues:
                 self.issue_detector.detected_issues = loaded_issues
 
@@ -665,6 +776,14 @@ class WebCrawler:
                     print("No pending URLs found - crawl was already complete")
 
                 self.stats['discovered'] = len(self.link_manager.all_discovered_urls)
+
+            # Re-read the sitemaps for the sitemap audit (and to queue any
+            # listed URL the interrupted run never reached)
+            self.sitemap_urls = set()
+            if self.config.get('discover_sitemaps', True) and not self.config.get('list_mode'):
+                self._sitemap_discovery_done = False
+                threading.Thread(target=self._discover_sitemaps_background,
+                                 args=(self.base_url,), daemon=True).start()
 
             # Update status to running
             set_crawl_status(crawl_id, 'running')
@@ -771,7 +890,8 @@ class WebCrawler:
             'memory': self.memory_monitor.get_stats(),
             'memory_data': data_sizes,
             'demo_stopped': self._demo_limit_reached,
-            'demo_mode': self.config.get('demo_mode', False)
+            'demo_mode': self.config.get('demo_mode', False),
+            'crawl_id': self.crawl_id
         }
 
     def get_status(self):
@@ -966,6 +1086,7 @@ class WebCrawler:
                             try:
                                 result = future.result()
                                 if result:
+                                    self._finalize_result(result)
                                     with self.results_lock:
                                         self.crawl_results.append(result)
                                         self.stats['crawled'] += 1
@@ -1049,9 +1170,13 @@ class WebCrawler:
                 self._detect_duplication_issues(duplication_threshold)
                 print(f"Duplication detection complete. Total issues: {len(self.issue_detector.get_issues())}")
 
+            self._run_crawl_analysis()
+
         # Save final data and set appropriate status
         if self.db_save_enabled and self.crawl_id:
             self._save_batch_to_db(force=True)
+            if not self._demo_limit_reached:
+                self._persist_analysis()
             from src.crawl_db import set_crawl_status
             if self._demo_limit_reached:
                 set_crawl_status(self.crawl_id, 'demo_stopped')
@@ -1218,6 +1343,20 @@ class WebCrawler:
                 ]
                 result['redirected_to'] = final_url
 
+            # Indexing directives can arrive as a header instead of a meta
+            # tag (requests joins repeated headers with ", ")
+            result['x_robots_tag'] = _header_text(response.headers.get('X-Robots-Tag', ''))
+
+            # With redirects not followed, keep the hop so chains and loops
+            # can be traced through the crawled rows afterwards. A malformed
+            # Location must not turn a fetched page into an error row.
+            if 300 <= response.status_code < 400 and response.headers.get('Location'):
+                try:
+                    result['redirect_target'] = urljoin(
+                        url, _header_text(response.headers['Location']))
+                except ValueError:
+                    result['redirect_target'] = _header_text(response.headers['Location'])
+
             # Only parse HTML content
             if 'text/html' in response.headers.get('content-type', ''):
                 soup = BeautifulSoup(response.content, 'html.parser')
@@ -1252,6 +1391,10 @@ class WebCrawler:
                     self.link_manager.extract_links(soup, url, depth + 1, self._should_crawl_url,
                                                     include_images=self.config.get('crawl_images', False),
                                                     base_url=final_url)
+
+            # Link: <...>; rel="canonical" (any content type, after the HTML
+            # tags so the tag stays first when both are present)
+            _apply_header_canonicals(result, response.headers.get('Link', ''))
 
             # Populate linked_from after all link collection is complete
             result['linked_from'] = self.link_manager.get_source_pages(url)
@@ -1340,8 +1483,15 @@ class WebCrawler:
                 'hreflang': [],
                 'schema_org': [],
                 'linked_from': [],
-                'javascript_rendered': True
+                'javascript_rendered': True,
+                'x_robots_tag': timing.get('x_robots_tag', '')
             }
+
+            # Real HTTP redirects only (from the request chain); a page.url
+            # changed by client-side routing is not a redirect
+            if timing.get('redirects'):
+                result['redirects'] = timing['redirects']
+                result['redirected_to'] = final_url
 
             # Parse HTML
             soup = BeautifulSoup(html_content, 'html.parser')
@@ -1358,6 +1508,7 @@ class WebCrawler:
             self.seo_extractor.extract_hreflang(soup, result)
             self.seo_extractor.extract_schema_org(soup, result)
             self._apply_custom_extraction(soup, html_content, result)
+            _apply_header_canonicals(result, timing.get('link_header', ''))
 
             # Collect all links (returns only the ones new to this crawl)
             new_links = self.link_manager.collect_all_links(soup, url, self.crawl_results,
@@ -1436,6 +1587,7 @@ class WebCrawler:
                         try:
                             result = await task
                             if result:
+                                self._finalize_result(result)
                                 with self.results_lock:
                                     self.crawl_results.append(result)
                                     self.stats['crawled'] += 1
@@ -1506,9 +1658,13 @@ class WebCrawler:
                     self._detect_duplication_issues(duplication_threshold)
                     print(f"Duplication detection complete. Total issues: {len(self.issue_detector.get_issues())}")
 
+                self._run_crawl_analysis()
+
             # Save final data and set appropriate status
             if self.db_save_enabled and self.crawl_id:
                 self._save_batch_to_db(force=True)
+                if not self._demo_limit_reached:
+                    self._persist_analysis()
                 from src.crawl_db import set_crawl_status
                 if self._demo_limit_reached:
                     set_crawl_status(self.crawl_id, 'demo_stopped')
@@ -1531,6 +1687,13 @@ class WebCrawler:
             if self.db_save_enabled:
                 self.unsaved_issues.extend(new_issues)
 
+    def _finalize_result(self, result):
+        """Per-row fields derived from the row itself, set before the row is
+        published. Cheap: a few dict lookups, no parsing."""
+        apply_indexability(result)
+        if self.sitemap_urls:
+            result['in_sitemap'] = result.get('url') in self.sitemap_urls
+
     def _update_all_linked_from(self):
         """Update linked_from field for all crawled URLs based on collected source_pages data"""
         print("Updating linked_from data for all URLs...")
@@ -1545,6 +1708,61 @@ class WebCrawler:
         if updated:
             self.event_log.emit_many('url_update', [self._client_url_data(u) for u in updated])
         print(f"Updated linked_from data for {len(updated)} URLs")
+
+    def _run_crawl_analysis(self):
+        """Site-wide checks once the crawl is done (see crawl_analysis).
+
+        Rows are patched in place and journalled as small 'url_patch' events
+        carrying only the changed fields, so the end-of-crawl update costs
+        a few bytes per URL rather than a second copy of every row.
+        """
+        if not self.issue_detector or not self.link_manager:
+            return
+        started = time.time()
+        print("Running crawl analysis...")
+        try:
+            with self.results_lock:
+                rows = list(self.crawl_results)
+            with self.link_manager.links_lock:
+                links = list(self.link_manager.all_links)
+
+            analyzer = CrawlAnalyzer(self.issue_detector._should_exclude)
+            patches, issues = analyzer.analyze(
+                rows, links, sitemap_urls=self.sitemap_urls, start_url=self.start_url)
+
+            if patches:
+                self.event_log.emit_many(
+                    'url_patch', [{'url': url, **fields} for url, fields in patches.items()])
+            if issues:
+                with self.issue_detector.issues_lock:
+                    self.issue_detector.detected_issues.extend(issues)
+                self.event_log.emit_many('issue', issues)
+                self.user_memory.track_issues(issues)
+                if self.db_save_enabled:
+                    self.unsaved_issues.extend(issues)
+            print(f"Crawl analysis complete in {time.time() - started:.1f}s: "
+                  f"{len(patches)} rows updated, {len(issues)} issues")
+        except Exception as e:
+            print(f"Crawl analysis failed: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _persist_analysis(self):
+        """Write the end-of-crawl fields to rows saved earlier in the crawl.
+
+        Runs after the final batch save, as one executemany over the
+        (crawl_id, url) index. linked_from goes with it: rows saved mid-crawl
+        otherwise keep the partial list they had when they were saved.
+        """
+        if not self.db_save_enabled or not self.crawl_id:
+            return
+        try:
+            from src.crawl_db import update_url_analysis
+            with self.results_lock:
+                rows = list(self.crawl_results)
+            update_url_analysis(self.crawl_id, rows)
+        except Exception as e:
+            print(f"Error saving crawl analysis: {e}")
 
     def _head_check_new_links(self, new_links, result, depth):
         """HEAD-check a page's new image links and uncrawled external links.
@@ -1670,6 +1888,7 @@ class WebCrawler:
             result['is_internal'] = self.link_manager.is_internal(url)
             result['linked_from'] = sources
             result['link_check_only'] = link_check_only
+            self._finalize_result(result)
             self.crawl_results.append(result)
             self.stats['crawled'] += 1
             # a result counts as discovered (issue #94)

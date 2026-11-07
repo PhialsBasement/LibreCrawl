@@ -65,11 +65,13 @@ class LinkManager:
             if not href or href.startswith('#') or href.startswith('mailto:') or href.startswith('tel:'):
                 continue
 
-            # Convert relative URLs to absolute
-            absolute_url = urljoin(resolve_base, href)
-
-            # Clean URL (remove fragment)
-            clean_url = normalize_url(absolute_url)
+            # Convert relative URLs to absolute and drop the fragment. One
+            # malformed href (e.g. "http://[bad/") is skipped; it must not
+            # take the rest of the page's links down with it.
+            try:
+                clean_url = normalize_url(urljoin(resolve_base, href))
+            except ValueError:
+                continue
 
             # Thread-safe checking and adding
             with self.urls_lock:

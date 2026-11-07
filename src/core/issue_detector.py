@@ -7,6 +7,9 @@ from collections import defaultdict
 from fnmatch import fnmatch
 from urllib.parse import urlparse
 
+from .crawl_analysis import (canonical_target, canonical_targets, is_canonicalised,
+                             noindex_source, nofollow_source)
+
 # Near-duplicate detection is bounded so a large site can never hold a crawl in
 # "finishing up" indefinitely: when the budget is exhausted the pass stops with
 # a warning and partial results instead of running to completion.
@@ -102,6 +105,16 @@ class IssueDetector:
                 'details': f"Title is {len(title)} characters (recommended: 30-60)"
             })
 
+        if (result.get('title_count') or 0) > 1:
+            issues.append({
+                'url': url,
+                'type': 'warning',
+                'category': 'SEO',
+                'issue': 'Multiple Title Tags',
+                'details': f"Page has {result['title_count']} <title> tags in <head>; "
+                           f"search engines may pick either"
+            })
+
     def _check_meta_description_issues(self, result, issues):
         """Check for meta description issues"""
         url = result.get('url', '')
@@ -132,6 +145,15 @@ class IssueDetector:
                 'details': f"Description is {len(meta_desc)} characters (recommended: 120-160)"
             })
 
+        if (result.get('meta_description_count') or 0) > 1:
+            issues.append({
+                'url': url,
+                'type': 'warning',
+                'category': 'SEO',
+                'issue': 'Multiple Meta Descriptions',
+                'details': f"Page has {result['meta_description_count']} meta description tags"
+            })
+
     def _check_heading_issues(self, result, issues):
         """Check for heading-related issues"""
         url = result.get('url', '')
@@ -144,11 +166,19 @@ class IssueDetector:
                 'issue': 'Missing H1 Tag',
                 'details': 'Page has no H1 heading'
             })
+        elif (result.get('h1_count') or 0) > 1:
+            issues.append({
+                'url': url,
+                'type': 'warning',
+                'category': 'SEO',
+                'issue': 'Multiple H1 Tags',
+                'details': f"Page has {result['h1_count']} H1 headings (recommended: one)"
+            })
 
     def _check_content_issues(self, result, issues):
         """Check for content-related issues"""
         url = result.get('url', '')
-        word_count = result.get('word_count', 0)
+        word_count = result.get('word_count') or 0
 
         if word_count < 300:
             issues.append({
@@ -162,7 +192,7 @@ class IssueDetector:
     def _check_technical_issues(self, result, issues):
         """Check for technical SEO issues"""
         url = result.get('url', '')
-        status_code = result.get('status_code', 0)
+        status_code = result.get('status_code') or 0
 
         # No HTTP response at all (DNS failure, connection refused, timeout, etc.)
         if status_code == 0:
@@ -226,14 +256,41 @@ class IssueDetector:
                 'issue': 'Missing Canonical URL',
                 'details': 'Page has no canonical URL specified'
             })
-        elif canonical_url != url:
+        elif is_canonicalised(result):
+            # Compared after resolving and normalising, so a relative
+            # canonical naming the page itself is not "different"
             issues.append({
                 'url': url,
                 'type': 'warning',
                 'category': 'Technical',
                 'issue': 'Canonical URL Different',
-                'details': f"Canonical points to: {canonical_url}"
+                'details': f"Canonical points to: {canonical_target(result)}"
             })
+
+        # Several canonical declarations (HTML tags and/or Link headers)
+        count = result.get('canonical_count') or 0
+        if count > 1:
+            targets = canonical_targets(result)
+            sources = 'tags' if not result.get('canonical_header') else 'tags/headers'
+            if len(targets) > 1:
+                shown = ', '.join(targets[:3]) + (f' (+{len(targets) - 3} more)' if len(targets) > 3 else '')
+                issues.append({
+                    'url': url,
+                    'type': 'error',
+                    'category': 'Technical',
+                    'issue': 'Conflicting Canonicals',
+                    'details': f"{count} canonical {sources} name {len(targets)} different URLs, "
+                               f"so search engines ignore all of them: {shown}"
+                })
+            else:
+                issues.append({
+                    'url': url,
+                    'type': 'info',
+                    'category': 'Technical',
+                    'issue': 'Multiple Canonical Tags',
+                    'details': f"{count} canonical {sources}, all naming "
+                               f"{targets[0] if targets else 'no valid URL'}; one is enough"
+                })
 
     def _check_mobile_issues(self, result, issues):
         """Check for mobile optimization issues"""
@@ -361,24 +418,27 @@ class IssueDetector:
     def _check_indexability_issues(self, result, issues):
         """Check for indexability issues"""
         url = result.get('url', '')
-        robots = result.get('robots', '').lower()
+        where = {'meta': 'robots meta tag', 'header': 'X-Robots-Tag HTTP header'}
 
-        if 'noindex' in robots:
+        source = noindex_source(result)
+        if source:
             issues.append({
                 'url': url,
                 'type': 'error',
                 'category': 'Indexability',
                 'issue': 'Noindex Tag Present',
-                'details': 'Page is BLOCKED from search engines - has noindex directive'
+                'details': f'Page is BLOCKED from search engines - noindex in the {where[source]}'
             })
 
-        if 'nofollow' in robots:
+        source = nofollow_source(result)
+        if source:
             issues.append({
                 'url': url,
                 'type': 'error',
                 'category': 'Indexability',
                 'issue': 'Nofollow Tag Present',
-                'details': 'Links on this page are NOT followed by search engines - has nofollow directive'
+                'details': f'Links on this page are NOT followed by search engines - '
+                           f'nofollow in the {where[source]}'
             })
 
     def _check_broken_image_issues(self, result, issues):
@@ -630,8 +690,10 @@ class IssueDetector:
 
     def _should_exclude(self, url):
         """Check if URL should be excluded from issue detection"""
-        parsed = urlparse(url)
-        path = parsed.path
+        try:
+            path = urlparse(url or '').path
+        except ValueError:
+            return False  # unparseable (e.g. a broken IPv6 host): nothing to match
 
         for pattern in self.exclusion_patterns:
             if '*' in pattern:

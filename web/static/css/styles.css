@@ -206,6 +206,123 @@ body {
     cursor: pointer;
 }
 
+/* Crawl comparison */
+.compare-bar {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    padding: 15px 20px 0;
+}
+
+.compare-label {
+    color: #cbd5e1;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.compare-input {
+    padding: 6px 12px;
+    border-radius: 6px;
+    border: 1px solid #4b5563;
+    background: #1f2937;
+    color: white;
+    font-size: 13px;
+    max-width: 420px;
+}
+
+.compare-btn {
+    padding: 8px 16px;
+    border-radius: 6px;
+    border: 1px solid #4b5563;
+    background: #1f2937;
+    color: white;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.compare-btn-primary {
+    background: #7c3aed;
+    border-color: #7c3aed;
+}
+
+.compare-status {
+    color: #94a3b8;
+    font-size: 13px;
+}
+
+.compare-summary {
+    padding: 12px 20px 0;
+}
+
+.compare-summary:empty {
+    display: none;
+}
+
+.compare-cards {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.compare-card {
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid #374151;
+    background: rgba(255, 255, 255, 0.03);
+    color: #e2e8f0;
+    font-size: 13px;
+    cursor: pointer;
+    text-align: left;
+}
+
+.compare-card strong {
+    display: block;
+    font-size: 18px;
+}
+
+.compare-card.active {
+    border-color: #7c3aed;
+    background: rgba(124, 58, 237, 0.15);
+}
+
+.compare-card.zero {
+    opacity: 0.5;
+}
+
+.compare-issues {
+    max-height: 170px;
+    overflow: auto;
+    border: 1px solid #374151;
+    border-radius: 8px;
+}
+
+.compare-issues table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.compare-issues th,
+.compare-issues td {
+    padding: 5px 10px;
+    text-align: left;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.compare-issues th {
+    position: sticky;
+    top: 0;
+    background: #1f2937;
+}
+
+.compare-delta-up { color: #ef4444; }
+.compare-delta-down { color: #10b981; }
+
 /* Custom extraction */
 .extraction-empty {
     padding: 14px 16px;

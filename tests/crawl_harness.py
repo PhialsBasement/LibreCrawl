@@ -93,6 +93,11 @@ class Client:
                       f"'url_update' for a url never sent: {row['url']}")
                 self.urls[row['url']] = row
                 self.url_updates += 1
+            elif kind == 'url_patch':
+                check(row['url'] in self.urls,
+                      f"'url_patch' for a url never sent: {row['url']}")
+                self.urls[row['url']] = {**self.urls[row['url']], **row}
+                self.url_updates += 1
             elif kind == 'link':
                 key = row['source_url'] + '|' + row['target_url']
                 check(key not in self.links, f"duplicate 'link' event for {key}")
