@@ -1,7 +1,7 @@
 """Sitemap discovery and parsing"""
 import gzip
 import xml.etree.ElementTree as ET
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 
 
 class SitemapParser:
@@ -33,6 +33,8 @@ class SitemapParser:
         # Check robots.txt for sitemap declarations
         robots_sitemaps = self._get_sitemaps_from_robots(base_domain)
         sitemap_urls.extend(robots_sitemaps)
+        # Deduplicate while preserving discovery order
+        sitemap_urls = list(dict.fromkeys(sitemap_urls))
 
         print(f"Discovering sitemaps for {base_domain}...")
 
@@ -57,8 +59,15 @@ class SitemapParser:
                 for line in response.text.split('\n'):
                     line = line.strip()
                     if line.lower().startswith('sitemap:'):
-                        sitemap_url = line.split(':', 1)[1].strip()
-                        sitemaps.append(sitemap_url)
+                        # Extract URL, strip inline comments (#) and surrounding whitespace
+                        sitemap_url = line.split(':', 1)[1].split('#', 1)[0].strip()
+                        if sitemap_url:
+                            # Resolve relative paths (e.g. "/sitemap-news.xml")
+                            # against the robots.txt URL so requests always
+                            # receives a full URL with a scheme.
+                            sitemap_url = urljoin(robots_url, sitemap_url)
+                            if sitemap_url not in sitemaps:
+                                sitemaps.append(sitemap_url)
 
         except Exception as e:
             print(f"Could not fetch robots.txt: {e}")
