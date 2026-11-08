@@ -1142,6 +1142,9 @@ def test_analysis_persists_and_crawls_compare():
     try:
         auth_db.DB_FILE = crawl_db.DB_FILE = os.path.join(tmp.name, 'compare.db')
         auth_db.init_db()
+        with auth_db.get_db() as conn:
+            conn.execute("INSERT OR IGNORE INTO users (id, username, email, password_hash) "
+                         "VALUES (1, 'fixture', 'fixture@localhost', 'x')")
 
         def saved_crawl():
             crawler = WebCrawler()
@@ -1328,6 +1331,9 @@ def test_hostile_input_regressions():
     try:
         auth_db.DB_FILE = crawl_db.DB_FILE = os.path.join(tmp.name, 'corrupt.db')
         auth_db.init_db()
+        with auth_db.get_db() as conn:
+            conn.execute("INSERT OR IGNORE INTO users (id, username, email, password_hash) "
+                         "VALUES (1, 'fixture', 'fixture@localhost', 'x')")
         cid = crawl_db.create_crawl(1, 's', 'https://x.au', 'x.au', {})
         crawl_db.save_url_batch(cid, [{'url': f'https://x.au/{i}', 'status_code': 200} for i in range(3)])
         with crawl_db.get_db() as conn:

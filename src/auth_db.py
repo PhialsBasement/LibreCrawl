@@ -18,6 +18,9 @@ def get_db():
     # Wait for a busy database instead of failing immediately (see crawl_db).
     conn = sqlite3.connect(DB_FILE, timeout=30)
     conn.row_factory = sqlite3.Row  # Return rows as dictionaries
+    # Enable foreign-key enforcement so ON DELETE CASCADE actually fires.
+    # SQLite defaults to foreign_keys=OFF on every new connection.
+    conn.execute('PRAGMA foreign_keys = ON')
     try:
         yield conn
         conn.commit()
