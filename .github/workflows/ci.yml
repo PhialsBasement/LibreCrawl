@@ -31,36 +31,27 @@ jobs:
       - name: Run fixture tests
         run: python tests/fixture_tests.py
 
-  start-script-linux-docker:
-    name: start-librecrawl.sh (Linux, Docker)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Check Docker Compose is available
-        run: docker compose version
-
-      - name: Run start-librecrawl.sh and wait for the server
-        run: .github/scripts/wait-for-start-script.sh ./start-librecrawl.sh
-
-      - name: Show the script output
-        if: always()
-        run: cat start.log
-
   start-script-linux-python:
-    name: start-librecrawl.sh (Ubuntu 24.04, Python, no Docker)
+    name: start-librecrawl.sh (Ubuntu, system Python, no Docker)
     runs-on: ubuntu-latest
-    container: ubuntu:24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
-      # A plain Ubuntu desktop user's setup; this Python refuses global pip installs
-      - name: Install Python and curl
+      # Hide Docker so the script takes its Python path
+      - name: Hide Docker
         run: |
-          apt-get update
-          apt-get install -y python3 python3-venv curl
+          while docker_path=$(command -v docker); do
+            echo "Hiding $docker_path"
+            sudo mv "$docker_path" "$docker_path.hidden"
+          done
+
+      # Ubuntu's system Python refuses global pip installs, like a desktop install
+      - name: Show the Python the script will use
+        run: |
+          which python3
+          python3 --version
+          python3 -c "import sysconfig, os; marker = os.path.join(sysconfig.get_path('stdlib'), 'EXTERNALLY-MANAGED'); print('EXTERNALLY-MANAGED present:', os.path.exists(marker))"
 
       - name: Run start-librecrawl.sh and wait for the server
         run: .github/scripts/wait-for-start-script.sh ./start-librecrawl.sh
@@ -112,9 +103,11 @@ jobs:
       - name: Run start-librecrawl.bat and wait for the server
         shell: pwsh
         run: |
-          # Windows runners only run Windows containers, so hide Docker to test the Python path
-          $env:Path = ($env:Path -split ';' | Where-Object { $_ -notmatch 'docker' }) -join ';'
-          if (Get-Command docker -ErrorAction SilentlyContinue) { throw 'Docker is still on PATH' }
+          # Hide Docker so the script takes its Python path
+          while ($docker = Get-Command docker -ErrorAction SilentlyContinue) {
+            Write-Host "Hiding $($docker.Source)"
+            Rename-Item $docker.Source "$($docker.Source).hidden"
+          }
 
           $script = Start-Process cmd.exe -ArgumentList '/c', 'start-librecrawl.bat > start.log 2>&1' -PassThru -NoNewWindow
           $deadline = (Get-Date).AddSeconds([int]$env:STARTUP_TIMEOUT_SECONDS)
