@@ -7,3 +7,4 @@ data/*.db-wal
 data/*.db-shm
 
 .env
+.venv/

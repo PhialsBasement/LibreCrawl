@@ -48,37 +48,37 @@ if command -v docker &> /dev/null && command -v docker compose &> /dev/null; the
 else
     echo "Docker not found. Checking for Python..."
 
-    # Check for Python 3
-    if ! command -v python3 &> /dev/null; then
-        echo "Python 3 not found! Please install Python 3.11 or later."
+    # Python 3.11+, same as the Docker image
+    if ! command -v python3 &> /dev/null || ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))'; then
+        echo "Python 3.11 or later not found!"
         echo ""
         echo "Installation instructions:"
-        echo "  Ubuntu/Debian: sudo apt install python3 python3-pip"
-        echo "  macOS: brew install python@3.11"
+        echo "  Ubuntu/Debian: sudo apt install python3 python3-venv"
+        echo "  macOS: brew install python"
         echo "  Or download from: https://www.python.org/downloads/"
         exit 1
     fi
 
-    echo "Python found! Installing dependencies..."
-
-    # Check if pip is available
-    if ! command -v pip3 &> /dev/null; then
-        echo "pip not found! Installing pip..."
-        python3 -m ensurepip --default-pip
-    fi
-
-    # Check if Flask is installed
-    if ! python3 -c "import flask" &> /dev/null; then
-        echo "Installing Python packages from requirements.txt..."
-        pip3 install -r requirements.txt
-
-        if [ $? -ne 0 ]; then
-            echo "Failed to install dependencies!"
+    # Own environment: Homebrew and recent Linux Python refuse global pip installs (PEP 668)
+    if [ ! -x .venv/bin/python ]; then
+        echo "Creating a Python environment in .venv..."
+        if ! python3 -m venv .venv; then
+            echo "Could not create the Python environment!"
+            echo "  Ubuntu/Debian: sudo apt install python3-venv"
             exit 1
         fi
+    fi
 
-        echo "Installing Playwright browsers..."
-        playwright install chromium
+    echo "Installing Python packages from requirements.txt..."
+    if ! .venv/bin/python -m pip install --quiet -r requirements.txt; then
+        echo "Failed to install dependencies!"
+        exit 1
+    fi
+
+    echo "Installing Playwright browser..."
+    if ! .venv/bin/python -m playwright install chromium; then
+        echo "Failed to install the Playwright browser!"
+        exit 1
     fi
 
     # Run LibreCrawl with Python in local mode
@@ -94,6 +94,5 @@ else
         fi
     }) &
 
-    # Run main.py with local flag
-    python3 main.py -l
+    .venv/bin/python main.py -l
 fi
