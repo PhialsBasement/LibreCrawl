@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    name: Fixture tests (Linux, Python 3.11)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same Python version as the Docker image
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Run fixture tests
+        run: python tests/fixture_tests.py
+
+  start-script-macos:
+    name: start-librecrawl.sh (macOS, Apple Silicon, Homebrew Python)
+    runs-on: macos-latest
+    timeout-minutes: 20
+    env:
+      LIBRECRAWL_URL: http://localhost:5000/
+      STARTUP_TIMEOUT_SECONDS: 600
+    steps:
+      - uses: actions/checkout@v4
+
+      # The script must take its Python path, the one Mac users without Docker get
+      - name: Check Docker is absent
+        run: |
+          if command -v docker; then
+            echo "Docker is installed, so the script would not test the Python path"
+            exit 1
+          fi
+
+      # Homebrew Python is what most Mac users have
+      - name: Use Homebrew Python
+        run: |
+          brew install python
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+
+      - name: Show the Python the script will use
+        run: |
+          which python3 pip3
+          python3 --version
+          python3 -c "import sysconfig, os; marker = os.path.join(sysconfig.get_path('stdlib'), 'EXTERNALLY-MANAGED'); print('EXTERNALLY-MANAGED present:', os.path.exists(marker))"
+
+      - name: Run start-librecrawl.sh and wait for the server
+        run: |
+          chmod +x start-librecrawl.sh
+          ./start-librecrawl.sh > start.log 2>&1 &
+          script_pid=$!
+
+          deadline=$((SECONDS + STARTUP_TIMEOUT_SECONDS))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            status=$(curl -s -o /dev/null -w '%{http_code}' "$LIBRECRAWL_URL" || true)
+            if [ "$status" = "200" ] || [ "$status" = "302" ]; then
+              echo "LibreCrawl answered with HTTP $status"
+              kill "$script_pid" 2>/dev/null || true
+              exit 0
+            fi
+            if ! kill -0 "$script_pid" 2>/dev/null; then
+              echo "start-librecrawl.sh exited before the server came up"
+              exit 1
+            fi
+            sleep 5
+          done
+
+          echo "LibreCrawl did not answer within ${STARTUP_TIMEOUT_SECONDS}s"
+          kill "$script_pid" 2>/dev/null || true
+          exit 1
+
+      - name: Show the script output
+        if: always()
+        run: cat start.log
