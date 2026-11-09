@@ -3,7 +3,6 @@
 # Usage: wait-for-start-script.sh <start script>
 # Needs LIBRECRAWL_URL and STARTUP_TIMEOUT_SECONDS; the script's output goes to start.log.
 
-chmod +x "$1"
 "$1" > start.log 2>&1 &
 script_pid=$!
 
