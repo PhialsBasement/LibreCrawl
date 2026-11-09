@@ -4,7 +4,13 @@
 
 mkdir -p data
 echo "Checking for Docker..."
-if command -v docker &> /dev/null && command -v docker compose &> /dev/null; then
+if docker compose version &> /dev/null; then
+    if ! docker info &> /dev/null; then
+        echo "Docker is installed but not running."
+        echo "Start Docker (Docker Desktop on Mac), wait until it is running, then run this again."
+        exit 1
+    fi
+
     echo "Docker found! Starting LibreCrawl with Docker..."
     docker compose up -d
 
