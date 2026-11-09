@@ -5,6 +5,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  LIBRECRAWL_URL: http://localhost:5000/
+  STARTUP_TIMEOUT_SECONDS: 900
+
 jobs:
   tests:
     name: Fixture tests (Linux, Python 3.11)
@@ -27,17 +31,52 @@ jobs:
       - name: Run fixture tests
         run: python tests/fixture_tests.py
 
-  start-script-macos:
-    name: start-librecrawl.sh (macOS, Apple Silicon, Homebrew Python)
-    runs-on: macos-latest
-    timeout-minutes: 20
-    env:
-      LIBRECRAWL_URL: http://localhost:5000/
-      STARTUP_TIMEOUT_SECONDS: 600
+  start-script-linux-docker:
+    name: start-librecrawl.sh (Linux, Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
-      # The script must take its Python path, the one Mac users without Docker get
+      - name: Check Docker Compose is available
+        run: docker compose version
+
+      - name: Run start-librecrawl.sh and wait for the server
+        run: .github/scripts/wait-for-start-script.sh ./start-librecrawl.sh
+
+      - name: Show the script output
+        if: always()
+        run: cat start.log
+
+  start-script-linux-python:
+    name: start-librecrawl.sh (Ubuntu 24.04, Python, no Docker)
+    runs-on: ubuntu-latest
+    container: ubuntu:24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # A plain Ubuntu desktop user's setup; this Python refuses global pip installs
+      - name: Install Python and curl
+        run: |
+          apt-get update
+          apt-get install -y python3 python3-venv curl
+
+      - name: Run start-librecrawl.sh and wait for the server
+        run: .github/scripts/wait-for-start-script.sh ./start-librecrawl.sh
+
+      - name: Show the script output
+        if: always()
+        run: cat start.log
+
+  start-script-macos:
+    name: start-librecrawl.sh (macOS, Apple Silicon, Homebrew Python)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # macOS runners have no Docker, so the script takes its Python path
       - name: Check Docker is absent
         run: |
           if command -v docker; then
@@ -51,37 +90,48 @@ jobs:
           brew install python
           echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
 
-      - name: Show the Python the script will use
-        run: |
-          which python3 pip3
-          python3 --version
-          python3 -c "import sysconfig, os; marker = os.path.join(sysconfig.get_path('stdlib'), 'EXTERNALLY-MANAGED'); print('EXTERNALLY-MANAGED present:', os.path.exists(marker))"
-
       - name: Run start-librecrawl.sh and wait for the server
-        run: |
-          chmod +x start-librecrawl.sh
-          ./start-librecrawl.sh > start.log 2>&1 &
-          script_pid=$!
-
-          deadline=$((SECONDS + STARTUP_TIMEOUT_SECONDS))
-          while [ "$SECONDS" -lt "$deadline" ]; do
-            status=$(curl -s -o /dev/null -w '%{http_code}' "$LIBRECRAWL_URL" || true)
-            if [ "$status" = "200" ] || [ "$status" = "302" ]; then
-              echo "LibreCrawl answered with HTTP $status"
-              kill "$script_pid" 2>/dev/null || true
-              exit 0
-            fi
-            if ! kill -0 "$script_pid" 2>/dev/null; then
-              echo "start-librecrawl.sh exited before the server came up"
-              exit 1
-            fi
-            sleep 5
-          done
-
-          echo "LibreCrawl did not answer within ${STARTUP_TIMEOUT_SECONDS}s"
-          kill "$script_pid" 2>/dev/null || true
-          exit 1
+        run: .github/scripts/wait-for-start-script.sh ./start-librecrawl.sh
 
       - name: Show the script output
         if: always()
         run: cat start.log
+
+  start-script-windows:
+    name: start-librecrawl.bat (Windows, Python, no Docker)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # A python.org install: python and the py launcher on PATH
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run start-librecrawl.bat and wait for the server
+        shell: pwsh
+        run: |
+          # Windows runners only run Windows containers, so hide Docker to test the Python path
+          $env:Path = ($env:Path -split ';' | Where-Object { $_ -notmatch 'docker' }) -join ';'
+          if (Get-Command docker -ErrorAction SilentlyContinue) { throw 'Docker is still on PATH' }
+
+          $script = Start-Process cmd.exe -ArgumentList '/c', 'start-librecrawl.bat > start.log 2>&1' -PassThru -NoNewWindow
+          $deadline = (Get-Date).AddSeconds([int]$env:STARTUP_TIMEOUT_SECONDS)
+          while ((Get-Date) -lt $deadline) {
+            try {
+              $response = Invoke-WebRequest $env:LIBRECRAWL_URL -MaximumRedirection 0 -SkipHttpErrorCheck -TimeoutSec 5
+              if ($response.StatusCode -in 200, 302) {
+                Write-Host "LibreCrawl answered with HTTP $($response.StatusCode)"
+                exit 0
+              }
+            } catch { }
+            if ($script.HasExited) { throw 'start-librecrawl.bat exited before the server came up' }
+            Start-Sleep -Seconds 5
+          }
+          throw "LibreCrawl did not answer within $env:STARTUP_TIMEOUT_SECONDS s"
+
+      - name: Show the script output
+        if: always()
+        shell: pwsh
+        run: Get-Content start.log
