@@ -50,26 +50,45 @@ LibreCrawl crawls websites and gives you detailed information about pages, links
 ## Getting started
 ### Quick Start (Automatic Installation)
 
-**The easiest way to run LibreCrawl** - just run the startup script and it handles everything:
+**The easiest way to run LibreCrawl.** The start script installs everything else and opens LibreCrawl in your browser. All you need first is **Python 3.11 or newer** (or Docker).
 
-**Windows:**
-```batch
-start-librecrawl.bat
-```
+The first start takes a few minutes, because it downloads LibreCrawl's packages and a Chromium browser (about 200 MB). Later starts are quick. Keep the window open while you use LibreCrawl, and close it (or press `Ctrl+C`) to stop.
 
-**Linux/Mac:**
+#### Windows
+
+1. Install Python from [python.org/downloads](https://www.python.org/downloads/) and run the installer.
+2. Download LibreCrawl: on this page click the green **Code** button, then **Download ZIP**, and unzip it.
+3. Open the unzipped `LibreCrawl-main` folder and double-click **`start-librecrawl.bat`**.
+
+#### Mac
+
+1. Install Python from [python.org/downloads](https://www.python.org/downloads/) (the macOS installer) and click through it.
+2. Download LibreCrawl: on this page click the green **Code** button, then **Download ZIP**. Double-click the ZIP in your Downloads folder to unzip it.
+3. Open **Terminal** (press `Cmd+Space`, type *Terminal*, press Enter).
+4. Type `cd ` (with a space after it), drag the unzipped `LibreCrawl-main` folder into the Terminal window, and press Enter.
+5. Paste these two lines and press Enter:
+   ```bash
+   chmod +x start-librecrawl.sh
+   ./start-librecrawl.sh
+   ```
+
+#### Linux
+
 ```bash
-chmod +x start-librecrawl.sh
+# Ubuntu/Debian: Python and its venv module
+sudo apt install python3 python3-venv git
+
+git clone https://github.com/PhialsBasement/LibreCrawl.git
+cd LibreCrawl
 ./start-librecrawl.sh
 ```
 
-**What it does automatically:**
-1. Checks for Docker - if found, runs LibreCrawl in a container (recommended)
-2. If no Docker, checks for Python - if not found, downloads and installs it (Windows only *temporairly disabled since it causes some bat issues*)
-3. Installs all dependencies automatically (`pip install -r requirements.txt`)
-4. Installs Playwright browsers for JavaScript rendering
-5. Starts LibreCrawl in local mode (no authentication)
-6. Opens your browser to `http://localhost:5000`
+**What the start script does:**
+1. If Docker (with Docker Compose) is installed and running, it runs LibreCrawl in a container. If Docker is installed but not running, it tells you to start it.
+2. Otherwise it uses Python 3.11+: it creates its own environment in `.venv` (so your system Python stays untouched), installs LibreCrawl's packages, and installs Chromium for JavaScript rendering.
+3. It starts LibreCrawl in local mode (no login) and opens `http://localhost:5000`.
+
+It checks the packages on every start, so updating LibreCrawl also brings in any new ones.
 
 ### Manual Installation
 
@@ -133,21 +152,23 @@ See `.env.example` for what each option does.
 
 #### Option 2: Python
 
-- Python 3.8 or later
+- Python 3.11 or later
 - Modern web browser (Chrome, Firefox, Safari, Edge)
 
 ### Installation
 
 1. Clone or download this repository
 
-2. Install dependencies:
+2. Create a virtual environment and install dependencies (Homebrew and recent Linux Python refuse a system-wide `pip install`):
 ```bash
-pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+python -m pip install -r requirements.txt
 ```
 
 3. For JavaScript rendering support (optional):
 ```bash
-playwright install chromium
+python -m playwright install chromium
 ```
 
 4. Run the application:
