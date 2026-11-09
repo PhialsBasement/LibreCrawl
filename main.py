@@ -10,9 +10,14 @@ import secrets
 import string
 import os
 import re
+import sys
 import base64
 from io import StringIO, BytesIO
 from datetime import datetime, timedelta
+
+# UTF-8 output everywhere: Windows writes redirected output in cp1252, which can't encode the log's emoji
+sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 # Load .env before importing src modules: several of them (email_service's
 # SMTP settings, for one) read environment variables at import time.
