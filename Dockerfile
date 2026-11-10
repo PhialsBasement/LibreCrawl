@@ -67,4 +67,4 @@ ENV PYTHONUNBUFFERED=1
 
 # Run the application
 # The command is handled by docker-compose.yml
-CMD ["python", "main.py"]
+CMD ["python", "main.py", "--local"]
