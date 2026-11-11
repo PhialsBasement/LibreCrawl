@@ -300,6 +300,10 @@ LibreCrawlPlugin.register({
 
     // Analyze E-E-A-T signals across all URLs
     analyzeEEAT(urls, links) {
+        // Only evaluate internal pages for the site E-E-A-T score (ignore external HEAD-checked links)
+        const internalUrls = urls.filter(u => u.is_internal !== false && !u.link_check_only);
+        const evalUrls = internalUrls.length > 0 ? internalUrls : urls;
+
         let totalScore = 0;
         let pagesWithAuthor = 0;
         let pagesWithSchema = 0;
@@ -310,7 +314,7 @@ LibreCrawlPlugin.register({
         let externalCitations = 0;
         const pageScores = [];
 
-        urls.forEach(url => {
+        evalUrls.forEach(url => {
             let score = 0;
             const urlData = {
                 url: url.url,
@@ -327,7 +331,7 @@ LibreCrawlPlugin.register({
             }
 
             // Check for author information (20 points)
-            if (url.meta_author || (url.og_tags && url.og_tags.author)) {
+            if (url.author || url.meta_author || (url.og_tags && url.og_tags.author)) {
                 score += 20;
                 pagesWithAuthor++;
                 urlData.hasAuthor = true;
@@ -372,8 +376,8 @@ LibreCrawlPlugin.register({
         pageScores.sort((a, b) => b.score - a.score);
 
         return {
-            totalPages: urls.length,
-            overallScore: urls.length > 0 ? Math.round(totalScore / urls.length) : 0,
+            totalPages: evalUrls.length,
+            overallScore: evalUrls.length > 0 ? Math.round(totalScore / evalUrls.length) : 0,
             pagesWithAuthor,
             pagesWithSchema,
             pagesWithExternalLinks,
@@ -381,7 +385,7 @@ LibreCrawlPlugin.register({
             securePages,
             pagesWithGoodContent,
             externalCitations,
-            avgExternalLinks: urls.length > 0 ? externalCitations / urls.length : 0,
+            avgExternalLinks: evalUrls.length > 0 ? externalCitations / evalUrls.length : 0,
             topPages: pageScores
         };
     },
