@@ -33,6 +33,10 @@ If LibreCrawl is replacing a $279/year Screaming Frog, Deepcrawl or Sitebulb lic
 
 LibreCrawl crawls websites and gives you detailed information about pages, links, SEO elements, and performance. It's built as a web application using Python Flask with a modern web interface supporting multiple concurrent users.
 
+## AI / MCP integration
+
+Run LibreCrawl audits directly from AI assistants (Claude, Cursor, Codex) via [librecrawl-technical-seo-audit-mcp](https://github.com/adityaarsharma/librecrawl-technical-seo-audit-mcp) — an MIT-licensed [Model Context Protocol](https://modelcontextprotocol.io) server built on LibreCrawl. It exposes 37 MCP tools for adaptive crawl-delay control, WAF fingerprint detection, and automated PDF/CSV report generation, letting an AI agent crawl and audit a site conversationally. It's a wrapper around LibreCrawl, not a replacement.
+
 ## Features
 
 - 🚀 **Multi-tenancy** - Multiple users can crawl simultaneously with isolated sessions
