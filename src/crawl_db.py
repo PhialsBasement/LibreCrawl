@@ -51,6 +51,9 @@ def get_db():
     # and sqlite's default 5s was not enough during large end-of-crawl saves.
     conn = sqlite3.connect(DB_FILE, timeout=30)
     conn.row_factory = sqlite3.Row  # Return rows as dictionaries
+    # Enable foreign-key enforcement so ON DELETE CASCADE actually fires.
+    # SQLite defaults to foreign_keys=OFF on every new connection.
+    conn.execute('PRAGMA foreign_keys = ON')
     try:
         yield conn
         conn.commit()
@@ -266,6 +269,20 @@ def init_crawl_tables():
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_crawl_issues_url ON crawl_issues(crawl_id, url)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_crawl_issues_category ON crawl_issues(crawl_id, category)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_crawl_queue_crawl ON crawl_queue(crawl_id)')
+
+        # One-time cleanup: remove orphan rows left by earlier versions that
+        # did not enable foreign_keys, so ON DELETE CASCADE never fired.
+        child_tables = ['crawled_urls', 'crawl_links', 'crawl_issues', 'crawl_queue']
+        for table in child_tables:
+            cursor.execute(f'''
+                DELETE FROM {table}
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM crawls WHERE crawls.id = {table}.crawl_id
+                )
+            ''')
+        orphans_removed = conn.total_changes
+        if orphans_removed:
+            print(f"Cleaned up orphan rows from previous versions ({orphans_removed} total changes)")
 
         print("Crawl persistence tables initialized successfully")
 
