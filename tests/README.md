@@ -33,6 +33,7 @@ Each test pins a bug that reached production once:
 | `test_crawl_analysis_scales_linearly` | The end-of-crawl analysis turns quadratic on templated sites and holds a large crawl in "finishing up" |
 | `test_hostile_input_regressions` | One malformed `href`, `Location` or sitemap `<loc>` loses a whole page or the rest of the sitemap; 204 counts as indexable; a `javascript:` canonical marks a page canonicalised; equally linked pages score 0; a corrupt DB value empties a loaded crawl |
 | `test_canonicals_and_titles` | Repeated or conflicting canonicals (tags or `Link` headers) go unreported, conflicting ones still mark the page canonicalised, a header-only canonical is missed, or titles inside SVG/`<object>`/`<iframe>` count as page titles |
+| `test_author_survives_reload` | `<meta name="author">` is not extracted, or is lost when a crawl is saved and reloaded, so the E-E-A-T tab counts 0 pages with author info |
 | `test_analysis_persists_and_crawls_compare` | Analysis fields or the final `linked_from` are lost on reload, crawl comparison misreports changes or leaks another user's crawls, or a resumed crawl saves its end-of-crawl issues twice |
 
 ## crawl_harness.py

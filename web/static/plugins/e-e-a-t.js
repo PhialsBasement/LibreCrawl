@@ -298,6 +298,21 @@ LibreCrawlPlugin.register({
         `;
     },
 
+    // Author info: <meta name="author"> (url.author; older saved crawls only have
+    // meta_tags.author), og:author, or an "author" in JSON-LD (also inside @graph)
+    hasAuthor(url) {
+        if (url.author) return true;
+        if (url.meta_tags && url.meta_tags.author) return true;
+        if (url.og_tags && url.og_tags.author) return true;
+        const hasLdAuthor = (node) => {
+            if (!node || typeof node !== 'object') return false;
+            if (Array.isArray(node)) return node.some(hasLdAuthor);
+            if (node.author) return true;
+            return hasLdAuthor(node['@graph']);
+        };
+        return hasLdAuthor(url.json_ld);
+    },
+
     // Analyze E-E-A-T signals across all URLs
     analyzeEEAT(urls, links) {
         let totalScore = 0;
@@ -327,7 +342,7 @@ LibreCrawlPlugin.register({
             }
 
             // Check for author information (20 points)
-            if (url.meta_author || (url.og_tags && url.og_tags.author)) {
+            if (this.hasAuthor(url)) {
                 score += 20;
                 pagesWithAuthor++;
                 urlData.hasAuthor = true;

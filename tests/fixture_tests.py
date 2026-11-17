@@ -1422,6 +1422,47 @@ def _playwright_available():
         return False
 
 
+def test_author_survives_reload():
+    """<meta name="author"> lands in the row's author field, is saved, comes
+    back from a reload, and an existing database gains the column."""
+    import sqlite3
+    import tempfile
+    from src import auth_db, crawl_db
+
+    site = BASE_PORT + 22
+    page = ('<html><head><title>t</title><meta name="author" content="Jane Doe">'
+            '</head><body><p>text</p></body></html>')
+    srv = serve(make_handler({'/': page}), site)
+    saved = (auth_db.DB_FILE, crawl_db.DB_FILE)
+    tmp = tempfile.TemporaryDirectory()
+    try:
+        auth_db.DB_FILE = crawl_db.DB_FILE = os.path.join(tmp.name, 'author.db')
+        auth_db.init_db()
+
+        crawler = crawl(f'http://127.0.0.1:{site}/')
+        row = next((r for r in crawler.crawl_results if r['url'].endswith(f'{site}/')), {})
+        result('author: <meta name="author"> fills the row', row.get('author') == 'Jane Doe',
+               repr(row.get('author')))
+
+        crawl_id = crawl_db.create_crawl(1, 'fixture-session', row.get('url', ''), '127.0.0.1', {})
+        crawl_db.save_url_batch(crawl_id, [row])
+        loaded = crawl_db.load_crawled_urls(crawl_id)
+        result('author: survives save and reload',
+               len(loaded) == 1 and loaded[0].get('author') == 'Jane Doe',
+               repr([r.get('author') for r in loaded]))
+
+        with sqlite3.connect(crawl_db.DB_FILE) as conn:
+            conn.execute('ALTER TABLE crawled_urls DROP COLUMN author')
+        crawl_db.init_crawl_tables()
+        with sqlite3.connect(crawl_db.DB_FILE) as conn:
+            cols = {r[1] for r in conn.execute('PRAGMA table_info(crawled_urls)')}
+        result('author: an older database gains the author column', 'author' in cols)
+    finally:
+        auth_db.DB_FILE, crawl_db.DB_FILE = saved
+        tmp.cleanup()
+        srv.shutdown()
+
+
 TESTS = (
     test_cross_domain_redirect,
     test_external_images,
@@ -1444,6 +1485,7 @@ TESTS = (
     test_analysis_persists_and_crawls_compare,
     test_hostile_input_regressions,
     test_canonicals_and_titles,
+    test_author_survives_reload,
 )
 
 
