@@ -122,6 +122,7 @@ def init_crawl_tables():
                 charset TEXT,
                 viewport TEXT,
                 robots TEXT,
+                author TEXT,
 
                 meta_tags TEXT,
                 og_tags TEXT,
@@ -187,6 +188,12 @@ def init_crawl_tables():
         # Migration: analysis, JSON of ANALYSIS_KEYS
         try:
             cursor.execute('ALTER TABLE crawled_urls ADD COLUMN analysis TEXT')
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+        # Migration: author (<meta name="author">), so it survives a reload
+        try:
+            cursor.execute('ALTER TABLE crawled_urls ADD COLUMN author TEXT')
         except sqlite3.OperationalError:
             pass  # Column already exists
 
@@ -380,7 +387,8 @@ def save_url_batch(crawl_id, urls):
                     url_data.get('link_check_only', False),
                     (json.dumps(url_data['custom_extraction'])
                      if url_data.get('custom_extraction') is not None else None),
-                    _analysis_json(url_data)
+                    _analysis_json(url_data),
+                    url_data.get('author')
                 )
                 rows.append(row)
 
@@ -393,8 +401,9 @@ def save_url_batch(crawl_id, urls):
                     meta_tags, og_tags, twitter_tags, json_ld, analytics, images,
                     hreflang, schema_org, redirects, linked_from,
                     external_links, internal_links, response_time, javascript_rendered,
-                    error_type, render_time, link_check_only, custom_extraction, analysis
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    error_type, render_time, link_check_only, custom_extraction, analysis,
+                    author
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', rows)
 
             print(f"Saved {len(urls)} URLs to database for crawl {crawl_id}")
